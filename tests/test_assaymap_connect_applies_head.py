@@ -87,11 +87,10 @@ def test_the_two_w_frames_differ_enough_to_matter() -> None:
     assert ratio == pytest.approx(0.8, abs=1e-6), "a 20% volume error, silently"
 
 
-def test_other_heads_are_not_applied_on_connect() -> None:
-    """Applying the head also swaps in per-head W software limits and, on Darwin,
-    arms a W parameter-table write. Existing 96LT/384 profiles carry W positions
-    outside those limits, so only AssayMAP opts in; every other head keeps the
-    explicit POST /api/change_head path it always had."""
+def test_other_heads_are_applied_on_connect_too() -> None:
+    """Every head gets its calibration on connect, not only AssayMAP. The shipped
+    Darwin profiles carry tips_off_w_position values inside the per-head W
+    software limits, so this cannot refuse a Tips Off."""
     for head in (HeadType.HT_96_D_200, HeadType.HT_384_D_70, HeadType.HT_96_F_50):
         controller = _RecordingController()
         profile = BravoProfile.default()
@@ -99,4 +98,25 @@ def test_other_heads_are_not_applied_on_connect() -> None:
         bravo = Bravo(profile=profile)
         bravo._controller = controller
         bravo._apply_profile_head_to_controller()
-        assert controller.head_types == [], head.name
+        assert controller.head_types == [head], head.name
+
+
+def test_shipped_darwin_profiles_eject_inside_the_per_head_w_limits() -> None:
+    """Guard the numbers this depends on: if a profile's tips_off_w_position ever
+    drifts outside the head's software minimum again, Tips Off would be refused
+    pre-flight after connect."""
+    from pathlib import Path
+
+    from pybravo.darwin.waxis_config import config_for_head
+
+    root = Path(__file__).resolve().parents[1] / "profiles"
+    for name in ("96LT", "Claptrap", "Flowby", "default", "384"):
+        profile = BravoProfile.load(root / f"{name}.yaml")
+        cfg = config_for_head(profile.head.head_type)
+        assert cfg is not None, name
+        cal = cfg.calibration()
+        w = profile.safety.tips_off_w_position
+        assert cal.effective_software_min <= w <= cal.effective_software_max, (
+            f"{name}: tips_off_w_position {w} outside "
+            f"[{cal.effective_software_min:.3f}, {cal.effective_software_max:.3f}]"
+        )

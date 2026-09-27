@@ -29,7 +29,7 @@ safety:
   run_medium_speed: false
   enable_tips_off_tip_touch: false
   is_srt: false
-  tips_off_w_position: -15.0
+  tips_off_w_position: -9.0
   tips_off_z_offset: 15.0
   tips_off_tip_touch_distance: 314.96
   head_tolerance: 25

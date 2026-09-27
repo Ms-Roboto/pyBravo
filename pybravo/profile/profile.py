@@ -78,7 +78,7 @@ class SafetyConfig:
     enable_tips_off_tip_touch: bool = True
     is_srt: bool = False
     # Optional fields kept for parity with legacy registry profiles
-    tips_off_w_position: float = -11.0
+    tips_off_w_position: float = -9.3
     tips_off_z_offset: float = 10.0
     tips_off_tip_touch_distance: float = 314.96
     head_tolerance: int = 25
