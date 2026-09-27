@@ -244,8 +244,19 @@ class Bravo:
         Failure here must not abort the connection: the head calibration is worth
         warning loudly about, but a connected instrument with a default frame is
         more useful than no connection at all.
+
+        Deliberately AssayMAP-only. Applying the head on connect also replaces the
+        W software limits with the per-head table, and on Darwin it arms a write
+        of the W parameter set at the next W home. Existing 96LT/384 installs run
+        with the controller default frame and profile W positions (for example
+        ``tips_off_w_position``) that sit outside the per-head limits, so doing
+        this for every head would refuse their Tips Off. Other heads keep the
+        behaviour they had: the head is applied only by an explicit
+        ``POST /api/change_head``.
         """
         head_type = self._profile.head.head_type
+        if not head_type.is_assaymap:
+            return
         setter = getattr(self._controller, "set_head_type", None)
         if setter is None:
             return

@@ -4438,8 +4438,23 @@ class TipsOnTask(StateMachineTask):
             )
             if hasattr(self._ctrl, "tip_force_jog"):
                 self._ctrl.tip_force_jog(Axis.Z, peak_current, z)
+            elif not self._profile.head.head_type.is_assaymap:
+                # Every head other than AssayMAP keeps the original press: one
+                # force-limited jog covering the whole descent from wherever the
+                # head is. Slower than the two-move press below, but the force
+                # limit protects the entire travel, so a wrong labware height or
+                # an obstruction on the box is met at 25 mm/s under current
+                # control rather than at the fast-move speed with force off.
+                self._ctrl.jog(JogParams(
+                    axis=Axis.Z,
+                    velocity=25.0,
+                    acceleration=250.0,
+                    max_position=z,
+                    tolerance=tolerance,
+                    peak_current=peak_current,
+                ))
             else:
-                # Two moves, the shape the vendor software uses: descend fast with force off to
+                # AssayMAP only. Two moves, the shape the vendor software uses: descend fast with force off to
                 # PRESS_TRAVEL_MM above the seat, then force-press only that last
                 # stretch at the profile's SLOW speed (8% / 26.67%, i.e. 10 mm/s and
                 # 100 mm/s^2 here).

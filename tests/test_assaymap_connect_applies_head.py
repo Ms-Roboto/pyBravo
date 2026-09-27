@@ -85,3 +85,18 @@ def test_the_two_w_frames_differ_enough_to_matter() -> None:
     assert span == pytest.approx(ASSAYMAP_W_RANGE_MM, abs=1e-6)
     ratio = DTIP_STANDARD_W_RANGE_MM / span
     assert ratio == pytest.approx(0.8, abs=1e-6), "a 20% volume error, silently"
+
+
+def test_other_heads_are_not_applied_on_connect() -> None:
+    """Applying the head also swaps in per-head W software limits and, on Darwin,
+    arms a W parameter-table write. Existing 96LT/384 profiles carry W positions
+    outside those limits, so only AssayMAP opts in; every other head keeps the
+    explicit POST /api/change_head path it always had."""
+    for head in (HeadType.HT_96_D_200, HeadType.HT_384_D_70, HeadType.HT_96_F_50):
+        controller = _RecordingController()
+        profile = BravoProfile.default()
+        profile.head.head_type = head
+        bravo = Bravo(profile=profile)
+        bravo._controller = controller
+        bravo._apply_profile_head_to_controller()
+        assert controller.head_types == [], head.name
