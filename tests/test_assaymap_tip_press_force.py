@@ -29,8 +29,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from pybravo.protocol.gemini.instruction import _scale_force_percent
 from pybravo.darwin.sequences import _z_axis_force_percent
+from pybravo.protocol.gemini.instruction import _scale_force_percent
 from pybravo.state_machine.tasks import TipsOnTask
 from pybravo.types import HeadType
 

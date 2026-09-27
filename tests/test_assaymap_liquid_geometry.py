@@ -163,6 +163,7 @@ class _FakeController:
 
 def _bravo_with(head_type, w_position):
     import asyncio  # noqa: F401  (used by callers)
+
     from pybravo.bravo import Bravo
     from pybravo.profile.profile import BravoProfile
     from pybravo.types import Axis

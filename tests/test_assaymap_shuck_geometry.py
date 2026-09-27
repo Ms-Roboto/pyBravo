@@ -27,10 +27,6 @@ from __future__ import annotations
 
 import pytest
 
-import yaml
-
-from pathlib import Path
-
 from pybravo.tip_offsets import get_tip_offset_table
 from pybravo.types import HeadType
 

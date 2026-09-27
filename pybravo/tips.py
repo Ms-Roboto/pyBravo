@@ -338,6 +338,14 @@ def _normalize_tip_payload(payload: dict[str, object], *, tip_id: str) -> dict[s
         "source": str(payload.get("source") or "user"),
         "model_3d": str(payload.get("model_3d") or "") or None,
         "compatible_heads": compatible_heads,
+        # Behavioural fields. Dropping these on save would turn an AssayMAP
+        # cartridge back into a disposable tip, and Tips On would then zero W
+        # during a cartridge mount -- expelling whatever the syringes hold.
+        "kind": str(payload.get("kind") or "tip"),
+        "overflow_ul": (
+            None if payload.get("overflow_ul") in {None, ""}
+            else float(payload.get("overflow_ul"))
+        ),
     }
 
 

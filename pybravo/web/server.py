@@ -957,6 +957,8 @@ class TipDefinitionRequest(BaseModel):
     source: str | None = None
     model_3d: str | None = None
     compatible_heads: list[str] | None = None
+    kind: str | None = None
+    overflow_ul: float | None = None
 
 
 class PipetteTechniqueRequest(BaseModel):

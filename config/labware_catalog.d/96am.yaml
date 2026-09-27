@@ -214,8 +214,9 @@ labware:
   well_volume_ul: 0.0
   well_diameter_mm: 0.0
   disposable_tip_capacity_ul: 60.0
-  tip_definition_id: ''
-  supported_tip_ids: []
+  tip_definition_id: am_cartridge_60ul
+  supported_tip_ids:
+  - am_cartridge_60ul
   model_3d: ''
   can_mount: false
   can_be_mounted: false
@@ -254,9 +255,14 @@ labware:
   spacing_y_mm: 9.0
   well_volume_ul: 0.0
   well_diameter_mm: 0.0
-  disposable_tip_capacity_ul: 250.0
-  tip_definition_id: ''
-  supported_tip_ids: []
+  # The fixture holds AssayMAP cartridges (60 uL packed bed, 29.2 mm), not the
+  # LT250 tips its vendor description was imported from. Pinned explicitly:
+  # capacity-based inference would otherwise resolve the LT250 teach tip, and
+  # Tips On would then zero W during a cartridge mount.
+  disposable_tip_capacity_ul: 60.0
+  tip_definition_id: am_cartridge_60ul
+  supported_tip_ids:
+  - am_cartridge_60ul
   model_3d: ''
   can_mount: false
   can_be_mounted: false

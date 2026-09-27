@@ -40,7 +40,7 @@ VENDOR_FIXTURES = {
 @pytest.fixture(scope="module")
 def catalog() -> dict[str, dict]:
     overlay = yaml.safe_load(OVERLAY.read_text())
-    return {l["name"]: l for l in overlay["labware"]}
+    return {row["name"]: row for row in overlay["labware"]}
 
 
 @pytest.mark.parametrize("name,expected", sorted(VENDOR_FIXTURES.items()))
@@ -116,7 +116,7 @@ def test_the_two_lt250_boxes_are_distinct_fixtures() -> None:
     these stay distinct entries.
     """
     overlay = yaml.safe_load(OVERLAY.read_text())
-    by_name = {l["name"]: l for l in overlay["labware"]}
+    by_name = {row["name"]: row for row in overlay["labware"]}
     a = by_name["96 V11 LT250 Tip Box 19477.002"]["height_mm"]
     b = by_name["96 V11 LT250 Tip Box Standard"]["height_mm"]
     assert a != b
@@ -149,7 +149,7 @@ def test_wash_station_is_not_aliased_to_tip_box() -> None:
 
 def test_base_class_normalization_is_case_insensitive() -> None:
     """The catalog stores mixed case; every lookup lowercases first."""
-    from pybravo.bravo import Bravo, _VENDOR_BASE_CLASS_ALIASES
+    from pybravo.bravo import _VENDOR_BASE_CLASS_ALIASES, Bravo
     from pybravo.deck.labware import Labware
 
     for stored in ("AssayMap Cartridge Rack", "assaymap cartridge rack", "  ASSAYMAP CARTRIDGE RACK  "):
@@ -189,7 +189,7 @@ def test_every_snapshot_row_is_loadable() -> None:
 
     overlay = yaml.safe_load(OVERLAY.read_text())
     loaded = {d.name for d in build_labware_catalog().list_definitions()}
-    missing = sorted({l["name"] for l in overlay["labware"]} - loaded)
+    missing = sorted({row["name"] for row in overlay["labware"]} - loaded)
     assert not missing, f"overlay rows dropped by the catalog builder: {missing}"
 
 
@@ -203,8 +203,8 @@ def test_the_overlay_does_not_replace_anything_in_the_snapshot() -> None:
     reintroduce exactly that problem, quietly.
     """
     snapshot_path = Path(__file__).resolve().parents[1] / "config" / "labware_catalog.snapshot.yaml"
-    snapshot_ids = {l["id"] for l in yaml.safe_load(snapshot_path.read_text())["labware"]}
-    overlay_ids = {l["id"] for l in yaml.safe_load(OVERLAY.read_text())["labware"]}
+    snapshot_ids = {row["id"] for row in yaml.safe_load(snapshot_path.read_text())["labware"]}
+    overlay_ids = {row["id"] for row in yaml.safe_load(OVERLAY.read_text())["labware"]}
     assert not (snapshot_ids & overlay_ids), "overlay shadows a snapshot entry"
 
 
@@ -221,3 +221,16 @@ def test_the_merged_catalog_holds_both_sources() -> None:
         assert row["name"] in loaded, f"snapshot entry lost: {row['name']}"
     for row in overlay:
         assert row["name"] in loaded, f"overlay entry lost: {row['name']}"
+
+
+def test_both_cartridge_fixtures_resolve_to_the_cartridge_tip():
+    """Tips On decides whether to zero W from the mounted consumable. Both
+    cartridge fixtures must therefore resolve to the cartridge definition, not
+    to the LT250 teach tip that capacity-based inference would pick."""
+    import yaml
+
+    rows = {row["name"]: row for row in yaml.safe_load(OVERLAY.read_text())["labware"]}
+    for name in ("96AM Cartridge Rack and Receiver Plate", "96AM Cartridge Seating Station"):
+        row = rows[name]
+        assert row["tip_definition_id"] == "am_cartridge_60ul", name
+        assert row["disposable_tip_capacity_ul"] == 60.0, name

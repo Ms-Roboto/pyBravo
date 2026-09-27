@@ -24,10 +24,10 @@ from __future__ import annotations
 import pytest
 
 from pybravo.state_machine.tasks import (
+    _LENGTH_DIFFERENCE_96_TO_384,
     GRIPPER_THICKNESS,
     GRIPPER_TO_BASE_OF_HEAD_GAP,
     HEIGHT_DIFF_96AM_TO_96LT,
-    _LENGTH_DIFFERENCE_96_TO_384,
 )
 
 # Measured, position 5, 96 Eppendorf Twin.tec PCR.
