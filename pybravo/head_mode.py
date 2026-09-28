@@ -43,6 +43,8 @@ class TipSelection:
     column_count: int = 1
     mirror_corner: str = "back_left"
     head_anchor: str = "back_left"
+    row_stride: int = 1
+    col_stride: int = 1
 
     def to_dict(self) -> dict[str, int | str]:
         anchor_row, anchor_col = tipbox_anchor_cell(self)
@@ -56,6 +58,8 @@ class TipSelection:
             "head_anchor": self.head_anchor,
             "anchor_row": anchor_row,
             "anchor_col": anchor_col,
+            **({"row_stride": self.row_stride, "col_stride": self.col_stride}
+               if (self.row_stride, self.col_stride) != (1, 1) else {}),
         }
 
 
@@ -298,12 +302,12 @@ def selected_anchor_ranges(
 def tipbox_anchor_cell(selection: TipSelection) -> tuple[int, int]:
     """Return the physical tipbox cell that aligns with the active head anchor."""
     anchor_row = (
-        selection.row + selection.row_count - 1
+        selection.row + (selection.row_count - 1) * selection.row_stride
         if selection.head_anchor.startswith("front")
         else selection.row
     )
     anchor_col = (
-        selection.col + selection.column_count - 1
+        selection.col + (selection.column_count - 1) * selection.col_stride
         if selection.head_anchor.endswith("right")
         else selection.col
     )
@@ -315,6 +319,16 @@ def selected_tip_wells(
     total_cols: int,
     selection: TipSelection,
 ) -> list[tuple[int, int]]:
+    if (selection.row_stride, selection.col_stride) != (1, 1):
+        if selection.row_stride < 1 or selection.col_stride < 1:
+            return []
+        cells = [
+            (selection.row + row * selection.row_stride,
+             selection.col + col * selection.col_stride)
+            for row in range(selection.row_count)
+            for col in range(selection.column_count)
+        ]
+        return cells if all(0 <= row < total_rows and 0 <= col < total_cols for row, col in cells) else []
     (row_start, row_stop), (col_start, col_stop) = selected_anchor_ranges(
         total_rows,
         total_cols,

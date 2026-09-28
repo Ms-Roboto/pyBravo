@@ -27,6 +27,7 @@ from pybravo.head_mode import (
     HeadMode,
     PlateSelection,
     TipSelection,
+    head_geometry_for_type,
     head_mode_offsets_mm,
     is_legal_plate_anchor,
     is_legal_tipbox_anchor,
@@ -2148,7 +2149,10 @@ class Bravo:
         self._emit("head_mode_changed", head_mode=self._head_mode.to_dict())
         return self._head_mode
 
-    def set_tip_selection(self, location: int | str, row: int, col: int) -> TipSelection:
+    def set_tip_selection(
+        self, location: int | str, row: int, col: int, *,
+        row_stride: int = 1, col_stride: int = 1,
+    ) -> TipSelection:
         location = self._resolve_location(location)
         labware = self._require_tip_box(location, operation="Tip selection")
         rows, cols = self._tipbox_dimensions(labware)
@@ -2160,7 +2164,19 @@ class Bravo:
             raise RuntimeError(f"Tip selection ({row}, {col}) is outside the tip box at location {location}")
         purpose = "return" if self._tips_on_head else "pickup"
         active_mode = (self._tips_on_head_mode or self._head_mode) if self._tips_on_head else self._head_mode
-        selection = self._selection_from_clicked_tip(location, labware, active_mode, row, col, purpose=purpose)
+        if (row_stride, col_stride) != (1, 1):
+            # Explicit 96-channel pickup from one interleaved 384-rack quadrant.
+            # Never use the legacy clicked-region normalization for this request.
+            selection = TipSelection(
+                location=location, row=row, col=col,
+                row_count=active_mode.row_count, column_count=active_mode.column_count,
+                row_stride=row_stride, col_stride=col_stride,
+            )
+            self._validated_tip_wells(labware, active_mode, selection, purpose=purpose)
+            if not self._is_tip_anchor_reachable(location, labware, active_mode, row, col):
+                raise RuntimeError("Interleaved tip quadrant is outside the configured X/Y range")
+        else:
+            selection = self._selection_from_clicked_tip(location, labware, active_mode, row, col, purpose=purpose)
         self._tip_selection = selection
         self._emit("tip_selection_changed", tip_selection=selection.to_dict())
         return selection
@@ -2488,9 +2504,37 @@ class Bravo:
         rows, cols = self._tipbox_dimensions(labware)
         if rows <= 0 or cols <= 0:
             raise RuntimeError("Tip box metadata is missing rows/cols")
+        interleaved = (selection.row_stride, selection.col_stride) != (1, 1)
+        if interleaved:
+            geometry = head_geometry_for_type(self._profile.head.head_type)
+            rack = well_geometry_from_metadata(labware.metadata)
+            if not (
+                (selection.row_stride, selection.col_stride) == (2, 2)
+                and (rows, cols) == (16, 24)
+                and (geometry.rows, geometry.columns) == (8, 12)
+                and head_mode.subset_type == "all_barrels"
+                and (head_mode.row_count, head_mode.column_count) == (8, 12)
+                and (selection.row_count, selection.column_count) == (8, 12)
+                and selection.row in (0, 1) and selection.col in (0, 1)
+                and abs(rack.pitch_x_mm * 2 - geometry.pitch_x_mm) < 1e-6
+                and abs(rack.pitch_y_mm * 2 - geometry.pitch_y_mm) < 1e-6
+            ):
+                raise RuntimeError("Interleaved tips require a full 96-channel head and a 384 rack at matching half pitch")
         wells = selected_tip_wells(rows, cols, selection)
         if not wells:
             raise RuntimeError("No tips are selected for the current head mode")
+        if interleaved:
+            if selection.location in self._tipbox_untracked:
+                raise RuntimeError("Interleaved tip selection requires tracked rack occupancy")
+            self._ensure_tipbox_occupancy(selection.location, labware)
+            occupied = self._occupied_tip_wells(selection.location)
+            if purpose == "pickup" and not set(wells) <= occupied:
+                raise RuntimeError("Interleaved tip quadrant is missing tips")
+            if purpose == "return" and set(wells) & occupied:
+                raise RuntimeError("Interleaved return quadrant is occupied")
+            if purpose not in {"pickup", "return"}:
+                raise ValueError(f"Unknown tip inventory purpose: {purpose}")
+            return wells
         if self._labware_base_class(labware) == "tip_box" or self._labware_kind(labware) == "tip_box":
             if selection.location not in self._tipbox_untracked:
                 self._ensure_tipbox_occupancy(selection.location, labware)
@@ -2520,7 +2564,8 @@ class Bravo:
                 self._validated_tip_wells(labware, head_mode, self._tip_selection, purpose=purpose)
                 return self._tip_selection
             except RuntimeError:
-                pass
+                if (self._tip_selection.row_stride, self._tip_selection.col_stride) != (1, 1):
+                    raise  # Explicit quadrants must not silently select a different region.
         rows, cols = self._tipbox_dimensions(labware)
         if rows <= 0 or cols <= 0:
             raise RuntimeError("Tip box metadata is missing rows/cols")

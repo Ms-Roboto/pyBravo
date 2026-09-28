@@ -987,6 +987,8 @@ class TipSelectionRequest(BaseModel):
     location: int
     row: int
     col: int
+    row_stride: int = 1
+    col_stride: int = 1
 
 
 class PlateSelectionRequest(BaseModel):
@@ -1490,7 +1492,9 @@ async def get_tip_selection():
 @app.put("/api/tip_selection", **_route_meta("Head", "Update the selected tip position", TIP_SELECTION_DOC))
 async def set_tip_selection(req: TipSelectionRequest):
     bravo = get_bravo()
-    selection = bravo.set_tip_selection(req.location, req.row, req.col)
+    selection = bravo.set_tip_selection(
+        req.location, req.row, req.col, row_stride=req.row_stride, col_stride=req.col_stride,
+    )
     return {
         "status": "updated",
         "tip_selection": selection.to_dict(),
