@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createRobotMaterial } from './robot-appearance.js?v=bravo-skin3';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -122,17 +123,6 @@ const TOOLING_ASSEMBLY_VISUAL_Y_OFFSET_M = -0.006;
 const LABWARE_CARRY_CLEARANCE_M = 0.04;
 const DECK_SLOT_SURFACE_OFFSET_M = 0.005;
 const DEFAULT_TELESHAKE_MODEL_PATH = '/static/accessories/TeleshakeSimple.gltf';
-const DECK_POSITION_GREYS = [
-    0xf3f3f6,
-    0xe5e5ea,
-    0xd6d7de,
-    0xc8c9d1,
-    0xb9bbc5,
-    0xabacb8,
-    0x9c9ea9,
-    0x8e909b,
-    0x7f828d,
-];
 const LABWARE_APPEARANCE_OVERRIDES = {
     '384 Greiner 781091 PS uclear': {
         color: 0xf2f2ee,
@@ -618,14 +608,14 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.update();
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 1.25);
+const ambientLight = new THREE.AmbientLight(0xffffff, 1.6);
 scene.add(ambientLight);
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.55);
+const dirLight = new THREE.DirectionalLight(0xffffff, 3.0);
 dirLight.position.set(1, 2, 1.5);
 scene.add(dirLight);
 
-const fillLight = new THREE.DirectionalLight(0xffffff, 0.35);
+const fillLight = new THREE.DirectionalLight(0xffffff, 1.2);
 fillLight.position.set(-1, 0.5, -1);
 scene.add(fillLight);
 
@@ -811,17 +801,12 @@ function deckLocationFromLinkName(name) {
     return Number(match[1] || '1');
 }
 
-function assignDeckPositionColors(deckVisuals) {
+function registerDeckVisuals(deckVisuals) {
     deckSlotLinkNames.clear();
     deckSlotPadMeshes.clear();
     deckVisuals.forEach((deckVisual) => {
         const location = deckLocationFromLinkName(deckVisual.linkName);
         if (!location) return;
-        const grey = DECK_POSITION_GREYS[location - 1];
-        if (grey === undefined) return;
-        deckVisual.mesh.material.color.setHex(grey);
-        deckVisual.mesh.material.roughness = 0.75;
-        deckVisual.mesh.material.metalness = 0.05;
         deckSlotLinkNames.set(location, deckVisual.linkName);
         if (!deckSlotPadMeshes.has(location)) deckSlotPadMeshes.set(location, []);
         deckSlotPadMeshes.get(location).push(deckVisual.mesh);
@@ -2290,7 +2275,7 @@ function updateLabwareAnimation() {
 }
 
 async function loadURDF() {
-    const URDF_URL  = '/model/pybravo_urdf/robot.urdf?v=deckfix4';
+    const URDF_URL  = '/model/pybravo_urdf/robot.urdf?v=bravo-skin4';
     const ASSET_BASE = '/model/pybravo_urdf/assets';
 
     log('Loading URDF model…', 'info');
@@ -2347,34 +2332,17 @@ async function loadURDF() {
             const xyz = parseVec3(originEl?.getAttribute('xyz'));
             const rpy = parseVec3(originEl?.getAttribute('rpy'));
 
-            const colorEl = visual.querySelector('material color');
-            let color = new THREE.Color(0.82, 0.82, 0.84);
             const isFingerVisual =
                 /(fingerleft|fingerright)\.stl$/i.test(filename) || /finger(left|right)/i.test(lname);
             const isHeadCarriageVisual =
                 /^(384_head_384_head|gripperzaxis_gripperzaxis)$/i.test(lname) ||
                 /(384_head|gripperzaxis)\.stl$/i.test(filename);
             const isDeckVisual = isDeckPositionVisual(lname);
-            if (colorEl) {
-                const rgba = colorEl.getAttribute('rgba').split(/\s+/).map(Number);
-                color = new THREE.Color(rgba[0], rgba[1], rgba[2]);
-            }
-            if (isDeckVisual) {
-                color = new THREE.Color(0xb9bbc5);
-            } else if (isFingerVisual) {
-                color = new THREE.Color(0xff7a00);
-            } else if (isHeadCarriageVisual) {
-                color = new THREE.Color(0xf2f2f2);
-            }
 
             const promise = new Promise((resolve) => {
                 stlLoader.load(filename, (geometry) => {
                     geometry.computeVertexNormals();
-                    const mat = new THREE.MeshStandardMaterial({
-                        color,
-                        roughness: isDeckVisual ? 0.92 : 0.55,
-                        metalness: isDeckVisual ? 0.0 : 0.25,
-                    });
+                    const mat = createRobotMaterial(visual);
                     const mesh = new THREE.Mesh(geometry, mat);
                     mesh.castShadow = !isDeckVisual;
                     mesh.receiveShadow = true;
@@ -2396,7 +2364,7 @@ async function loadURDF() {
         }
     }
     await Promise.all(meshPromises);
-    assignDeckPositionColors(deckVisuals);
+    registerDeckVisuals(deckVisuals);
 
     // Wire up joints and build the kinematic tree.
     const childLinks = new Set();

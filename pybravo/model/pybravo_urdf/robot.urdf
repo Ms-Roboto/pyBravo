@@ -2,6 +2,11 @@
 <!-- Generated using onshape-to-robot -->
 <!-- Onshape https://cad.onshape.com/documents/02acf2647518895d2d24800c/w/44e8d5f31b69be4213998d4a/e/93d6030cbd8f7505abd32039 -->
 <robot name="robot">
+  <!-- Bravo appearance: off-white covers, graphite frame and satin tooling.
+       Visual finish patches retain the original exported surfaces; collisions,
+       joint frames and inertias remain the original CAD export.
+       Pads 1-3: blue; 4-6: green; 7-9: yellow; each group dark / medium / light.
+       Material RGB values are normalized sRGB. -->
   <!-- Link base_link -->
   <link name="base_link">
     <inertial>
@@ -31,8 +36,8 @@
       <geometry>
         <mesh filename="package://assets/hw1_300_001.stl"/>
       </geometry>
-      <material name="hw1_300_001_material">
-        <color rgba="0.866667 0.866667 0.890196 1"/>
+      <material name="bravo_pad_1">
+        <color rgba="0.270588 0.431373 0.568627 1"/>
       </material>
     </visual>
     <collision>
@@ -101,10 +106,46 @@
     <visual>
       <origin xyz="0 5.64188e-31 0" rpy="0 3.65358e-43 0"/>
       <geometry>
-        <mesh filename="package://assets/384_head.stl"/>
+        <mesh filename="package://assets/bravo_head_upper.stl"/>
       </geometry>
-      <material name="384_head_material">
-        <color rgba="0.615686 0.811765 0.929412 1"/>
+      <material name="bravo_housing_head_upper">
+        <color rgba="0.909804 0.917647 0.905882 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 5.64188e-31 0" rpy="0 3.65358e-43 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_head_gasket.stl"/>
+      </geometry>
+      <material name="bravo_gasket_head_seam">
+        <color rgba="0.207843 0.231373 0.239216 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 5.64188e-31 0" rpy="0 3.65358e-43 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_head_lower.stl"/>
+      </geometry>
+      <material name="bravo_housing_head_lower">
+        <color rgba="0.925490 0.933333 0.921569 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 5.64188e-31 0" rpy="0 3.65358e-43 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_head_tooling.stl"/>
+      </geometry>
+      <material name="bravo_tooling_barrel_plate">
+        <color rgba="0.709804 0.737255 0.752941 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 5.64188e-31 0" rpy="0 3.65358e-43 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_head_barrels.stl"/>
+      </geometry>
+      <material name="bravo_peek_barrels">
+        <color rgba="0.709804 0.607843 0.439216 1"/>
       </material>
     </visual>
     <collision>
@@ -159,8 +200,8 @@
       <geometry>
         <mesh filename="package://assets/fingerleft.stl"/>
       </geometry>
-      <material name="fingerleft_material">
-        <color rgba="0.615686 0.811765 0.929412 1"/>
+      <material name="bravo_tooling_finger_left">
+        <color rgba="0.682353 0.709804 0.725490 1"/>
       </material>
     </visual>
     <collision>
@@ -207,8 +248,8 @@
       <geometry>
         <mesh filename="package://assets/fingerright.stl"/>
       </geometry>
-      <material name="fingerright_material">
-        <color rgba="0.615686 0.811765 0.929412 1"/>
+      <material name="bravo_tooling_finger_right">
+        <color rgba="0.682353 0.709804 0.725490 1"/>
       </material>
     </visual>
     <collision>
@@ -248,8 +289,8 @@
       <geometry>
         <mesh filename="package://assets/gripperzaxis.stl"/>
       </geometry>
-      <material name="gripperzaxis_material">
-        <color rgba="0.917647 0.917647 0.917647 1"/>
+      <material name="bravo_tooling_gripper_carriage">
+        <color rgba="0.709804 0.737255 0.752941 1"/>
       </material>
     </visual>
     <collision>
@@ -284,12 +325,30 @@
     </inertial>
     <!-- Part ygantry -->
     <visual>
-      <origin xyz="0 7.24371e-43 0" rpy="0 -2.13433e-117 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://assets/ygantry.stl"/>
+        <mesh filename="package://assets/bravo_carriage_cover.stl"/>
       </geometry>
-      <material name="ygantry_material">
-        <color rgba="0.917647 0.917647 0.917647 1"/>
+      <material name="bravo_housing_carriage">
+        <color rgba="0.909804 0.917647 0.905882 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_carriage_seam.stl"/>
+      </geometry>
+      <material name="bravo_gasket_carriage_seam">
+        <color rgba="0.207843 0.231373 0.239216 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_carriage_trim.stl"/>
+      </geometry>
+      <material name="bravo_tooling_carriage_trim">
+        <color rgba="0.709804 0.737255 0.752941 1"/>
       </material>
     </visual>
     <collision>
@@ -326,10 +385,64 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 -0 0"/>
       <geometry>
-        <mesh filename="package://assets/xgantry.stl"/>
+        <mesh filename="package://assets/bravo_gantry_cover.stl"/>
       </geometry>
-      <material name="xgantry_material">
-        <color rgba="0.615686 0.811765 0.929412 1"/>
+      <material name="bravo_housing_gantry">
+        <color rgba="0.941176 0.945098 0.937255 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -0 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_front_support.stl"/>
+      </geometry>
+      <material name="bravo_frame_front_support">
+        <color rgba="0.443137 0.454902 0.466667 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_cover_trim.stl"/>
+      </geometry>
+      <material name="bravo_gasket_cover_trim">
+        <color rgba="0.392157 0.407843 0.415686 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_cover_markings.stl"/>
+      </geometry>
+      <material name="bravo_label_ink">
+        <color rgba="0.266667 0.286275 0.301961 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_brand_emblem.stl"/>
+      </geometry>
+      <material name="bravo_label_blue">
+        <color rgba="0.070588 0.458824 0.666667 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_warning_yellow.stl"/>
+      </geometry>
+      <material name="bravo_label_warning">
+        <color rgba="0.949020 0.776471 0.168627 1"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://assets/bravo_warning_ink.stl"/>
+      </geometry>
+      <material name="bravo_label_warning_ink">
+        <color rgba="0.125490 0.137255 0.156863 1"/>
       </material>
     </visual>
     <collision>
@@ -368,8 +481,8 @@
       <geometry>
         <mesh filename="package://assets/part_4.stl"/>
       </geometry>
-      <material name="part_4_material">
-        <color rgba="0.972549 0.529412 0.00392157 1"/>
+      <material name="bravo_deck_cast_base">
+        <color rgba="0.450980 0.466667 0.466667 1"/>
       </material>
     </visual>
     <collision>
@@ -416,8 +529,8 @@
       <geometry>
         <mesh filename="package://assets/hw1_300_001.stl"/>
       </geometry>
-      <material name="hw1_300_001_2_material">
-        <color rgba="0.866667 0.866667 0.890196 1"/>
+      <material name="bravo_pad_2">
+        <color rgba="0.392157 0.556863 0.682353 1"/>
       </material>
     </visual>
     <collision>
@@ -464,8 +577,8 @@
       <geometry>
         <mesh filename="package://assets/hw1_300_001.stl"/>
       </geometry>
-      <material name="hw1_300_001_3_material">
-        <color rgba="0.866667 0.866667 0.890196 1"/>
+      <material name="bravo_pad_3">
+        <color rgba="0.541176 0.674510 0.780392 1"/>
       </material>
     </visual>
     <collision>
@@ -512,8 +625,8 @@
       <geometry>
         <mesh filename="package://assets/hw1_300_001.stl"/>
       </geometry>
-      <material name="hw1_300_001_4_material">
-        <color rgba="0.866667 0.866667 0.890196 1"/>
+      <material name="bravo_pad_4">
+        <color rgba="0.223529 0.482353 0.470588 1"/>
       </material>
     </visual>
     <collision>
@@ -560,8 +673,8 @@
       <geometry>
         <mesh filename="package://assets/hw1_300_001.stl"/>
       </geometry>
-      <material name="hw1_300_001_5_material">
-        <color rgba="0.866667 0.866667 0.890196 1"/>
+      <material name="bravo_pad_5">
+        <color rgba="0.333333 0.603922 0.572549 1"/>
       </material>
     </visual>
     <collision>
@@ -608,8 +721,8 @@
       <geometry>
         <mesh filename="package://assets/hw1_300_001.stl"/>
       </geometry>
-      <material name="hw1_300_001_6_material">
-        <color rgba="0.866667 0.866667 0.890196 1"/>
+      <material name="bravo_pad_6">
+        <color rgba="0.486275 0.721569 0.662745 1"/>
       </material>
     </visual>
     <collision>
@@ -656,8 +769,8 @@
       <geometry>
         <mesh filename="package://assets/hw1_300_001.stl"/>
       </geometry>
-      <material name="hw1_300_001_7_material">
-        <color rgba="0.866667 0.866667 0.890196 1"/>
+      <material name="bravo_pad_7">
+        <color rgba="0.682353 0.509804 0.243137 1"/>
       </material>
     </visual>
     <collision>
@@ -704,8 +817,8 @@
       <geometry>
         <mesh filename="package://assets/hw1_300_001.stl"/>
       </geometry>
-      <material name="hw1_300_001_8_material">
-        <color rgba="0.866667 0.866667 0.890196 1"/>
+      <material name="bravo_pad_8">
+        <color rgba="0.768627 0.611765 0.345098 1"/>
       </material>
     </visual>
     <collision>
@@ -752,8 +865,8 @@
       <geometry>
         <mesh filename="package://assets/hw1_300_001.stl"/>
       </geometry>
-      <material name="hw1_300_001_9_material">
-        <color rgba="0.866667 0.866667 0.890196 1"/>
+      <material name="bravo_pad_9">
+        <color rgba="0.850980 0.721569 0.478431 1"/>
       </material>
     </visual>
     <collision>
@@ -800,8 +913,8 @@
       <geometry>
         <mesh filename="package://assets/part_1.stl"/>
       </geometry>
-      <material name="part_1_material">
-        <color rgba="0.231373 0.380392 0.705882 1"/>
+      <material name="bravo_housing_crossbeam">
+        <color rgba="0.941176 0.945098 0.937255 1"/>
       </material>
     </visual>
     <collision>
@@ -848,8 +961,8 @@
       <geometry>
         <mesh filename="package://assets/part_2.stl"/>
       </geometry>
-      <material name="part_2_material">
-        <color rgba="0.917647 0.917647 0.917647 1"/>
+      <material name="bravo_tooling_locator_left">
+        <color rgba="0.709804 0.737255 0.752941 1"/>
       </material>
     </visual>
     <collision>
@@ -896,8 +1009,8 @@
       <geometry>
         <mesh filename="package://assets/part_3.stl"/>
       </geometry>
-      <material name="part_3_material">
-        <color rgba="0.768627 0.886275 0.952941 1"/>
+      <material name="bravo_tooling_locator_right">
+        <color rgba="0.709804 0.737255 0.752941 1"/>
       </material>
     </visual>
     <collision>
@@ -944,8 +1057,8 @@
       <geometry>
         <mesh filename="package://assets/part_5.stl"/>
       </geometry>
-      <material name="part_5_material">
-        <color rgba="0.498039 0.498039 0.498039 1"/>
+      <material name="bravo_frame_rear">
+        <color rgba="0.474510 0.486275 0.494118 1"/>
       </material>
     </visual>
     <collision>
@@ -992,8 +1105,8 @@
       <geometry>
         <mesh filename="package://assets/part_6.stl"/>
       </geometry>
-      <material name="part_6_material">
-        <color rgba="0.980392 0.713725 0.00392157 1"/>
+      <material name="bravo_frame_rear_panel">
+        <color rgba="0.505882 0.517647 0.529412 1"/>
       </material>
     </visual>
     <collision>

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bravo · Appearance preview</title>
+  <script type="importmap">
+    {"imports":{"three":"https://esm.sh/three@0.162.0","three/addons/":"https://esm.sh/three@0.162.0/examples/jsm/"}}
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #edf0f2; color: #25303a; font: 14px system-ui, sans-serif; }
+    header { position: absolute; z-index: 1; top: 32px; left: 38px; }
+    .eyebrow { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #65727e; }
+    h1 { margin: 10px 0 8px; font-size: 34px; font-weight: 550; letter-spacing: -.04em; }
+    p { margin: 0; color: #65727e; }
+    #viewport { width: 100%; height: 100vh; min-height: 580px; }
+    nav { position: absolute; z-index: 1; bottom: 34px; left: 38px; display: flex; gap: 8px; }
+    button { background: #ffffffd9; color: #25303a; border: 1px solid #cdd4db; border-radius: 7px; padding: 10px 17px; cursor: pointer; font: inherit; }
+    button:hover, button[aria-pressed="true"] { background: #25303a; color: white; }
+    footer { position: absolute; bottom: 38px; right: 38px; color: #65727e; font-size: 12px; }
+    #status { position: absolute; top: 40px; right: 38px; color: #65727e; font-size: 12px; }
+    @media(max-width: 650px) { header { top: 20px; left: 20px; } h1 { font-size: 28px; } #status { top: 135px; left: 20px; } nav { left: 20px; bottom: 52px; } footer { left: 20px; bottom: 20px; } }
+  </style>
+</head>
+<body>
+  <header><div class="eyebrow">pyBravo / digital twin</div><h1>Bravo</h1><p>Off-white housings. Graphite frame. Nine colored pads.</p></header>
+  <div id="status" role="status">Loading model…</div>
+  <main id="viewport" aria-label="Interactive Bravo 3D model"></main>
+  <nav aria-label="Camera views"><button data-view="three-quarter" aria-pressed="true">Perspective</button><button data-view="front" aria-pressed="false">Front</button><button data-view="top" aria-pressed="false">Deck</button></nav>
+  <footer>Drag to orbit · Scroll to zoom</footer>
+  <script type="module">
+    import * as THREE from 'three';
+    import { RobotScene } from './src/robot-scene.js?v=bravo-skin4';
+    const status = document.getElementById('status');
+    try {
+      const robot = await new RobotScene(document.getElementById('viewport'), { autoConnect: false, showGizmo: false }).init();
+      if (!robot.urdfRobot) throw new Error('The model could not be loaded.');
+      const pose = { X: 182.64, Y: 85, Z: 15, Zg: 0, G: 12 };
+      robot.setPositions(pose);
+      robot.snapRenderPositions(pose);
+      robot.setBackground('#edf0f2');
+      // A neutral studio floor makes the machine's finish and footprint clear.
+      robot.renderer.shadowMap.enabled = true;
+      robot.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0xedf0f2, roughness: 1 }));
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = -.035;
+      floor.receiveShadow = true;
+      robot.scene.add(floor);
+      const key = robot.scene.children.find(obj => obj.isDirectionalLight);
+      key.castShadow = true;
+      key.shadow.mapSize.set(2048, 2048);
+      Object.assign(key.shadow.camera, { left: -.7, right: .7, top: .8, bottom: -.7, near: .1, far: 5 });
+      key.shadow.normalBias = .002;
+      key.shadow.bias = -.0001;
+      key.shadow.camera.updateProjectionMatrix();
+      robot.camera.fov = 35;
+      robot.camera.updateProjectionMatrix();
+      const center = robot.modelCenter;
+      function view(name) {
+        const deckOnly = name === 'top';
+        for (const link of ['part_1', 'part_5', 'part_6', 'xgantry']) robot.urdfRobot._links[link].visible = !deckOnly;
+        const target = deckOnly ? new THREE.Vector3(center.x, .015, center.z) : center;
+        const offsets = { 'three-quarter': [-1.05, .58, 1.55], front: [0, .12, 1.85], top: [0, 1.15, .42] };
+        robot.controls.target.copy(target);
+        robot.camera.position.copy(target).add(new THREE.Vector3(...offsets[name]));
+        robot.controls.update();
+        document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === name)));
+      }
+      document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => view(button.dataset.view)));
+      view('three-quarter');
+      status.textContent = `${robot.deckSlotAnchors.size} deck pads · No hardware connection`;
+    } catch (error) { status.textContent = error.message; console.error(error); }
+  </script>
+</body>
+</html>

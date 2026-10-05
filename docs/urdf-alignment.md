@@ -234,3 +234,21 @@ Be aware that the designer pauses the `/ws/state` socket while a simulation runs
 (`setSimulationMode`), so anything the renderer needs from server state must not
 depend on that socket being live. A previous attempt at this fix was correct but
 never executed for exactly that reason.
+
+## Visual appearance
+
+The URDF carries the Bravo's off-white covers, graphite frame, metallic tooling, PEEK-tan barrels,
+and nine pad colors: pads 1–3 are blue, 4–6 green, and 7–9 yellow, with
+three shades per group.
+Both web viewers read these colors through `frontend/src/robot-appearance.js`,
+which supplies the surface roughness and metallic response.
+
+`python scripts/build_bravo_skin.py` regenerates the `bravo_*.stl` visual
+surfaces and markings from the original meshes. The finish boundaries preserve
+the original surface area and bounds; the original collision meshes, joint
+frames, inertias, and calibrated datums are unchanged. After a CAD re-export,
+review those boundaries before regenerating the visual assets.
+
+With the web server running, `/static/bravo-preview.html` opens an orbitable
+preview with perspective, front, and isolated-deck views. This page does not
+connect to the robot's state socket or send motion commands.

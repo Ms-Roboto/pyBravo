@@ -13,6 +13,7 @@
  */
 
 import * as THREE from 'three';
+import { createRobotMaterial } from './robot-appearance.js?v=bravo-skin3';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -31,10 +32,6 @@ const FINGER_JOINT_Y_OFFSET_M = -0.010;
 const TOOLING_ASSEMBLY_VISUAL_Y_OFFSET_M = -0.006;
 const LABWARE_CARRY_CLEARANCE_M = 0.04;
 const DECK_SLOT_SURFACE_OFFSET_M = 0.005;
-
-const DECK_POSITION_GREYS = [
-    0.74, 0.70, 0.66, 0.62, 0.58, 0.54, 0.50, 0.46, 0.42,
-];
 
 const LABWARE_APPEARANCE_OVERRIDES = {
     '384 Greiner 781091 PS uclear': {
@@ -77,7 +74,7 @@ const JOINT_AXIS_MAP = {
     'ygripper-right': { bravoAxis: 'G',  homeOffset: 0,      scale:  0.5 },
 };
 
-const URDF_URL  = '/model/pybravo_urdf/robot.urdf?v=deckfix4';
+const URDF_URL  = '/model/pybravo_urdf/robot.urdf?v=bravo-skin4';
 const ASSET_BASE = '/model/pybravo_urdf/assets';
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -92,9 +89,8 @@ function isDeckPositionVisual(name) {
 }
 
 function deckLocationFromLinkName(name) {
-    const parts = name.replace(/^hw1_300_001_?/i, '').split('_');
-    const nums = parts.map(Number).filter(n => !isNaN(n) && n >= 1 && n <= 9);
-    return nums.length ? nums[nums.length - 1] : null;
+    const match = /^hw1_300_001(?:_(\d+))?_hw1_300_001(?:_\d+)?$/i.exec(name);
+    return match ? Number(match[1] || '1') : null;
 }
 
 function resolveLabwareModelUrl(modelPath) {
@@ -634,12 +630,12 @@ export class RobotScene {
     }
 
     _setupLighting() {
-        const ambient = new THREE.AmbientLight(0xffffff, 1.25);
+        const ambient = new THREE.AmbientLight(0xffffff, 1.6);
         this.scene.add(ambient);
-        const dir = new THREE.DirectionalLight(0xffffff, 0.55);
+        const dir = new THREE.DirectionalLight(0xffffff, 3.0);
         dir.position.set(1, 2, 1.5);
         this.scene.add(dir);
-        const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+        const fill = new THREE.DirectionalLight(0xffffff, 1.2);
         fill.position.set(-1, 0.5, -1);
         this.scene.add(fill);
     }
@@ -752,34 +748,17 @@ export class RobotScene {
                 const xyz = parseVec3(originEl?.getAttribute('xyz'));
                 const rpy = parseVec3(originEl?.getAttribute('rpy'));
 
-                const colorEl = visual.querySelector('material color');
-                let color = new THREE.Color(0.82, 0.82, 0.84);
                 const isFingerVisual =
                     /(fingerleft|fingerright)\.stl$/i.test(filename) || /finger(left|right)/i.test(lname);
                 const isHeadCarriageVisual =
                     /^(384_head_384_head|gripperzaxis_gripperzaxis)$/i.test(lname) ||
                     /(384_head|gripperzaxis)\.stl$/i.test(filename);
                 const isDeckVisual = isDeckPositionVisual(lname);
-                if (colorEl) {
-                    const rgba = colorEl.getAttribute('rgba').split(/\s+/).map(Number);
-                    color = new THREE.Color(rgba[0], rgba[1], rgba[2]);
-                }
-                if (isDeckVisual) {
-                    color = new THREE.Color(0xb9bbc5);
-                } else if (isFingerVisual) {
-                    color = new THREE.Color(0xff7a00);
-                } else if (isHeadCarriageVisual) {
-                    color = new THREE.Color(0xf2f2f2);
-                }
 
                 const promise = new Promise((resolve) => {
                     this.stlLoader.load(filename, (geometry) => {
                         geometry.computeVertexNormals();
-                        const mat = new THREE.MeshStandardMaterial({
-                            color,
-                            roughness: isDeckVisual ? 0.92 : 0.55,
-                            metalness: isDeckVisual ? 0.0 : 0.25,
-                        });
+                        const mat = createRobotMaterial(visual);
                         const mesh = new THREE.Mesh(geometry, mat);
                         mesh.castShadow = !isDeckVisual;
                         mesh.receiveShadow = true;
@@ -800,7 +779,7 @@ export class RobotScene {
             }
         }
         await Promise.all(meshPromises);
-        this._assignDeckPositionColors(deckVisuals);
+        this._registerDeckVisuals(deckVisuals);
 
         const childLinks = new Set();
         for (const joint of xml.querySelectorAll('joint')) {
@@ -879,14 +858,9 @@ export class RobotScene {
         void this.refreshDeckLabwareScene();
     }
 
-    _assignDeckPositionColors(deckVisuals) {
-        const sorted = [...deckVisuals].sort((a, b) => {
-            const dy = a.y - b.y;
-            return Math.abs(dy) > 0.01 ? -dy : a.x - b.x;
-        });
-        sorted.forEach((entry, index) => {
-            const grey = DECK_POSITION_GREYS[index] ?? 0.6;
-            entry.mesh.material.color.setRGB(grey, grey, grey + 0.03);
+    _registerDeckVisuals(deckVisuals) {
+        this.deckSlotLinkNames.clear();
+        deckVisuals.forEach((entry) => {
             const loc = deckLocationFromLinkName(entry.linkName);
             if (loc) this.deckSlotLinkNames.set(loc, entry.linkName);
         });
