@@ -7,6 +7,7 @@ from pybravo.deck.labware import normalize_labware_definitions
 from pybravo.tip_offsets import get_tip_offset_table
 from pybravo.tips import get_tip_definitions_for_head
 from pybravo.workflow.protocols.store import digest
+from pybravo.workflow.protocols.tipbox_choices import compatible_tipbox_choices, tipbox_catalog_candidates
 
 
 def machine_context(bravo) -> dict:
@@ -32,6 +33,15 @@ def machine_context(bravo) -> dict:
     }
     if "W" in bravo.profile.axes:
         context["head_max_volume_ul"] = bravo.profile.axes["W"].range.max_pos
+    context["tipbox_choices"] = compatible_tipbox_choices(head, context["labware"], tips)
+    context["tipbox_catalog_candidates"] = tipbox_catalog_candidates(
+        head, context["labware"], tips, tip_offsets=context["tip_offsets"],
+    )
+    context["tipbox_choices_reason"] = "" if context["tipbox_choices"] else (
+        f"No catalog tip box has a verified rack grid and linked tip definition with "
+        f"known length and explicit compatibility for {head}. Complete the catalog metadata "
+        "or select the correct configured head before choosing tips."
+    )
     context["profile_hash"] = digest(profile)
     # Deliberately exclude volatile runtime positions and fitted tips. The setup
     # supplies head mode/tips; the approved profile/catalog values must not drift.

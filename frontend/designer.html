@@ -682,6 +682,11 @@ body {
 .protocol-chat-message strong { display:block; font-size:10px; color:var(--text-dim); margin-bottom:5px; text-transform:uppercase; letter-spacing:.04em; }
 .protocol-chat-questions { border-top:1px solid var(--border); padding:10px 14px; font-size:12px; max-height:160px; overflow:auto; }
 .protocol-chat-questions:empty { display:none; }
+.protocol-chat-tipboxes { padding:10px 12px; border-top:1px solid var(--border); display:grid; gap:7px; font-size:11px; line-height:1.45; }
+.protocol-chat-tipboxes[hidden] { display:none; }
+.protocol-chat-tipboxes select { min-width:0; width:100%; color:var(--text); background:var(--bg-input); border:1px solid var(--border); border-radius:4px; padding:6px; font:11px var(--sans); }
+.protocol-chat-tipboxes p { color:var(--text-dim); }
+.protocol-chat-tipboxes a { color:var(--accent); }
 .protocol-chat-questions ul { padding-left:17px; line-height:1.5; margin-top:6px; }
 .protocol-chat-form { border-top:1px solid var(--border); padding:12px; display:grid; gap:9px; }
 .protocol-chat-form label { font-size:11px; color:var(--text-dim); }
@@ -756,6 +761,7 @@ body.protocol-preview-active #viewport-float { display:none; }
         <p class="protocol-chat-intro">Describe your procedure, then answer questions or request changes. Each reply updates a separate draft on the canvas.</p>
         <div class="protocol-chat-messages" id="protocol-chat-messages" role="log" aria-label="Conversation" aria-live="polite"></div>
         <div class="protocol-chat-questions" id="protocol-chat-questions"></div>
+        <div class="protocol-chat-tipboxes" id="protocol-chat-tipboxes" hidden></div>
         <form class="protocol-chat-form" id="protocol-chat-form">
             <label for="protocol-chat-message">Procedure or reply</label>
             <textarea id="protocol-chat-message" placeholder="Transfer buffer to a plate, mix, then incubate… Include known quantities and equipment." maxlength="20000" required></textarea>
@@ -7789,10 +7795,65 @@ function renderProtocolReviewProperties(body, node) {
         block.appendChild(document.createTextNode(String(text || ''))); body.appendChild(block);
     }
 }
+function appendProtocolTipboxCandidates(panel,preview,hasVerifiedChoices) {
+    const candidates = Array.isArray(preview.tipbox_catalog_candidates) ? preview.tipbox_catalog_candidates : [];
+    if (!candidates.length) return;
+    const labels = {rows_cols:'rack rows and columns',tip_link:'linked tip definition',tip_definition:'valid tip definition',head_compatibility:'explicit head compatibility',tip_capacity:'tip capacity',tip_length:'tip length'};
+    const details = document.createElement('details'); details.id = 'protocol-chat-tipbox-candidates'; details.open = !hasVerifiedChoices;
+    const summary = document.createElement('summary'); summary.textContent = `Catalog candidates to complete (${candidates.length})`;
+    const note = document.createElement('p'); note.textContent = 'These recorded formats may fit, but incomplete catalog metadata prevents verification and selection.';
+    const items = document.createElement('div'); items.style.cssText = 'max-height:130px;overflow:auto;';
+    for (const candidate of candidates) {
+        const row = document.createElement('div'); row.dataset.labwareId = candidate.labware_id; row.style.cssText = 'padding:7px 0;border-bottom:1px solid var(--border);';
+        const name = document.createElement('strong'); name.textContent = candidate.labware_name || candidate.labware_id;
+        const recorded = document.createElement('p'); recorded.textContent = `Recorded: ${candidate.wells || 'unspecified'} wells · ${candidate.spacing_x_mm || '?'} × ${candidate.spacing_y_mm || '?'} mm pitch`;
+        const missing = document.createElement('p'); missing.textContent = 'Complete: ' + (candidate.missing_metadata || []).map(key => labels[key] || String(key).replaceAll('_',' ')).join(', ');
+        const link = document.createElement('a'); link.href = '/labware-editor'; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Complete in labware editor';
+        row.append(name, recorded, missing, link); items.appendChild(row);
+    }
+    details.append(summary, note, items); panel.appendChild(details);
+}
+function renderProtocolTipboxes(envelope) {
+    const panel = document.getElementById('protocol-chat-tipboxes');
+    const previous = document.getElementById('protocol-chat-tipbox-select')?.value;
+    panel.replaceChildren(); panel.hidden = !envelope;
+    if (!envelope) return;
+    const preview = envelope.preview || {};
+    const choices = (Array.isArray(preview.tipbox_choices) ? preview.tipbox_choices : []).filter(choice => choice.labware_id && choice.tip_definition_id && ['rows','cols','wells','spacing_x_mm','spacing_y_mm','tip_capacity_ul','tip_length_mm'].every(field => Number(choice[field]) > 0));
+    const heading = document.createElement('strong'); heading.textContent = 'Compatible tipboxes · ' + (preview.head_type || 'active head'); panel.appendChild(heading);
+    const explanation = document.createElement('p');
+    if (!choices.length) {
+        explanation.textContent = preview.tipbox_choices_reason || 'No verified compatible tipbox is available in the active catalog. Check the head assignment, rack geometry, and tip definition.';
+        const link = document.createElement('a'); link.href = '/labware-editor'; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Review the labware catalog';
+        panel.append(explanation, link); appendProtocolTipboxCandidates(panel,preview,false); return;
+    }
+    const select = document.createElement('select'); select.id = 'protocol-chat-tipbox-select'; select.setAttribute('aria-label', 'Compatible tipbox and tip definition');
+    const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'Choose a catalog rack / tip pairing…'; select.appendChild(empty);
+    for (const [index, choice] of choices.entries()) {
+        const option = document.createElement('option'); option.value = String(index);
+        option.textContent = `${choice.labware_name} · ${choice.rows} × ${choice.cols} · ${choice.tip_name} (${choice.tip_capacity_ul} µL)`; select.appendChild(option);
+    }
+    if (previous && choices[Number(previous)]) select.value = previous;
+    select.disabled = protocolChat.pending;
+    const button = document.createElement('button'); button.type = 'button'; button.id = 'protocol-chat-tipbox-use'; button.className = 'toolbar-btn'; button.textContent = 'Add choice to message'; button.disabled = protocolChat.pending || !select.value;
+    explanation.textContent = 'Send the choice to update the draft. Deck position and available tips still require review.';
+    select.addEventListener('change', () => { button.disabled = protocolChat.pending || !select.value; });
+    button.addEventListener('click', () => {
+        const choice = choices[Number(select.value)];
+        if (!choice || select.value === '' || protocolChat.pending) return;
+        const input = document.getElementById('protocol-chat-message');
+        const sentence = `Use the catalog tipbox "${choice.labware_name}" (labware_id: ${choice.labware_id}) with tip definition "${choice.tip_name}" (tip_definition_id: ${choice.tip_definition_id}). Keep deck placement and actual tip availability unresolved unless I already supplied them.`;
+        input.value = input.value.trim() ? input.value.trimEnd() + '\n\n' + sentence : sentence;
+        protocolChatStatus('Tipbox choice added to your message. Review it and press Send to update the draft.'); input.focus();
+    });
+    panel.append(select, button, explanation);
+    appendProtocolTipboxCandidates(panel,preview,true);
+}
 function renderProtocolConversation() {
     const container = document.getElementById('protocol-chat-messages');
     container.replaceChildren();
     const envelope = protocolChat.envelope;
+    renderProtocolTipboxes(envelope);
     const messages = [...(envelope?.session?.chat_messages || [])];
     if (!messages.length && envelope?.reply) messages.push({ role: 'assistant', content: envelope.reply });
     if (protocolChat.pendingMessage) messages.push({ role: 'user', content: protocolChat.pendingMessage });

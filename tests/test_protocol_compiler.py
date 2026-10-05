@@ -177,6 +177,42 @@ def test_tip_capacity_head_compatibility_catalog_and_setup_choices():
     assert {"liquid_class", "pipetting_height", "tip_reuse_reason"} <= codes(report)
 
 
+def test_imported_sbs_tip_box_is_usable_only_with_explicit_tip_link_and_head_match():
+    plan, setup, context, sources = protocol_fixture()
+    rack = context["labware"][1]
+    rack["kind"] = "sbs_plate"
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"], report["issues"]
+    assert compile_plan(plan, setup, context, sources=sources)["deck"]["3"][0]["tipbox_fill_state"] == "full"
+
+    rack["tip_definition_id"] = ""
+    rack["supported_tip_ids"] = []
+    plan["materials"][2]["tip_definition_id"] = "tips-200"
+    assert "tip_rack_compatibility" in codes(validate_plan(plan, setup, context, sources=sources))
+    rack["tip_definition_id"] = "tips-200"
+    context["tip_definitions"][0]["compatible_heads"] = []
+    assert "tip_head_compatibility" in codes(validate_plan(plan, setup, context, sources=sources))
+
+
+def test_model_tipbox_recommendation_needs_scientist_confirmation_of_exact_pair():
+    plan, setup, context, sources = protocol_fixture()
+    context["tipbox_choices"] = [{"labware_id": "rack", "tip_definition_id": "tips-200"}]
+    plan["materials"][2]["tip_definition_id"] = "tips-200"
+    plan["questions"] = [{"id": "catalog-tipbox:tips", "path": "/materials/2/labware_id",
+                          "prompt": "Confirm this rack and tip pair."}]
+    assert "tipbox_confirmation" in codes(validate_plan(plan, setup, context, sources=sources))
+    plan["decisions"] = [
+        {"path": "/materials/2/labware_id", "value": "rack", "reason": "Scientist checked rack", "actor": "scientist"},
+        {"path": "/materials/2/tip_definition_id", "value": "tips-200", "reason": "Scientist checked tip", "actor": "scientist"},
+    ]
+    assert validate_plan(plan, setup, context, sources=sources)["valid"]
+    plan["decisions"][1]["value"] = "old-tip"
+    assert "tipbox_confirmation" in codes(validate_plan(plan, setup, context, sources=sources))
+    plan["decisions"][1]["value"] = "tips-200"
+    context["tipbox_choices"] = []
+    assert "tipbox_confirmation" in codes(validate_plan(plan, setup, context, sources=sources))
+
+
 def test_corrected_question_is_resolved_from_exact_pointer():
     plan, setup, context, sources = protocol_fixture()
     plan["questions"] = [{"id": "q1", "path": "/steps/0/volume_ul", "prompt": "What volume?"}]

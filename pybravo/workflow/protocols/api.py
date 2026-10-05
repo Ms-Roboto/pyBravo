@@ -188,11 +188,16 @@ async def ingest(file: UploadFile = File(...)):
     return _store.create_session(source.model_dump())
 
 
-def _chat_preview(record: dict) -> dict:
+def _chat_preview(record: dict, capabilities: dict | None = None) -> dict:
     from pybravo.workflow.protocols.preview import build_chat_preview
 
     preview = build_chat_preview(record["plan"], record["id"], record["revision"], sources=_sources(record))
     preview.setdefault("questions", preview.get("protocol_questions", []))
+    machine = capabilities if capabilities is not None else machine_context(_bravo())
+    preview["head_type"] = machine.get("head_type")
+    preview["tipbox_choices"] = machine.get("tipbox_choices", [])
+    preview["tipbox_catalog_candidates"] = machine.get("tipbox_catalog_candidates", [])
+    preview["tipbox_choices_reason"] = machine.get("tipbox_choices_reason", "")
     return preview
 
 
@@ -264,7 +269,7 @@ async def chat(request: ChatRequest):
                      "name": proposed_name,
                      "source": source.model_dump(), "selected_paragraph_ids": selected,
                      "plan": result.plan.model_dump(), "setup": record["setup"] if record else {}}
-        preview = _chat_preview(candidate)
+        preview = _chat_preview(candidate, capabilities)
         reply = _chat_reply(result.plan, preview)
         messages.append({"role": "assistant", "content": reply, "time": now()})
         # Persist source, transcript and plan together, only after successful

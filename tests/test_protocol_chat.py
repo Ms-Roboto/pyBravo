@@ -86,6 +86,34 @@ async def test_chat_followup_preserves_messages_sources_and_requires_revision(ch
         assert store.get("sessions", identity) == session
 
 
+async def test_chat_preview_shows_current_verified_tipbox_options(chat_environment, monkeypatch):
+    _, calls = chat_environment
+    choice = {"labware_id": "rack-384", "labware_name": "384 verified rack",
+              "tip_definition_id": "tip-st10", "tip_name": "ST10", "rows": 16,
+              "cols": 24, "wells": 384, "spacing_x_mm": 4.5,
+              "spacing_y_mm": 4.5, "tip_capacity_ul": 10.0,
+              "tip_length_mm": 19.9}
+    current = {"context_hash": "synthetic", "head_type": "HT_384_D_70",
+               "tipbox_choices": [choice], "tipbox_catalog_candidates": [], "tipbox_choices_reason": ""}
+    monkeypatch.setattr(api, "machine_context", lambda bravo: current.copy())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+        created = (await client.post("/api/protocols/chat", json={"message": "Inspect this rack."})).json()
+        assert calls[-1]["context"]["tipbox_choices"] == [choice]
+        assert created["preview"]["head_type"] == "HT_384_D_70"
+        assert created["preview"]["tipbox_choices"] == [choice]
+        current = {"context_hash": "changed", "head_type": "HT_16_D_ST",
+                   "tipbox_choices": [], "tipbox_catalog_candidates": [{"labware_id": "unconfigured-rack",
+                   "labware_name": "Short-tip candidate", "rows": 0, "cols": 0, "wells": 384,
+                   "spacing_x_mm": 4.5, "spacing_y_mm": 4.5, "verified": False,
+                   "missing_metadata": ["rows_cols", "tip_link"]}],
+                   "tipbox_choices_reason": "No verified rack for this head."}
+        resumed = (await client.get(f"/api/protocols/{created['session']['id']}/chat-preview")).json()
+        assert resumed["preview"]["head_type"] == "HT_16_D_ST"
+        assert resumed["preview"]["tipbox_choices"] == []
+        assert resumed["preview"]["tipbox_catalog_candidates"] == current["tipbox_catalog_candidates"]
+        assert resumed["preview"]["tipbox_choices_reason"] == "No verified rack for this head."
+
+
 async def test_chat_title_updates_atomically_without_changing_citation_ids(chat_environment, monkeypatch):
     store, _ = chat_environment
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:

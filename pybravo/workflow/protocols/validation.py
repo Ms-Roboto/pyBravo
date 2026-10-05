@@ -59,6 +59,11 @@ def _positive(value: Any, *, zero: bool = False) -> bool:
     return isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value) and (value >= 0 if zero else value > 0)
 
 
+def _is_tip_box(definition: dict) -> bool:
+    """Imported vendor racks often use an SBS kind with a tip-box base class."""
+    return "tip_box" in {definition.get("kind"), definition.get("base_class")}
+
+
 def _catalog(context: dict, key: str) -> dict[str, dict]:
     rows = context.get(key) or []
     if isinstance(rows, dict):
@@ -173,6 +178,24 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
     decisions = {d.path: d for d in plan.decisions}
     doc = {**plan.model_dump(), "setup": setup.model_dump()}
     for question in plan.questions:
+        if question.id.startswith("catalog-tipbox:"):
+            match = re.fullmatch(r"/materials/(\d+)/labware_id", question.path)
+            material = plan.materials[int(match[1])] if match and int(match[1]) < len(plan.materials) else None
+            if material is None or material.role != "tips" or material.id != question.id.removeprefix("catalog-tipbox:"):
+                result.issue("tipbox_confirmation", question.path, "The catalog tipbox recommendation no longer identifies its original tip material.")
+                continue
+            pair = (material.labware_id, material.tip_definition_id)
+            choices = context.get("tipbox_choices") or []
+            if not any((choice.get("labware_id"), choice.get("tip_definition_id")) == pair
+                       for choice in choices if isinstance(choice, dict)):
+                result.issue("tipbox_confirmation", question.path, "The recommended rack and tip are no longer a verified choice for the active head.")
+                continue
+            tip_path = question.path.removesuffix("/labware_id") + "/tip_definition_id"
+            if (decisions.get(question.path) is None or decisions[question.path].value != pair[0]
+                    or decisions.get(tip_path) is None or decisions[tip_path].value != pair[1]):
+                result.issue("tipbox_confirmation", question.path,
+                             "Confirm the recommended rack and tip together before validation.", question.prompt)
+            continue
         answer = _pointer(doc, question.path)
         if answer is None or answer == "" or answer == []:
             if question.path not in decisions:
@@ -254,7 +277,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                 "kind": definition.get("kind", ""), "base_class": definition.get("base_class", ""),
                 "wells": definition.get("wells", 0), "is_lidded": False, "is_sealed": False,
                 "tip_definition_id": material.tip_definition_id or definition.get("tip_definition_id", "")}]
-            if definition.get("kind") == "tip_box":
+            if _is_tip_box(definition):
                 result.deck[str(slot)][0].update(
                     tipbox_fill_state="empty" if material.role == "waste" or material.available_tips == [] else "full",
                     available_tips=material.available_tips,
@@ -282,7 +305,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             if material.dead_volume_ul is not None and material.dead_volume_ul > definition["well_volume_ul"]:
                 result.issue("dead_volume_capacity", path + "/dead_volume_ul", "Dead volume exceeds the catalog well capacity.")
         elif material.role == "tips":
-            if definition.get("kind") != "tip_box" or rows <= 0 or cols <= 0:
+            if not _is_tip_box(definition) or rows <= 0 or cols <= 0 or rows * cols != definition.get("wells"):
                 result.issue("tip_labware", path + "/labware_id", "Tip supplies must use a catalog tip box with valid geometry.")
             cells = {(r, c) for r in range(rows) for c in range(cols)}
             if material.available_tips is not None:
@@ -297,7 +320,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                         result.issue("tip_inventory", path + "/available_tips", str(error))
                 cells = chosen
             fresh_tips[material.id] = cells
-        elif definition.get("kind") == "tip_box":
+        elif _is_tip_box(definition):
             if material.available_tips != []:
                 result.issue("disposal_not_empty", path + "/available_tips", "A tip box used for disposal must be explicitly empty (available_tips=[]).")
             discarded_tips[material.id] = set()
@@ -384,13 +407,14 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             if tip is None:
                 result.issue("tip_definition", "/setup/tip_rack_ids", f"Tip rack {material_id!r} needs an approved tip definition.")
                 continue
-            compatible = tip.get("compatible_heads") or tip.get("supported_head_types") or []
-            if compatible and head_type.name not in compatible:
-                result.issue("tip_head_compatibility", "/setup/tip_rack_ids", f"Tip {tip_id!r} does not support {head_type.name}.")
+            head_memberships = [tip.get(key) for key in ("compatible_heads", "supported_head_types") if tip.get(key)]
+            if not head_memberships or any(head_type.name not in membership for membership in head_memberships):
+                result.issue("tip_head_compatibility", "/setup/tip_rack_ids", f"Tip {tip_id!r} has no explicit compatibility with {head_type.name}.")
                 continue
             supported = definition.get("supported_tip_ids") or []
-            if supported and tip_id not in supported:
-                result.issue("tip_rack_compatibility", "/setup/tip_rack_ids", f"Tip {tip_id!r} is incompatible with rack {material_id!r}.")
+            primary = definition.get("tip_definition_id")
+            if (not supported and not primary) or (supported and tip_id not in supported) or (not supported and tip_id != primary):
+                result.issue("tip_rack_compatibility", "/setup/tip_rack_ids", f"Tip {tip_id!r} is not explicitly linked to rack {material_id!r}.")
                 continue
             capacity = tip.get("capacity_ul")
             if not _positive(capacity):

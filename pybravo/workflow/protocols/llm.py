@@ -10,6 +10,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import time
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
@@ -249,6 +250,24 @@ questions for missing values, with JSON-pointer paths to fields. Use the actual
 catalog IDs only when they are explicitly established by the source or supplied
 setup. Preserve one-to-one source/destination well mapping; do not infer A1.
 
+Active-head tipbox guidance: context.tipbox_choices contains verified catalog
+pairs for the configured head. You MAY recommend a listed exact labware_id and
+tip_definition_id on a tips material. A recommendation is a catalog proposal,
+not a source fact or scientist approval. Keep decisions empty and never create
+source_values from catalog geometry/capacity. Clearly ask the scientist to
+confirm a recommendation. Copy both IDs from the SAME listed choice; never
+infer compatibility from a name, prefix, head channel count, or a similar rack.
+Keep an already specified pair unchanged unless the latest scientist message
+explicitly selects a different listed pair. For a new recommendation leave
+deck_slot, available_tips, initial_volume_ul and dead_volume_ul null, and leave
+well_volumes_ul empty. Do not infer a full rack, empty waste, inventory or deck
+placement from compatibility. If choices are empty, ask for compatible catalog
+setup using tipbox_choices_reason rather than inventing a pair.
+context.tipbox_catalog_candidates lists incomplete racks that may be worth
+checking in the catalog. They are not verified choices: mention their names
+only as leads for catalog completion, never fill material IDs from them unless
+the scientist explicitly supplies the IDs.
+
 Every step must cite actual paragraph IDs from this input. Numeric step values
 must have source_values containing the field, original numeric value and unit,
 and the exact paragraph ID that states it. Normalize volume to uL and duration
@@ -291,6 +310,136 @@ _STEP_ALLOWED_PARAMETERS = {
     "move_plate": {"material", "destination_slot"},
     "repeat": set(),
 }
+
+_TIPBOX_CHOICE_FIELDS = (
+    "labware_id", "labware_name", "tip_definition_id", "tip_name", "rows", "cols", "wells",
+    "spacing_x_mm", "spacing_y_mm", "tip_capacity_ul", "tip_length_mm",
+)
+_MAX_TIPBOX_CHOICES = 32
+
+
+def _tipbox_context(context: dict[str, Any] | None, source: IngestedProtocol | None = None) -> dict[str, Any]:
+    """Bound catalog guidance; expose only the authoritative helper's fields."""
+    supplied = dict(context or {})
+    if "tipbox_choices" not in supplied:
+        return supplied
+    current_plan = supplied.get("current_plan") or {}
+    prior_pairs = {(row.get("labware_id"), row.get("tip_definition_id"))
+                   for row in current_plan.get("materials", []) if isinstance(row, dict)} if isinstance(current_plan, dict) else set()
+    latest_text = source.paragraphs[-1].text if source is not None and source.paragraphs else ""
+    rows = [row for row in supplied.get("tipbox_choices") or [] if isinstance(row, dict)]
+
+    def priority(row: dict) -> int:
+        pair = (row.get("labware_id"), row.get("tip_definition_id"))
+        if all(isinstance(value, str) and value.strip() for value in pair) and _mentions_pair(latest_text, pair):
+            return 0
+        return 1 if pair in prior_pairs else 2
+
+    choices = []
+    seen: set[tuple[str, str]] = set()
+    for row in sorted(rows, key=priority):
+        pair = (row.get("labware_id"), row.get("tip_definition_id"))
+        if not all(isinstance(value, str) and value.strip() for value in pair) or pair in seen:
+            continue
+        seen.add(pair)
+        choices.append({key: row[key] for key in _TIPBOX_CHOICE_FIELDS if key in row})
+        if len(choices) == _MAX_TIPBOX_CHOICES:
+            break
+    supplied["tipbox_choices"] = choices
+    supplied["tipbox_choices_reason"] = str(supplied.get("tipbox_choices_reason") or "")[:1000]
+    return supplied
+
+
+def _mentions_pair(text: str, pair: tuple[str, str]) -> bool:
+    return all(re.search(r"(?<![\w-])" + re.escape(value) + r"(?![\w-])", text) for value in pair)
+
+
+def _mentions_identity(text: str, identity: str) -> bool:
+    return bool(re.search(r"(?<![\w-])" + re.escape(identity) + r"(?![\w-])", text))
+
+
+def _check_tipbox_guidance(
+    plan: "ProtocolPlan", source: IngestedProtocol, context: dict[str, Any],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Check proposed pairs without turning catalog data into source evidence."""
+    if "tipbox_choices" not in context:
+        return [], []
+    choices = {(row["labware_id"], row["tip_definition_id"]): row for row in context["tipbox_choices"]}
+    prior_plan = context.get("current_plan") or {}
+    if not isinstance(prior_plan, dict):
+        prior_plan = {}
+    prior = {row.get("id"): row for row in prior_plan.get("materials", []) if isinstance(row, dict)}
+    prior_recommendations = {q.get("id") for q in prior_plan.get("questions", []) if isinstance(q, dict)}
+    issues: list[str] = []
+    recommendations: list[dict[str, Any]] = []
+    latest_text = source.paragraphs[-1].text if source.paragraphs else ""
+    for index, material in enumerate(plan.materials):
+        if material.role != "tips":
+            continue
+        path = f"/materials/{index}"
+        previous = prior.get(material.id) or {}
+        old_pair = (previous.get("labware_id"), previous.get("tip_definition_id"))
+        pair = (material.labware_id, material.tip_definition_id)
+        # A catalog may become incomplete after a previous scientist choice.
+        # Keep that draft editable; current validation will block release until
+        # the active catalog again verifies the selected rack and tip.
+        if pair == old_pair and pair not in choices:
+            continue
+        if pair == (None, None):
+            if all(old_pair):
+                issues.append(f"{path}: preserve the already specified tipbox pair; do not silently clear it")
+            continue
+        if not all(pair):
+            specified = next((value for value in pair if value), None)
+            if not any(old_pair) and specified and any(
+                _mentions_identity(paragraph.text, specified) for paragraph in source.paragraphs
+            ):
+                continue
+            issues.append(f"{path}: tipbox IDs must be one exact labware_id/tip_definition_id pair from context.tipbox_choices; leave both null if unknown")
+            continue
+        if pair not in choices:
+            if any(_mentions_pair(paragraph.text, pair) for paragraph in source.paragraphs):
+                # Preserve an explicit scientist statement in a review draft.
+                # This is not a catalog recommendation and cannot validate
+                # until the active machine catalog accepts the pair.
+                continue
+            issues.append(f"{path}: tipbox IDs must be one exact labware_id/tip_definition_id pair from context.tipbox_choices; leave both null if unknown")
+            continue
+        explicitly_selected = any(_mentions_pair(paragraph.text, pair) for paragraph in source.paragraphs)
+        if all(old_pair) and pair != old_pair and not _mentions_pair(latest_text, pair):
+            issues.append(f"{path}: preserve the already specified tipbox pair {old_pair}; the latest scientist message did not select this replacement")
+            continue
+        recommendation_id = "catalog-tipbox:" + material.id
+        is_recommendation = not explicitly_selected and (
+            pair != old_pair or recommendation_id in prior_recommendations
+        )
+        if not is_recommendation:
+            continue
+        for field_name in ("deck_slot", "available_tips", "initial_volume_ul", "dead_volume_ul", "well_volumes_ul"):
+            value = getattr(material, field_name)
+            if value not in (None, {}) and value != previous.get(field_name):
+                issues.append(f"{path}/{field_name}: a catalog recommendation does not establish placement or inventory; preserve the prior value or leave it unknown")
+        recommendations.append({
+            "kind": "tipbox", "material_id": material.id, "path": path,
+            "source": "active_head_tipbox_catalog", "head_type": context.get("head_type"),
+            "labware_id": pair[0], "tip_definition_id": pair[1],
+            "scientist_confirmed": False,
+            "question_id": recommendation_id,
+        })
+    return issues, recommendations
+
+
+def _add_tipbox_confirmation_questions(plan: "ProtocolPlan", recommendations: list[dict[str, Any]]) -> None:
+    from .models import ProtocolQuestion
+
+    for recommendation in recommendations:
+        question = ProtocolQuestion(
+            id=recommendation["question_id"], path=recommendation["path"] + "/labware_id",
+            prompt=(f"Confirm the catalog recommendation {recommendation['labware_id']} with "
+                    f"tip {recommendation['tip_definition_id']} for the active head, and specify its deck slot and available tips."),
+        )
+        plan.questions = [q for q in plan.questions if q.id != question.id]
+        plan.questions.append(question)
 
 
 def _check_grounding(plan: "ProtocolPlan", source: IngestedProtocol) -> list[str]:
@@ -344,7 +493,8 @@ async def extract_protocol_plan(
     if not source.paragraphs:
         raise ProtocolGroundingError("Select at least one source paragraph before extracting a plan.")
     cfg = config or LocalLLMConfig.from_env()
-    user_payload: dict[str, Any] = {"source": source.model_dump(), "context": context or {}, "answers": answers or {}}
+    supplied_context = _tipbox_context(context, source)
+    user_payload: dict[str, Any] = {"source": source.model_dump(), "context": supplied_context, "answers": answers or {}}
     if feedback:
         user_payload["validation_feedback"] = feedback
     messages = [
@@ -367,10 +517,14 @@ async def extract_protocol_plan(
             issues = [f"{'.'.join(str(v) for v in error['loc'])}: {error['msg']}" for error in exc.errors()][:30]
         else:
             issues = _check_grounding(plan, source)
+            tipbox_issues, recommendations = _check_tipbox_guidance(plan, source, supplied_context)
+            issues.extend(tipbox_issues)
             if not issues:
+                _add_tipbox_confirmation_questions(plan, recommendations)
                 return ExtractionResult(plan=plan, metadata={
                     **result.metadata, "extraction_attempts": attempt + 1, "attempts": history,
                     "source_id": source.source_id, "source_paragraph_ids": [p.id for p in source.paragraphs],
+                    "catalog_recommendations": recommendations,
                 })
         if attempt == cfg.repair_attempts:
             raise ProtocolGroundingError("The extracted plan still has grounding/schema errors: " + "; ".join(issues[:8]))

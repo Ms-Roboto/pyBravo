@@ -17,7 +17,10 @@ function envelope(revision) {
     const questions=revision===1?[{id:'duration',path:'/steps/0/duration_s',prompt:'How many seconds should the wait last?'}]:[];
     const properties={step_id:'wait',kind:'wait',summary:revision===1?'Wait an unspecified duration.':`Wait ${revision} seconds.`,parameters:revision===1?{}:{duration_s:revision},missing_fields:revision===1?['duration_s']:[],citations:[],questions};
     const nodes=[{id:1,type:'flow/Start',title:'Protocol draft',properties:{},pos:[80,80],size:[180,70],inputs:[],outputs:[{name:'flow',type:-1,links:[1]}]},{id:2,type:'review/ProtocolStep',title:'1. Wait',properties,pos:[80,210],size:[420,170],inputs:[{name:'flow',type:-1,link:1}],outputs:[{name:'flow',type:-1,links:[2]}]},{id:3,type:'flow/End',title:'End of draft',properties:{},pos:[80,440],size:[180,70],inputs:[{name:'flow',type:-1,link:2}],outputs:[]}];
-    const preview={name:'Incubation chat',description:'',deck:{},protocol_chat_draft:true,protocol_chat_session_id:'chat1',protocol_revision:revision,protocol_questions:questions,questions,graph:{nodes,links:[[1,1,0,2,0,-1],[2,2,0,3,0,-1]],last_node_id:3,last_link_id:2,version:.4}};
+    const tipbox={labware_id:'verified-rack',labware_name:'Verified 96 tipbox',tip_definition_id:'st-tip',tip_name:'ST 70 µL',rows:8,cols:12,wells:96,spacing_x_mm:9,spacing_y_mm:9,tip_capacity_ul:70,tip_length_mm:50};
+    const tipboxChoices=revision===1?[tipbox,{...tipbox,labware_id:'unknown-rack',spacing_x_mm:0}]:[];
+    const candidates=[{labware_id:'incomplete-rack',labware_name:'Incomplete catalog tipbox',rows:0,cols:0,wells:96,spacing_x_mm:9,spacing_y_mm:9,verified:false,missing_metadata:['rows_cols','tip_link']}];
+    const preview={tipbox_catalog_candidates:candidates,tipbox_choices:tipboxChoices,tipbox_choices_reason:revision===1?'':'No verified compatible tipbox remains in this test catalog.',head_type:'ST',name:'Incubation chat',description:'',deck:{},protocol_chat_draft:true,protocol_chat_session_id:'chat1',protocol_revision:revision,protocol_questions:questions,questions,graph:{nodes,links:[[1,1,0,2,0,-1],[2,2,0,3,0,-1]],last_node_id:3,last_link_id:2,version:.4}};
     return {session:{id:'chat1',revision,name:preview.name,chat_messages:messages,plan:{questions}},reply:messages.at(-1).content,preview};
 }
 (async()=>{
@@ -56,9 +59,26 @@ function envelope(revision) {
         assert.equal(await page.evaluate(()=>window.designerState.graph._nodes.filter(n=>n.type==='review/ProtocolStep').length),1);
         assert.equal(await page.evaluate(()=>window.designerState.graphCanvas.read_only),true);
         await page.locator('#protocol-chat-message').fill('Wait 2 seconds.');
+        assert.equal(await page.locator('#protocol-chat-tipbox-select option').count(),2,'Do not show options with missing geometry');
+        await page.locator('#protocol-chat-tipbox-candidates summary').click();
+        assert.match(await page.locator('#protocol-chat-tipbox-candidates').innerText(),/Incomplete catalog tipbox/);
+        assert.match(await page.locator('#protocol-chat-tipbox-candidates').innerText(),/rack rows and columns, linked tip definition/);
+        assert.equal(await page.locator('#protocol-chat-tipbox-candidates button, #protocol-chat-tipbox-candidates select, #protocol-chat-tipbox-candidates input').count(),0,'Candidates have no selection action');
+
+        await page.locator('#protocol-chat-tipbox-select').selectOption('0');
+        await page.screenshot({path:'/tmp/protocol-designer-tipbox-choices.png'});
+        const requestsBeforeChoice=requests.length;
+        await page.locator('#protocol-chat-tipbox-use').click();
+        assert.match(await page.locator('#protocol-chat-message').inputValue(),/^Wait 2 seconds\./);
+        assert.match(await page.locator('#protocol-chat-message').inputValue(),/labware_id: verified-rack/);
+        assert.match(await page.locator('#protocol-chat-message').inputValue(),/tip_definition_id: st-tip/);
+        assert.equal(requests.length,requestsBeforeChoice,'Choice populates composer; explicit Send is required');
         await page.locator('#protocol-chat-send').click();
         await page.waitForFunction(()=>document.querySelector('#protocol-chat-status').textContent.includes('revision 2'));
         assert.equal(await page.locator('.wf-tab').count(),2,'Followup must update its draft tab');
+        assert.match(await page.locator('#protocol-chat-tipboxes').innerText(),/No verified compatible tipbox remains/);
+        assert.equal(await page.locator('#protocol-chat-tipbox-select').count(),0);
+        assert.equal(await page.locator('#protocol-chat-tipbox-candidates').getAttribute('open'),'');
         assert.equal(await page.evaluate(()=>window.designerState.graph._nodes.find(n=>n.type==='review/ProtocolStep').properties.parameters.duration_s),2);
         await page.locator('.wf-tab-name').filter({hasText:'Existing scientist workflow'}).click();
         assert.equal(await page.locator('#btn-simulate').isDisabled(),false);

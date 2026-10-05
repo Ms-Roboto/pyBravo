@@ -272,3 +272,183 @@ def test_legacy_explicit_cloud_provider_does_not_silently_fallback(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(legacy.NoLLMCredentialsError, match="explicitly selected"):
         legacy._resolve_config()
+
+
+def _tip_context():
+    return {"head_type": "HT_96_D_200", "tipbox_choices": [
+        {"labware_id": "rack-200", "labware_name": "Approved rack", "tip_definition_id": "tip-200",
+         "tip_name": "Approved tip", "rows": 8, "cols": 12, "tip_capacity_ul": 200, "tip_length_mm": 50},
+        {"labware_id": "rack-50", "labware_name": "Another rack", "tip_definition_id": "tip-50"},
+    ], "tipbox_choices_reason": ""}
+
+
+def _tips_plan(paragraph_id, *, labware_id="rack-200", tip_definition_id="tip-200", **tip_fields):
+    payload = _plan(paragraph_id)
+    payload["materials"] = [{"id": "tips", "name": "Tip supply", "role": "tips", "labware_id": labware_id,
+                             "tip_definition_id": tip_definition_id, **tip_fields}]
+    return payload
+
+
+async def test_verified_tipbox_recommendation_has_catalog_provenance_not_source_evidence(monkeypatch):
+    source = ingest_text("Inspect the plate and recommend compatible tips.")
+    captured = []
+
+    async def complete(messages, schema, **kwargs):
+        captured.append(messages)
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    result = await extract_protocol_plan(source, context=_tip_context())
+    material = result.plan.materials[0]
+    assert (material.labware_id, material.tip_definition_id) == ("rack-200", "tip-200")
+    assert material.deck_slot is None and material.available_tips is None
+    assert result.plan.decisions == []
+    assert result.plan.steps[0].source_values == []
+    assert result.plan.steps[0].source_paragraph_ids == [source.paragraphs[0].id]
+    recommendation = result.metadata["catalog_recommendations"][0]
+    assert recommendation["source"] == "active_head_tipbox_catalog"
+    assert recommendation["scientist_confirmed"] is False
+    assert recommendation["head_type"] == "HT_96_D_200"
+    assert "Confirm the catalog recommendation rack-200" in result.plan.questions[-1].prompt
+    assert "never create\nsource_values from catalog" in captured[0][0]["content"]
+
+
+@pytest.mark.parametrize("labware_id,tip_id", [("invented-rack", "tip-200"), ("rack-200", "invented-tip"),
+                                               ("rack-200", "tip-50"), ("rack-200", None)])
+async def test_unverified_tipbox_pairs_are_rejected(monkeypatch, labware_id, tip_id):
+    source = ingest_text("Recommend compatible tips.")
+
+    async def complete(*args, **kwargs):
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id, labware_id=labware_id, tip_definition_id=tip_id), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    with pytest.raises(ProtocolGroundingError, match="one exact labware_id/tip_definition_id pair"):
+        await extract_protocol_plan(source, context=_tip_context(), config=LocalLLMConfig(repair_attempts=0))
+
+
+@pytest.mark.parametrize("tip_fields", [{"deck_slot": 3}, {"available_tips": ["A1"]},
+                                        {"initial_volume_ul": 0}, {"dead_volume_ul": 0}, {"well_volumes_ul": {"A1": 200}}])
+async def test_tipbox_recommendations_do_not_establish_deck_or_inventory(monkeypatch, tip_fields):
+    source = ingest_text("Recommend compatible tips.")
+
+    async def complete(*args, **kwargs):
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id, **tip_fields), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    with pytest.raises(ProtocolGroundingError, match="does not establish placement or inventory"):
+        await extract_protocol_plan(source, context=_tip_context(), config=LocalLLMConfig(repair_attempts=0))
+
+
+async def test_existing_tip_pair_is_preserved_until_scientist_explicitly_selects_another(monkeypatch):
+    source = ingest_text("Inspect the plate.")
+    context = _tip_context()
+    context["current_plan"] = _tips_plan(source.paragraphs[0].id)
+
+    async def complete(*args, **kwargs):
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id, labware_id="rack-50", tip_definition_id="tip-50"), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    with pytest.raises(ProtocolGroundingError, match="preserve the already specified tipbox pair"):
+        await extract_protocol_plan(source, context=context, config=LocalLLMConfig(repair_attempts=0))
+
+    selected_source = ingest_text("Use catalog rack-50 with tip-50.")
+
+    async def selected(*args, **kwargs):
+        return StructuredResponse(_tips_plan(selected_source.paragraphs[0].id, labware_id="rack-50", tip_definition_id="tip-50"), {})
+
+    monkeypatch.setattr(llm, "structured_json", selected)
+    result = await extract_protocol_plan(selected_source, context=context)
+    assert result.plan.materials[0].labware_id == "rack-50"
+    assert result.metadata["catalog_recommendations"] == []
+    assert result.plan.decisions == []
+
+
+async def test_tipbox_repair_uses_verified_choices_without_fabricating_facts(monkeypatch):
+    source = ingest_text("Recommend compatible tips.")
+    calls = []
+
+    async def complete(messages, schema, **kwargs):
+        calls.append(list(messages))
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id,
+            labware_id="invented-rack" if len(calls) == 1 else "rack-200"), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    result = await extract_protocol_plan(source, context=_tip_context(), config=LocalLLMConfig(repair_attempts=1))
+    assert len(calls) == 2
+    assert "one exact labware_id/tip_definition_id pair" in calls[-1][-1]["content"]
+    assert result.plan.materials[0].labware_id == "rack-200"
+    assert result.plan.steps[0].source_values == []
+
+
+async def test_empty_compatible_tip_choices_leave_ids_unknown(monkeypatch):
+    source = ingest_text("Recommend compatible tips.")
+    captured = []
+
+    async def complete(messages, schema, **kwargs):
+        captured.append(messages)
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id, labware_id=None, tip_definition_id=None), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    result = await extract_protocol_plan(source, context={"tipbox_choices": [], "tipbox_choices_reason": "No verified pair for this head."})
+    assert result.plan.materials[0].labware_id is None
+    assert result.metadata["catalog_recommendations"] == []
+    assert "No verified pair for this head." in captured[0][1]["content"]
+
+
+async def test_explicit_unverified_tipbox_ids_remain_in_review_draft_without_recommendation(monkeypatch):
+    source = ingest_text("Use rack-384 with tip-st10; the catalog metadata needs checking.")
+
+    async def complete(*args, **kwargs):
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id,
+            labware_id="rack-384", tip_definition_id="tip-st10"), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    result = await extract_protocol_plan(source, context={"tipbox_choices": []})
+    assert result.plan.materials[0].labware_id == "rack-384"
+    assert result.metadata["catalog_recommendations"] == []
+
+
+async def test_catalog_change_does_not_make_unrelated_chat_revision_drop_prior_tip_choice(monkeypatch):
+    source = ingest_text("Inspect the plate after transfer.")
+    existing = _tips_plan(source.paragraphs[0].id)
+
+    async def complete(*args, **kwargs):
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    result = await extract_protocol_plan(source, context={"tipbox_choices": [], "current_plan": existing})
+    assert result.plan.materials[0].labware_id == "rack-200"
+    assert result.metadata["catalog_recommendations"] == []
+
+
+async def test_scientist_can_supply_one_tipbox_id_without_fabricating_its_mate(monkeypatch):
+    source = ingest_text("The rack ID is rack-384; I will check its tip definition later.")
+
+    async def complete(*args, **kwargs):
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id,
+            labware_id="rack-384", tip_definition_id=None), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    result = await extract_protocol_plan(source, context={"tipbox_choices": []})
+    assert result.plan.materials[0].labware_id == "rack-384"
+    assert result.plan.materials[0].tip_definition_id is None
+    assert result.metadata["catalog_recommendations"] == []
+
+
+def test_tipbox_guidance_is_bounded_and_drops_unrelated_catalog_fields():
+    supplied = {"tipbox_choices": [{"labware_id": f"rack-{i}", "tip_definition_id": f"tip-{i}", "unrelated": "x" * 1000}
+                                  for i in range(50)], "tipbox_choices_reason": "x" * 2000}
+    result = llm._tipbox_context(supplied)
+    assert len(result["tipbox_choices"]) == 32
+    assert all("unrelated" not in row for row in result["tipbox_choices"])
+    assert len(result["tipbox_choices_reason"]) == 1000
+    assert len(supplied["tipbox_choices"]) == 50
+
+
+def test_bounded_tip_guidance_retains_explicit_and_existing_selections():
+    supplied = {"tipbox_choices": [{"labware_id": f"rack-{i}", "tip_definition_id": f"tip-{i}"} for i in range(50)],
+                "current_plan": {"materials": [{"id": "tips", "labware_id": "rack-48", "tip_definition_id": "tip-48"}]}}
+    result = llm._tipbox_context(supplied, ingest_text("Use rack-49 with tip-49."))
+    assert len(result["tipbox_choices"]) == 32
+    assert result["tipbox_choices"][0]["labware_id"] == "rack-49"
+    assert result["tipbox_choices"][1]["labware_id"] == "rack-48"

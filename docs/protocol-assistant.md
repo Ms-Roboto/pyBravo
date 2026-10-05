@@ -37,6 +37,25 @@ finish the physical setup, validate and strictly simulate the plan, record
 scientist approval, and export the compiled workflow back to the designer.
 That export contains the executable nodes and the reviewed deck configuration.
 
+The chat and setup panel offer tip-box choices for the active head. A verified
+choice has a matching rack grid and pitch, an explicit rack-to-tip definition
+link, and a tip definition that names the head and has known capacity and
+length. A 384-channel head only receives 384-position choices; a 16-channel
+short-tip head receives racks whose recorded grid and pitch can hold its full
+footprint and whose tips explicitly support that head. Choosing a chat option
+adds its exact IDs to your message for review before you send it. Choosing one
+in setup adds an unplaced tip material, leaving deck slot and actual tip
+inventory blank. A model-proposed pair asks for explicit scientist confirmation
+of both IDs before validation.
+
+Imported racks with a plausible recorded format or pitch but incomplete
+metadata appear separately as **catalog candidates**. These help identify
+which labware record needs work; they are not selectable as verified pairs.
+The model may mention a candidate as a lead, but cannot turn its name into a
+tip definition or deck assignment. Complete the listed fields in the labware
+and tip editors, then reload the active catalog to make a verified choice
+available.
+
 ## Prepare a protocol
 
 1. Paste a procedure, or upload a PDF. Selectable-text PDFs work locally;
