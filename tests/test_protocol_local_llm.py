@@ -452,3 +452,211 @@ def test_bounded_tip_guidance_retains_explicit_and_existing_selections():
     assert len(result["tipbox_choices"]) == 32
     assert result["tipbox_choices"][0]["labware_id"] == "rack-49"
     assert result["tipbox_choices"][1]["labware_id"] == "rack-48"
+
+
+def _quadrant_fixture():
+    from pybravo.workflow.protocols.models import ProtocolPlan
+
+    source = ingest_text(
+        "I have 4 384 well plates and I want to transfer 5ul from each plate "
+        "into the 4 quadrants of two 1536 plates. I can't have any cross "
+        "contamination. Please help me layout the deck and write the protocol."
+    )
+    citation = source.paragraphs[0].id
+    materials = [
+        {"id": f"src{i}", "name": f"Source {i}", "deck_slot": 9, "stack_order": i - 1}
+        for i in range(1, 5)
+    ]
+    materials.extend([
+        {"id": "dest1", "name": "1536 destination 1", "deck_slot": 5},
+        {"id": "dest2", "name": "1536 destination 2", "deck_slot": 8},
+    ])
+    materials.extend([
+        {"id": f"tip{i}", "name": f"ST10 rack for source {i}", "role": "tips",
+         "labware_id": "rack-384", "tip_definition_id": "st_10ul", "deck_slot": 5 - i}
+        for i in range(4, 0, -1)
+    ])
+    steps = []
+    for index, source_id in enumerate(("src4", "src3", "src2", "src1")):
+        quadrant = {"src1": "A1", "src2": "A2", "src3": "B1", "src4": "B2"}[source_id]
+        steps.append({"id": f"destack{index}", "kind": "destack_plate" if index < 3 else "move_plate", "material": source_id,
+                      "destination_slot": 6, "source_paragraph_ids": [citation]})
+        for destination_id in ("dest1", "dest2"):
+            steps.append({"id": f"transfer{index}{destination_id}", "kind": "transfer",
+                          "source": source_id, "destination": destination_id,
+                          "source_anchor": "A1", "destination_anchor": quadrant,
+                          "volume_ul": 5, "source_paragraph_ids": [citation],
+                          "source_values": [{"field": "volume_ul", "value": 5, "unit": "uL",
+                                             "paragraph_id": citation}]})
+        steps.append({"id": f"park{index}", "kind": "move_plate" if index == 0 else "stack_plate",
+                      "material": source_id, "destination_slot": 7,
+                      "source_paragraph_ids": [citation]})
+    plan = ProtocolPlan.model_validate({"name": "Four-source quadrant transfer",
+                                        "materials": materials, "steps": steps})
+    context = {"head_type": "HT_384_D_70", "tipbox_choices": [
+        {"labware_id": "rack-384", "tip_definition_id": "st_10ul", "wells": 384,
+         "execution_ready": True},
+        {"labware_id": "rack-384", "tip_definition_id": "st_70ul", "wells": 384,
+         "execution_ready": False},
+    ]}
+    return source, plan, context
+
+
+def test_quadrant_layout_guard_preserves_four_sources_four_racks_two_destinations():
+    source, plan, context = _quadrant_fixture()
+    assert llm._check_quadrant_materials(plan, source, context) == []
+    plan.materials = [material for material in plan.materials if material.id != "tip2"]
+    assert any("4 distinct tip-rack materials" in issue for issue in llm._check_quadrant_materials(plan, source, context))
+    source, plan, context = _quadrant_fixture()
+    plan.steps = [step for step in plan.steps if step.source != "src1"]
+    assert any("4 distinct source-plate materials" in issue for issue in llm._check_quadrant_materials(plan, source, context))
+
+
+def test_quadrant_layout_guard_requires_same_disjoint_quadrants_and_st10():
+    source, plan, context = _quadrant_fixture()
+    target = next(step for step in plan.steps if step.source == "src4" and step.destination == "dest2")
+    target.destination_anchor = "A1"
+    assert any("one of A1/A2/B1/B2 on both" in issue for issue in llm._check_quadrant_materials(plan, source, context))
+    source, plan, context = _quadrant_fixture()
+    rack = next(material for material in plan.materials if material.id == "tip4")
+    rack.tip_definition_id = "st_70ul"
+    assert any("ST70 is unsuitable" in issue for issue in llm._check_quadrant_materials(plan, source, context))
+
+
+def test_quadrant_layout_guard_requires_top_first_staging_and_processed_stack():
+    source, plan, context = _quadrant_fixture()
+    bottom_access = next(step for step in plan.steps if step.id == "destack3")
+    bottom_access.kind = "destack_plate"
+    assert any("src1 needs move_plate" in issue for issue in llm._check_quadrant_materials(plan, source, context))
+    source, plan, context = _quadrant_fixture()
+    first_park = next(step for step in plan.steps if step.id == "park0")
+    first_park.destination_slot = 5
+    assert any("initially empty processed-stack slot" in issue for issue in llm._check_quadrant_materials(plan, source, context))
+
+
+def test_explicit_st70_is_preserved_for_validator_to_flag():
+    source, plan, context = _quadrant_fixture()
+    source.paragraphs[0].text += " Use ST70 tips."
+    for rack in (material for material in plan.materials if material.role == "tips"):
+        rack.tip_definition_id = "st_70ul"
+    assert llm._check_quadrant_materials(plan, source, context) == []
+
+
+def test_quadrant_isolation_questions_show_top_first_rack_pairing_and_alignment():
+    source, plan, _ = _quadrant_fixture()
+    llm._add_isolated_source_setup_questions(plan, source)
+    prompts = {question.path: question.prompt for question in plan.questions}
+    assert "fresh_each_source" in prompts["/setup/tip_strategy"]
+    assert "src4 → tip4" in prompts["/setup/tip_rack_ids"]
+    assert "src1 → tip1" in prompts["/setup/tip_rack_ids"]
+    assert "two destinations" in prompts["/setup/tip_reuse_reason"]
+    assert "own now-empty rack" in prompts["/setup/tip_disposal_id"]
+    assert sum("alignment and teachpoint" in prompt for prompt in prompts.values()) == 2
+
+
+async def test_requested_deck_layout_may_propose_tipbox_slot_for_review(monkeypatch):
+    source = ingest_text("Please help me layout the deck with a compatible tip rack.")
+
+    async def complete(*args, **kwargs):
+        return StructuredResponse(_tips_plan(source.paragraphs[0].id, deck_slot=3), {})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    result = await extract_protocol_plan(source, context=_tip_context())
+    assert result.plan.materials[0].deck_slot == 3
+    assert result.metadata["catalog_recommendations"][0]["deck_slot_proposal"] == 3
+    assert "confirm proposed deck slot 3" in result.plan.questions[-1].prompt
+
+
+def _catalog_quadrant_context():
+    return {
+        "head_type": "HT_384_D_70", "has_gripper": True,
+        "labware": [
+            {"id": "source-384", "name": "Verified 384 microplate", "base_class": "microplate",
+             "wells": 384, "rows": 16, "cols": 24, "spacing_x_mm": 4.5,
+             "spacing_y_mm": 4.5, "well_volume_ul": 130},
+            {"id": "destination-1536", "name": "Verified 1536 microplate", "base_class": "microplate",
+             "wells": 1536, "rows": 32, "cols": 48, "spacing_x_mm": 2.25,
+             "spacing_y_mm": 2.25, "well_volume_ul": 5.5},
+        ],
+        "tipbox_choices": [{"labware_id": "st10-rack", "labware_name": "384 ST rack",
+                            "tip_definition_id": "st_10ul", "tip_name": "ST10",
+                            "rows": 16, "cols": 24, "wells": 384, "tip_capacity_ul": 10,
+                            "execution_ready": True}],
+    }
+
+
+async def test_exact_four_source_quadrant_request_uses_catalog_template_without_model(monkeypatch):
+    source = ingest_text(
+        "I have 4 384 well plates and I want to transfer 5ul from each plate "
+        "into the 4 quadrants of two 1536 plates.  i can't have any cross "
+        "contamination. Please help me layout the deck and write the protocol "
+        "to do the transfer."
+    )
+
+    async def model_must_not_be_called(*args, **kwargs):
+        raise AssertionError("The exact catalog-backed pattern must not call the local model")
+
+    monkeypatch.setattr(llm, "structured_json", model_must_not_be_called)
+    result = await extract_protocol_plan(source, context=_catalog_quadrant_context())
+    plan = result.plan
+    assert result.metadata["provider"] == "catalog_template"
+    assert result.metadata["http_attempts"] == 0
+    assert len(plan.materials) == 10
+    assert [(material.id, material.deck_slot, material.stack_order) for material in plan.materials[:4]] == [
+        ("source_1", 9, 0), ("source_2", 9, 1), ("source_3", 9, 2), ("source_4", 9, 3),
+    ]
+    assert [(material.id, material.deck_slot, material.tip_definition_id) for material in plan.materials[6:]] == [
+        ("tips_source_4", 1, "st_10ul"), ("tips_source_3", 2, "st_10ul"),
+        ("tips_source_2", 3, "st_10ul"), ("tips_source_1", 4, "st_10ul"),
+    ]
+    assert [material.deck_slot for material in plan.materials[4:6]] == [5, 8]
+    assert [step.kind for step in plan.steps[::4]] == [
+        "destack_plate", "destack_plate", "destack_plate", "move_plate",
+    ]
+    assert [step.kind for step in plan.steps[3::4]] == [
+        "move_plate", "stack_plate", "stack_plate", "stack_plate",
+    ]
+    transfers = [step for step in plan.steps if step.kind == "transfer"]
+    assert len(transfers) == 8
+    assert [(step.source, step.destination, step.destination_anchor) for step in transfers] == [
+        (f"source_{number}", f"destination_{destination}", quadrant)
+        for number, quadrant in ((4, "B2"), (3, "B1"), (2, "A2"), (1, "A1"))
+        for destination in (1, 2)
+    ]
+    assert all(step.volume_ul == 5 and step.source_anchor == "A1" for step in transfers)
+    assert all(step.source_values[0].paragraph_id == source.paragraphs[0].id for step in transfers)
+    assert all(material.available_tips is None for material in plan.materials if material.role == "tips")
+    assert all(material.initial_volume_ul is None for material in plan.materials if material.role == "liquid")
+    assert plan.decisions == []
+    assert len(result.metadata["catalog_recommendations"]) == 4
+    assert {question.path for question in plan.questions} >= {
+        "/setup/tip_strategy", "/setup/tip_rack_ids", "/setup/tip_reuse_reason",
+        "/setup/tip_disposal_id", "/setup/liquid_class",
+    }
+
+
+async def test_quadrant_template_requires_unique_catalog_and_exact_request(monkeypatch):
+    exact = ingest_text(
+        "I have 4 384 well plates and I want to transfer 5ul from each plate "
+        "into the 4 quadrants of two 1536 plates. i can't have any cross "
+        "contamination. Please help me layout the deck and write the protocol "
+        "to do the transfer."
+    )
+    context = _catalog_quadrant_context()
+    context["labware"].append({**context["labware"][0], "id": "another-384"})
+    calls = []
+
+    async def model_called(*args, **kwargs):
+        calls.append(True)
+        raise llm.ProtocolResponseError("model attempted")
+
+    monkeypatch.setattr(llm, "structured_json", model_called)
+    with pytest.raises(llm.ProtocolResponseError, match="model attempted"):
+        await extract_protocol_plan(exact, context=context, config=LocalLLMConfig(repair_attempts=0))
+    assert calls == [True]
+    calls.clear()
+    context["labware"].pop()
+    additional_instruction = ingest_text(exact.paragraphs[0].text + " Also mix each destination.")
+    with pytest.raises(llm.ProtocolResponseError, match="model attempted"):
+        await extract_protocol_plan(additional_instruction, context=context, config=LocalLLMConfig(repair_attempts=0))
+    assert calls == [True]

@@ -17,7 +17,8 @@ MAX_PREVIEW_DEPTH = 8
 PREVIEW_NODE_TYPE = "review/ProtocolStep"
 _STEP_TITLES = {
     "transfer": "Transfer", "mix": "Mix", "manual": "Manual checkpoint",
-    "wait": "Wait", "move_plate": "Move plate", "repeat": "Repeat block",
+    "wait": "Wait", "move_plate": "Move plate", "destack_plate": "Destack plate",
+    "stack_plate": "Stack plate", "repeat": "Repeat block",
 }
 _PARAMETER_FIELDS = (
     "source", "destination", "material", "source_anchor", "destination_anchor",
@@ -27,7 +28,10 @@ _REQUIRED_FIELDS = {
     "transfer": ("source", "destination", "source_anchor", "destination_anchor", "volume_ul"),
     "mix": ("material", "anchor", "volume_ul", "cycles"),
     "manual": ("message",), "wait": ("duration_s",),
-    "move_plate": ("material", "destination_slot"), "repeat": ("repeat",),
+    "move_plate": ("material", "destination_slot"),
+    "destack_plate": ("material", "destination_slot"),
+    "stack_plate": ("material", "destination_slot"),
+    "repeat": ("repeat",),
 }
 
 
@@ -47,6 +51,48 @@ def _quantity(value: int | float | None, unit: str) -> str:
     return f"{value:g} {unit}" if value is not None else f"unspecified {unit}"
 
 
+def _proposed_deck(plan: ProtocolPlan) -> dict[str, list[dict]]:
+    """Show stated positions in the read-only chat draft, pending validation.
+
+    These entries never create executable tasks. Unknown catalog IDs remain
+    visible as proposed names, and uncertain stack levels keep plan order until
+    the scientist corrects them in Protocol Assistant.
+    """
+    grouped: dict[str, list[tuple[int, int | None, dict]]] = {}
+    for index, material in enumerate(plan.materials):
+        slot = material.deck_slot
+        if not isinstance(slot, int) or isinstance(slot, bool) or not 1 <= slot <= 9:
+            continue
+        entry = {
+            "material_id": material.id,
+            "labware_id": material.labware_id or "",
+            "name": material.name,
+            "kind": {"liquid": "sbs_plate", "tips": "tip_box", "waste": "tip_trash_bin"}[material.role],
+            "proposed": True,
+        }
+        if material.role == "tips":
+            entry["tip_definition_id"] = material.tip_definition_id or ""
+            entry["tip_inventory_status"] = (
+                "unconfirmed" if material.available_tips is None
+                else "full" if material.available_tips == "full"
+                else "empty" if material.available_tips == [] else "specified"
+            )
+            if material.available_tips == "full":
+                entry["tipbox_fill_state"] = "full"
+            elif material.available_tips == []:
+                entry["tipbox_fill_state"] = "empty"
+        grouped.setdefault(str(slot), []).append((index, material.stack_order, entry))
+    deck = {}
+    for slot, items in grouped.items():
+        # The Designer and runtime use bottom-to-top array order.
+        ordered = sorted(items, key=lambda item: (
+            item[1] if isinstance(item[1], int) and not isinstance(item[1], bool) and item[1] >= 0 else float("inf"),
+            item[0],
+        ))
+        deck[slot] = [entry for _, _, entry in ordered]
+    return deck
+
+
 def _summary(step: ProtocolStep, material_names: dict[str, str]) -> str:
     def material(identity: str | None) -> str:
         return material_names.get(identity, identity) if identity else "unspecified material"
@@ -64,8 +110,10 @@ def _summary(step: ProtocolStep, material_names: dict[str, str]) -> str:
             summary += f" Required duration: {_quantity(step.duration_s, 'seconds')}."
     elif step.kind == "wait":
         summary = f"Wait {_quantity(step.duration_s, 'seconds')}; this does not specify temperature control."
-    elif step.kind == "move_plate":
-        summary = f"Move {material(step.material)} to deck slot {step.destination_slot if step.destination_slot is not None else 'unspecified'}."
+    elif step.kind in {"move_plate", "destack_plate", "stack_plate"}:
+        action = {"move_plate": "Move", "destack_plate": "Destack", "stack_plate": "Stack"}[step.kind]
+        summary = (f"{action} {material(step.material)} to deck slot "
+                   f"{step.destination_slot if step.destination_slot is not None else 'unspecified'}.")
     else:
         summary = f"Repeat the following {len(step.steps)} child step(s) {_quantity(step.repeat, 'times')}; the body is shown once."
     if step.kind != "repeat" and step.repeat != 1:
@@ -81,9 +129,9 @@ def build_chat_preview(
 ) -> dict:
     """Return a marked LiteGraph workflow containing only structural review nodes.
 
-    Missing scientific values remain missing. ``deck`` is deliberately empty:
-    material assignments are retained as review metadata, without asserting that
-    model-proposed identifiers or positions are valid instrument setup.
+    Missing scientific values remain missing. The proposed deck is displayed
+    for visual review only; model-proposed identifiers, slots, and stacking
+    levels are not validated instrument setup.
     """
     plan = plan if isinstance(plan, ProtocolPlan) else ProtocolPlan.model_validate(plan)
     if not isinstance(session_id, str) or not session_id.strip():
@@ -145,19 +193,26 @@ def build_chat_preview(
     specs.append({"type": "flow/End", "title": "End of draft", "properties": {}, "depth": 0})
     nodes, links = [], []
     next_y = 80.0
+    columns = 3 if len(specs) > 8 else 1
     for index, spec in enumerate(specs):
         identity = index + 1
         size = [420, 170] if spec["type"] == PREVIEW_NODE_TYPE else [180, 70]
+        if columns == 1:
+            position = [80.0 + spec["depth"] * 70.0, next_y]
+            next_y += size[1] + 60.0
+        else:
+            row, order_in_row = divmod(index, columns)
+            column = order_in_row if row % 2 == 0 else columns - 1 - order_in_row
+            position = [80.0 + column * 500.0 + spec["depth"] * 40.0, 80.0 + row * 230.0]
         nodes.append({"id": identity, "type": spec["type"], "title": spec["title"],
-            "pos": [80.0 + spec["depth"] * 70.0, next_y], "size": size,
+            "pos": position, "size": size,
             "order": index, "mode": 0, "properties": spec["properties"],
             "inputs": [] if index == 0 else [{"name": "flow", "type": -1, "link": index}],
             "outputs": [] if index == len(specs) - 1 else [{"name": "flow", "type": -1, "links": [identity]}]})
-        next_y += size[1] + 60.0
         if index:
             links.append([index, index, 0, identity, 0, -1])
     return {
-        "name": plan.name, "description": plan.description, "deck": {},
+        "name": plan.name, "description": plan.description, "deck": _proposed_deck(plan),
         "graph": {"last_node_id": len(nodes), "last_link_id": len(links), "nodes": nodes, "links": links,
                   "groups": [], "config": {}, "extra": {}, "version": 0.4},
         "protocol_chat_draft": True, "protocol_chat_session_id": session_id, "protocol_revision": revision,

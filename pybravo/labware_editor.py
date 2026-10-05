@@ -107,7 +107,9 @@ def _normalize_type_item(item: dict[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(item)
     normalized["labware_class_ids"] = _dedupe_string_list(normalized.get("labware_class_ids") or [])
     normalized["supported_tip_ids"] = _dedupe_string_list(normalized.get("supported_tip_ids") or [])
+    normalized["compatible_head_types"] = _dedupe_string_list(normalized.get("compatible_head_types") or [])
     normalized["tip_definition_id"] = str(normalized.get("tip_definition_id") or "")
+    normalized["provisional"] = bool(normalized.get("provisional", False))
     return normalized
 
 
@@ -284,6 +286,8 @@ def create_type(payload: dict[str, Any]) -> dict[str, Any]:
         "labware_class_ids": list(payload.get("labware_class_ids") or []),
         "tip_definition_id": str(payload.get("tip_definition_id") or ""),
         "supported_tip_ids": list(payload.get("supported_tip_ids") or []),
+        "provisional": bool(payload.get("provisional", False)),
+        "compatible_head_types": list(payload.get("compatible_head_types") or []),
     }
     store["labware_types"].append(item)
     save_store(store)
@@ -513,6 +517,8 @@ def _editor_type_to_definition(item: dict[str, Any]) -> LabwareDefinition:
         tip_definition_id=str(item.get("tip_definition_id") or ""),
         supported_tip_ids=list(item.get("supported_tip_ids") or []),
         model_3d=str(model.get("url") or model.get("filename") or "") or None,
+        provisional=bool(item.get("provisional", False)),
+        compatible_head_types=list(item.get("compatible_head_types") or []),
     )
     return labware_module._apply_mirrored_motion_fields(definition)
 
@@ -535,6 +541,8 @@ def _mongo_type_to_editor_type(doc: dict[str, Any]) -> dict[str, Any]:
     item["labware_class_ids"] = list(item.get("labware_class_ids", []) or [])
     item["tip_definition_id"] = str(item.get("tip_definition_id") or "")
     item["supported_tip_ids"] = list(item.get("supported_tip_ids", []) or [])
+    item["provisional"] = bool(item.get("provisional", False))
+    item["compatible_head_types"] = _dedupe_string_list(item.get("compatible_head_types") or [])
 
     image_2d = item.get("image_2d")
     if image_2d is not None:
@@ -635,6 +643,8 @@ def _definition_to_editor_type(definition: LabwareDefinition) -> dict[str, Any]:
         "labware_class_ids": [],
         "tip_definition_id": definition.tip_definition_id,
         "supported_tip_ids": list(definition.supported_tip_ids or []),
+        "provisional": definition.provisional,
+        "compatible_head_types": list(definition.compatible_head_types or []),
         "image_2d": None,
         "model_3d": (
             {

@@ -22,7 +22,9 @@ function envelope(revision) {
     const tipboxChoices=revision===1?[tipbox,tip70,{...tipbox,labware_id:'unknown-rack',spacing_x_mm:0}]:revision===2?[tip70,tipbox]:[];
     const materials=[{id:'tips',role:'tips',labware_id:'verified-rack',tip_definition_id:revision>1?'st70':null}];
     const candidates=[{labware_id:'incomplete-rack',labware_name:'Incomplete catalog tipbox',rows:0,cols:0,wells:96,spacing_x_mm:9,spacing_y_mm:9,verified:false,missing_metadata:['rows_cols','tip_link']}];
-    const preview={protocol_materials:materials,tipbox_catalog_candidates:candidates,tipbox_choices:tipboxChoices,tipbox_choices_reason:revision<3?'':'No verified compatible tipbox remains in this test catalog.',head_type:'ST',name:'Incubation chat',description:'',deck:{},protocol_chat_draft:true,protocol_chat_session_id:'chat1',protocol_revision:revision,protocol_questions:questions,questions,graph:{nodes,links:[[1,1,0,2,0,-1],[2,2,0,3,0,-1]],last_node_id:3,last_link_id:2,version:.4}};
+    const deck={'1':[{material_id:'tips',labware_id:'verified-rack',name:'Shared ST tipbox',kind:'tip_box',tip_inventory_status:'unconfirmed',proposed:true}],
+        '9':[1,2,3,4].map(index=>({material_id:'source'+index,labware_id:'plate-384',name:'Source '+index,kind:'sbs_plate',proposed:true}))};
+    const preview={protocol_materials:materials,tipbox_catalog_candidates:candidates,tipbox_choices:tipboxChoices,tipbox_choices_reason:revision<3?'':'No verified compatible tipbox remains in this test catalog.',head_type:'ST',name:'Incubation chat',description:'',deck,protocol_chat_draft:true,protocol_chat_session_id:'chat1',protocol_revision:revision,protocol_questions:questions,questions,graph:{nodes,links:[[1,1,0,2,0,-1],[2,2,0,3,0,-1]],last_node_id:3,last_link_id:2,version:.4}};
     return {session:{id:'chat1',revision,name:preview.name,chat_messages:messages,plan:{materials,questions}},reply:messages.at(-1).content,preview};
 }
 (async()=>{
@@ -61,6 +63,10 @@ function envelope(revision) {
         assert.equal(await page.locator('#btn-simulate').isDisabled(),true);
         assert.equal(await page.locator('#btn-execute').isDisabled(),true);
         assert.equal(await page.locator('#btn-save').isDisabled(),true);
+        assert.deepEqual(await page.evaluate(()=>window.designerState.deckConfig),envelope(1).preview.deck,'Chat draft should display proposed deck stacks');
+        assert.match(await page.locator('.deck-cell[data-loc="1"] .deck-label').innerText(),/tips unconfirmed/);
+        assert.match(await page.locator('.deck-cell[data-loc="9"] .deck-label').innerText(),/Source 4 \(4\)/);
+        assert.match(await page.locator('#protocol-draft-summary').innerText(),/Proposed deck layout/);
         assert.equal(await page.locator('#protocol-chat-reload').isVisible(),false);
         assert.match(await page.locator('#protocol-chat-questions').innerText(),/How many seconds/);
         assert.equal(await page.locator('#protocol-chat-review').getAttribute('href'),'/protocol-assistant?session=chat1');

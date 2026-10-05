@@ -77,6 +77,8 @@ class LabwareDefinition:
     tip_definition_id: str = ""
     supported_tip_ids: list[str] = field(default_factory=list)
     model_3d: str | None = None
+    provisional: bool = False
+    compatible_head_types: list[str] = field(default_factory=list)
     # Mount-ability flags — consulted by mount_plates() / unmount_plate().
     # can_mount        = "this plate can sit on top of another and lock into
     #                    it" (e.g. a filter plate that nests into a
@@ -143,6 +145,8 @@ class LabwareDefinition:
             tip_definition_id=str(doc.get("tip_definition_id") or ""),
             supported_tip_ids=list(doc.get("supported_tip_ids") or []),
             model_3d=_resolve_model_3d_path(doc),
+            provisional=bool(doc.get("provisional", False)),
+            compatible_head_types=list(doc.get("compatible_head_types") or []),
             can_mount=bool(props.get("can_mount", False)),
             can_be_mounted=bool(props.get("can_be_mounted", False)),
         )
@@ -407,6 +411,8 @@ class MongoLabwareCatalog(LabwareCatalog):
                     "tip_definition_id": 1,
                     "supported_tip_ids": 1,
                     "model_3d": 1,
+                    "provisional": 1,
+                    "compatible_head_types": 1,
                     "legacy_raw": 1,
                 },
             )

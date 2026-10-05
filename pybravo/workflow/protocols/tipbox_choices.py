@@ -49,6 +49,16 @@ def _supports_head(tip: Mapping[str, Any], head: HeadType) -> bool:
     )
 
 
+def _rack_allows_head(rack: Mapping[str, Any], head: HeadType) -> bool:
+    """Respect a rack's explicit head family without guessing from its name."""
+    declared = rack.get("compatible_head_types") or []
+    return not declared or (
+        isinstance(declared, (list, tuple))
+        and all(isinstance(value, str) for value in declared)
+        and head.name in declared
+    )
+
+
 def catalog_tip_ids(rack: Mapping[str, Any]) -> frozenset[str]:
     """Explicit consumables supported by a rack, independent of its default."""
     supported = rack.get("supported_tip_ids") or []
@@ -148,7 +158,8 @@ def compatible_tipbox_choices(
     tips = _unique_rows(tip_definitions, "tip_id", "id")
     choices = []
     for rack_id, rack in racks.items():
-        if "tip_box" not in {rack.get("kind"), rack.get("base_class")}:
+        if ("tip_box" not in {rack.get("kind"), rack.get("base_class")}
+                or rack.get("provisional") or not _rack_allows_head(rack, head)):
             continue
         rows, cols, wells = rack.get("rows"), rack.get("cols"), rack.get("wells")
         stride = rack_tip_stride(head, rack)
@@ -206,7 +217,8 @@ def tipbox_catalog_candidates(
     verified_racks = {row["labware_id"] for row in compatible_tipbox_choices(head, racks.values(), tips.values())}
     candidates = []
     for rack_id, rack in racks.items():
-        if rack_id in verified_racks or "tip_box" not in {rack.get("kind"), rack.get("base_class")}:
+        if (rack_id in verified_racks or "tip_box" not in {rack.get("kind"), rack.get("base_class")}
+                or not _rack_allows_head(rack, head)):
             continue
         wells, rows, cols = rack.get("wells"), rack.get("rows"), rack.get("cols")
         px, py = rack.get("spacing_x_mm"), rack.get("spacing_y_mm")
@@ -228,6 +240,8 @@ def tipbox_catalog_candidates(
         elif (known_rows and rows < geometry.rows) or (known_cols and cols < geometry.columns):
             continue
         missing = [] if known_rows and known_cols else ["rows_cols"]
+        if rack.get("provisional"):
+            missing.append("provisional_approval")
         links = catalog_tip_ids(rack)
         if not _candidate_calibration_allows_head(rack_id, rack, head, tips, links, offsets):
             continue

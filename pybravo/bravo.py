@@ -2290,6 +2290,11 @@ class Bravo:
         kind = self._labware_kind(labware)
         if base_class != "tip_box" and kind != "tip_box":
             raise RuntimeError(f"{operation} requires a tip box at location {location}")
+        if (labware.metadata or {}).get("provisional"):
+            raise RuntimeError(f"{operation} cannot use provisional tip box '{labware.name}' before approval")
+        allowed_heads = (labware.metadata or {}).get("compatible_head_types") or []
+        if allowed_heads and self._profile.head.head_type.name not in allowed_heads:
+            raise RuntimeError(f"{operation} cannot use tip box '{labware.name}' with this head")
         return labware
 
     def _require_well_labware(self, location: int, *, operation: str) -> Labware:
@@ -2309,6 +2314,11 @@ class Bravo:
         kind = self._labware_kind(labware)
         if base_class not in {"tip_box", "tip_trash"} and kind not in {"tip_box", "tip_trash"}:
             raise RuntimeError(f"{operation} requires a tip box or tip trash at location {location}")
+        if (labware.metadata or {}).get("provisional"):
+            raise RuntimeError(f"{operation} cannot use provisional tip box '{labware.name}' before approval")
+        allowed_heads = (labware.metadata or {}).get("compatible_head_types") or []
+        if (base_class == "tip_box" or kind == "tip_box") and allowed_heads and self._profile.head.head_type.name not in allowed_heads:
+            raise RuntimeError(f"{operation} cannot use tip box '{labware.name}' with this head")
         return labware
 
     def _tip_length_for_labware(self, labware: Labware) -> float:

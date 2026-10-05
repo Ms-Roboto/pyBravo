@@ -77,6 +77,15 @@ async function run(){
         assert.equal(await page.getByRole('button',{name:'Confirm selected tipbox'}).isDisabled(),true,'A stale rack/tip mismatch cannot be confirmed');
         await page.locator('[data-path="/materials/2/tip_definition_id"]').selectOption('tip250');
         assert.equal(await page.getByRole('button',{name:'Confirm selected tipbox'}).count(),0);
+        await page.locator('#materials > .row-card').nth(2).getByRole('button',{name:'Mark inspected full (96 tips)'}).click();
+        assert.equal(await page.locator('#materials > .row-card').nth(2).getByLabel('Available tips for Tips').inputValue(),'full');
+        await page.locator('#materials > .row-card').nth(2).locator('details > summary').click();
+        await page.locator('#materials > .row-card').nth(2).getByLabel('Available tips for Tips').fill('A1, H12');
+        await page.locator('#materials > .row-card').nth(2).getByLabel('Available tips for Tips').blur();
+        await page.locator('#save').click();
+        await page.waitForFunction(()=>document.querySelector('#save').disabled);
+        assert.deepEqual(session.plan.materials[2].available_tips,['A1','H12'],'Partial rack inventory remains editable');
+        await page.locator('#materials > .row-card').nth(2).getByRole('button',{name:'Mark inspected full (96 tips)'}).click();
 
         await page.locator('#correction-reason').fill('Scientist confirmed 20 µL for this water qualification.');
         await page.locator('[data-path="/steps/0/volume_ul"]').fill('20');
@@ -89,6 +98,8 @@ async function run(){
         assert.equal(session.plan.decisions.at(-1).value,20);
         assert.ok(session.plan.decisions.some(d=>d.path==='/materials/2/labware_id'&&d.value==='tiprack'));
         assert.ok(session.plan.decisions.some(d=>d.path==='/materials/2/tip_definition_id'&&d.value==='tip250'));
+        assert.equal(session.plan.materials[2].available_tips,'full','Full inspected rack is saved as a compact explicit inventory');
+        assert.match(await page.locator('#supplies').innerText(),/Inspected full \(96 tips\)/);
         await page.locator('#simulate').click();
         await page.waitForFunction(()=>document.querySelector('#simulation-status').textContent==='Passed');
         await page.locator('#scientist').fill('Test Scientist');
@@ -142,6 +153,25 @@ async function run(){
         assert.equal(await page.locator('#setup-tipbox-select').count(),0);
         assert.match(await page.locator('#setup-tipbox-candidates').innerText(),/Catalog candidates to complete/);
         assert.equal(await page.locator('#setup-tipbox-candidates').getAttribute('open'),'');
+
+        // Proposed stacks remain easy to inspect before the strict validator
+        // accepts their catalog geometry and top-to-bottom move sequence.
+        await page.locator('[data-path="/materials/0/stack_order"]').fill('0');
+        await page.locator('[data-path="/materials/0/stack_order"]').blur();
+        await page.locator('#add-material').click();
+        const upper=page.locator('#materials > .row-card').last();
+        await upper.locator('[data-path$="/name"]').fill('Upper source plate');
+        await upper.locator('[data-path$="/name"]').blur();
+        await upper.locator('[data-path$="/labware_id"]').selectOption('plate');
+        await upper.locator('[data-path$="/deck_slot"]').fill('1');
+        await upper.locator('[data-path$="/deck_slot"]').blur();
+        await upper.locator('[data-path$="/stack_order"]').fill('1');
+        await upper.locator('[data-path$="/stack_order"]').blur();
+        await page.locator('#tab-review').click();
+        const firstSlot=page.locator('#deck .deck-slot').first();
+        assert.match(await firstSlot.innerText(),/Load bottom → top/);
+        assert.match(await firstSlot.innerText(),/Water reservoir.*Level 0.*Upper source plate.*Level 1/s);
+        assert.equal(await page.locator('[data-path="/setup/tip_disposal_id"] option[value="return_to_source_rack"]').count(),1);
 
         await page.screenshot({path:'/tmp/protocol-assistant-browser.png',fullPage:true});
         assert.deepEqual(errors,[],'UI must not throw browser errors');

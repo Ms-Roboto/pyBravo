@@ -221,18 +221,60 @@ Use manual for unsupported operations. Never claim the Bravo can perform an
 operation simply because the protocol requests it. Do not omit a step to make
 the plan executable. A wait represents elapsed time only, not temperature control.
 Use transfer for pipetting/addition/aliquoting even when volume or setup is
-unknown; use mix for mixing, move_plate for plate movement, wait for elapsed
+unknown; use mix for mixing, move_plate for an unstacked plate movement,
+destack_plate for removing the top plate from a stack to an empty work slot,
+stack_plate for placing a plate on a compatible occupied stack, wait for elapsed
 time and manual for centrifuging or other external instrument work. Unknown
 setup does NOT turn an otherwise supported transfer/mix into a manual step.
-Create materials for physical source/destination containers, tip racks and
-waste. Do NOT create a separate material for water or a reagent when it is
+Create ONE material per physical source plate, destination plate, tip rack and
+waste container, even when several physical items share one catalog type. Never
+collapse four source plates into one material or four separate racks into one.
+Do NOT create a separate material for water or a reagent when it is
 already held by a named source plate; put reagent identity in descriptions.
 A material's human name and logical ID can be known while its catalog
 labware_id, deck_slot and inventory remain null. Distinguish reagent identity
 in descriptions and vessel identity in source/destination/material references.
+For a stack, each plate is a separate material at the same deck_slot;
+stack_order is zero-based bottom-to-top (the top plate has the highest order).
+Process the top plate first. A plate beneath it is inaccessible until the top
+plate has been destacked. Use destack_plate while at least two plates remain;
+move_plate handles the final singleton plate. If the scientist has not specified bottom-to-top
+identity, use a clearly labeled proposed order and ask them to confirm it.
+Place an accessed plate on a free work slot, then move it to a free or
+compatible processed-plate slot before accessing the next stacked plate. Use
+move_plate for the first processed plate on an empty slot and stack_plate for
+subsequent processed plates on that occupied compatible stack.
+Never pipette from an occluded plate or place multiple separate tip racks at
+the same slot.
+
+With a 384-channel head and catalog-confirmed 384-to-1536 geometry, the
+destination anchors A1, A2, B1 and B2 represent the four disjoint 384-well
+footprints. A source plate occupies ONE corresponding quadrant on EACH named
+destination plate. Thus four source plates into two 1536 destination plates
+need eight full-head transfer steps, not four, sixteen, or 384 individual steps.
+With a smaller head, divide each quadrant into validated subsets instead of
+claiming one step covers all 384 wells. If the
+source-to-quadrant assignment is unspecified, propose source 1 to A1, source 2
+to A2, source 3 to B1, source 4 to B2 on both destinations and ask the scientist
+to confirm the mapping. The anchor follows the SOURCE identity, not the
+destination identity: source 4 uses B2 on destination 1 AND B2 on destination
+2; source 3 uses B1 on both; source 2 uses A2 on both; source 1 uses A1 on
+both. Process in top-first order 4, 3, 2, 1 when source 1 is bottom.
+Keep the same tip set across the two destination
+transfers from one source only; use a different clean set for every other source.
+No-cross-contamination language does not authorize tip reuse across sources.
+Name each separate rack for the source it serves and ask for review of
+setup.tip_strategy=fresh_each_source and setup.tip_rack_ids ordered to match
+top-to-bottom source processing. A full rack and its loaded-tip inventory must
+be confirmed. Do not imply that reusing tips between a source and both
+destinations is safe for every assay; ask the scientist to confirm this policy.
+List tip-rack materials in the same order as their paired sources are processed
+so the proposed pairing is visible and easy to review.
+
 Step fields by kind (leave all other operation-specific fields null):
 transfer: source,destination,source_anchor,destination_anchor,volume_ul;
-mix: material,anchor,volume_ul,cycles; move_plate: material,destination_slot;
+mix: material,anchor,volume_ul,cycles;
+move_plate/destack_plate/stack_plate: material,destination_slot;
 manual: message,duration_s; wait: duration_s; repeat: repeat,steps.
 Use description for the scientific purpose and reagent names. Manual steps
 must have a message containing the actual operator instructions.
@@ -243,12 +285,29 @@ set material. Preserve any manual-operation temperature, volume or speed in
 message, not in fields reserved for automated transfers or mixing. For example,
 "centrifuge plate B" is kind=manual, message="Centrifuge plate B", material=null.
 
-Unknown values MUST remain null. Never guess volume, time, cycles, labware,
-location, wells, liquid class, tip type, reagent inventory or instrument setup.
-Do not choose nearest labware or substitute operations. Ask short, specific
-questions for missing values, with JSON-pointer paths to fields. Use the actual
-catalog IDs only when they are explicitly established by the source or supplied
-setup. Preserve one-to-one source/destination well mapping; do not infer A1.
+Unknown values MUST remain null unless explicitly marked as review-draft
+proposals. Never guess scientific or measured volumes, times, cycles, well
+inventory, liquid class, tip type, reagent inventory, head
+mode or measured instrument setup. If the scientist asks for a deck layout,
+you may propose free slots 1-9 as a REVIEW DRAFT, and ask for confirmation of
+the physical stack order, clearance, rack positions, destination positions and
+working/parking positions. For example, four separate racks can occupy slots
+1-4, two destinations slots 5 and 8, a four-plate source stack slot 9, with
+slots 6 and 7 for working and processed plates. Treat these as proposals, not
+source facts or approval. For this seven-item starting deck, slots 6 and 7
+must have NO material initially assigned: they are empty destinations for
+plate moves. Do not create extra work-slot or processed-slot materials.
+Use slot 6 only as destination_slot of each source-access move and slot 7
+only as destination_slot of each processed-plate move. An initially occupied
+destination slot is not a valid work or parking position. Do not choose
+nearest labware or substitute
+operations. Ask short, specific questions for missing values, with JSON-pointer
+paths to fields. Use the actual catalog IDs only when explicitly established by
+the source, supplied setup, or a verified catalog recommendation described
+below. Preserve source/destination well mapping; do not infer A1 for an
+unspecified subset. A full 384-well source mapped to a 1536 quadrant may use
+source_anchor A1 and one of the destination anchors above when the active head
+supports that map.
 
 Active-head tipbox guidance: context.tipbox_choices contains catalog-compatible
 box/tip pairs for the configured head. Box identity and loaded tip identity are
@@ -261,6 +320,9 @@ metadata (for example tip_length). Keep that selected tip and ask for catalog
 completion; do not substitute another tip or claim it is ready to run.
 required_head_mode, when present, is a restriction on using that pair, not
 permission to silently change the scientist's selected head mode.
+When the requested transfer is 5 uL, a listed, execution-ready ST10 tip with
+10 uL capacity may be proposed on a compatible 384ST rack; independently
+confirm both the rack and loaded tip. Never assume the tip from a rack name.
 You MAY recommend a listed exact labware_id and
 tip_definition_id on a tips material. A recommendation is a catalog proposal,
 not a source fact or scientist approval. Keep decisions empty and never create
@@ -269,9 +331,11 @@ confirm a recommendation. Copy both IDs from the SAME listed choice; never
 infer compatibility from a name, prefix, head channel count, or a similar rack.
 Keep an already specified pair unchanged unless the latest scientist message
 explicitly selects a different listed pair. For a new recommendation leave
-deck_slot, available_tips, initial_volume_ul and dead_volume_ul null, and leave
-well_volumes_ul empty. Do not infer a full rack, empty waste, inventory or deck
-placement from compatibility. If choices are empty, ask for compatible catalog
+available_tips, initial_volume_ul and dead_volume_ul null, and leave
+well_volumes_ul empty. A deck_slot is allowed only as an explicitly labeled
+review-draft layout proposal requested by the scientist; it does not prove the
+rack is physically present or loaded. Do not infer a full rack, empty waste or
+inventory from compatibility. If choices are empty, ask for compatible catalog
 setup using tipbox_choices_reason rather than inventing a pair.
 context.tipbox_catalog_candidates lists incomplete racks that may be worth
 checking in the catalog. They are not verified choices: mention their names
@@ -318,6 +382,8 @@ _STEP_ALLOWED_PARAMETERS = {
     "manual": {"message", "duration_s"},
     "wait": {"duration_s"},
     "move_plate": {"material", "destination_slot"},
+    "destack_plate": {"material", "destination_slot"},
+    "stack_plate": {"material", "destination_slot"},
     "repeat": set(),
 }
 
@@ -382,6 +448,323 @@ def _selects_pair(text: str, pair: tuple[str, str], previous: tuple[str, str]) -
                for index in (0, 1))
 
 
+def _requested_deck_layout(source: IngestedProtocol) -> bool:
+    """A scientist's request can authorize a provisional placement proposal."""
+    return any(re.search(r"\b(?:deck\s+(?:layout|position|slot)|layout\s+the\s+deck|lay\s+out\s+the\s+deck)\b",
+                         paragraph.text, re.I) for paragraph in source.paragraphs)
+
+
+_COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+
+
+def _last_plate_count(source: IngestedProtocol, wells: int) -> int | None:
+    """Read only an explicit plate count, allowing later chat corrections."""
+    pattern = re.compile(
+        rf"\b(?P<count>\d+|{'|'.join(_COUNT_WORDS)})\s+{wells}(?:[- ]well)?\s+"
+        r"(?:(?:source|destination)\s+)?plates?\b", re.I,
+    )
+    for paragraph in reversed(source.paragraphs):
+        match = pattern.search(paragraph.text)
+        if match:
+            token = match.group("count").lower()
+            return int(token) if token.isdigit() else _COUNT_WORDS[token]
+    return None
+
+
+def _quadrant_request(source: IngestedProtocol) -> bool:
+    text = " ".join(paragraph.text for paragraph in source.paragraphs).lower()
+    return "quadrant" in text and _last_plate_count(source, 384) is not None and _last_plate_count(source, 1536) is not None
+
+
+def _transfer_steps(plan: "ProtocolPlan") -> list[Any]:
+    result: list[Any] = []
+
+    def visit(steps: list[Any]) -> None:
+        for step in steps:
+            if step.kind == "transfer":
+                result.append(step)
+            visit(step.steps)
+
+    visit(plan.steps)
+    return result
+
+
+def _ordered_steps(plan: "ProtocolPlan") -> list[Any]:
+    """Retain extraction order without expanding model-supplied repeat counts."""
+    result: list[Any] = []
+
+    def visit(steps: list[Any]) -> None:
+        for step in steps:
+            if step.kind != "repeat":
+                result.append(step)
+            visit(step.steps)
+
+    visit(plan.steps)
+    return result
+
+
+def _check_quadrant_materials(
+    plan: "ProtocolPlan", source: IngestedProtocol, context: dict[str, Any],
+) -> list[str]:
+    """Reject a reduced interpretation of an explicit multi-plate quadrant request."""
+    if not _quadrant_request(source):
+        return []
+    source_count = _last_plate_count(source, 384)
+    destination_count = _last_plate_count(source, 1536)
+    if source_count is None or destination_count is None:
+        return []
+    if source_count != 4 or destination_count != 2:
+        return []
+    transfers = _transfer_steps(plan)
+    sources = {step.source for step in transfers if step.source}
+    destinations = {step.destination for step in transfers if step.destination}
+    tips = [material for material in plan.materials if material.role == "tips"]
+    issues: list[str] = []
+    if len(sources) != source_count:
+        issues.append(f"quadrant layout: preserve {source_count} distinct source-plate materials and reference each in transfers; found {len(sources)}")
+    if len(destinations) != destination_count:
+        issues.append(f"quadrant layout: preserve {destination_count} distinct destination-plate materials and reference each in transfers; found {len(destinations)}")
+    if len(tips) != source_count:
+        issues.append(f"quadrant layout: preserve {source_count} distinct tip-rack materials, one per source plate; found {len(tips)}")
+    st10_choices = {(row.get("labware_id"), row.get("tip_definition_id"))
+                    for row in context.get("tipbox_choices") or [] if isinstance(row, dict)
+                    and row.get("tip_definition_id") == "st_10ul" and row.get("wells") == 384
+                    and row.get("execution_ready") is not False}
+    tip_explicitly_selected = any(re.search(
+        r"\b(?:st\s*(?:10|30|70)|(?:10|30|70)\s*u[lL]\s*(?:ST\s*)?tips?)\b",
+        paragraph.text, re.I,
+    ) for paragraph in source.paragraphs)
+    if st10_choices and not tip_explicitly_selected:
+        for material in tips:
+            if (material.labware_id, material.tip_definition_id) not in st10_choices:
+                issues.append(f"quadrant layout: {material.id} needs one verified 384-position ST10 rack/tip pair for the 1536-well transfer; ST70 is unsuitable")
+    materials = {material.id: material for material in plan.materials}
+    source_materials = [materials[identity] for identity in sources if identity in materials]
+    if len(source_materials) == source_count and _requested_deck_layout(source):
+        source_slots = {material.deck_slot for material in source_materials}
+        orders = {getattr(material, "stack_order", None) for material in source_materials}
+        if None in source_slots or len(source_slots) != 1 or orders != set(range(source_count)):
+            issues.append("quadrant layout: proposed source plates must share one deck_slot with consecutive bottom-to-top stack_order values")
+    if _requested_deck_layout(source) and len(tips) == source_count and len(destinations) == destination_count:
+        destination_materials = [materials[identity] for identity in destinations if identity in materials]
+        independent_slots = [material.deck_slot for material in [*tips, *destination_materials]]
+        source_slot = source_materials[0].deck_slot if source_materials else None
+        if (len(destination_materials) != destination_count or None in independent_slots
+                or len(independent_slots) != len(set(independent_slots)) or source_slot in independent_slots):
+            issues.append("quadrant layout: propose distinct deck slots for four tip racks, two destinations, and the shared source stack")
+    head_type = str(context.get("head_type") or "")
+    if not head_type.startswith("HT_384_") or len(sources) != source_count or len(destinations) != destination_count:
+        return issues
+    expected_pairs = {(source_id, destination_id) for source_id in sources for destination_id in destinations}
+    actual_pairs = [(step.source, step.destination) for step in transfers]
+    if len(transfers) != source_count * destination_count or set(actual_pairs) != expected_pairs or len(actual_pairs) != len(set(actual_pairs)):
+        issues.append(f"quadrant layout: use exactly {source_count * destination_count} full-head transfers, one from each source to each destination")
+    anchors_by_source: dict[str, set[str | None]] = {}
+    for step in transfers:
+        if step.source:
+            anchors_by_source.setdefault(step.source, set()).add(step.destination_anchor)
+    if any(len(anchors) != 1 or not anchors <= {"A1", "A2", "B1", "B2"} for anchors in anchors_by_source.values()):
+        issues.append("quadrant layout: each source must use one of A1/A2/B1/B2 on both destination plates")
+    elif len({next(iter(anchors)) for anchors in anchors_by_source.values()}) != source_count:
+        issues.append("quadrant layout: different sources must occupy different 1536 quadrants")
+    if any(step.source_anchor != "A1" for step in transfers):
+        issues.append("quadrant layout: full 384-well source transfers start at source_anchor A1")
+    if _requested_deck_layout(source) and len(source_materials) == source_count:
+        source_order = list(dict.fromkeys(step.source for step in transfers if step.source))
+        top_first = [material.id for material in sorted(source_materials, key=lambda item: item.stack_order or 0, reverse=True)]
+        if source_order != top_first:
+            issues.append("quadrant layout: process the source stack top-to-bottom; destack each top plate before pipetting")
+        else:
+            events = _ordered_steps(plan)
+            occupied = {material.deck_slot for material in plan.materials if material.deck_slot is not None}
+            stage_slots: list[int | None] = []
+            processed_slots: list[int | None] = []
+            prior_park = -1
+            for index, source_id in enumerate(top_first):
+                transfer_positions = [position for position, step in enumerate(events)
+                                      if step.kind == "transfer" and step.source == source_id]
+                if not transfer_positions:
+                    continue
+                first, last = min(transfer_positions), max(transfer_positions)
+                access_kind = "destack_plate" if index < source_count - 1 else "move_plate"
+                access = [(position, step) for position, step in enumerate(events)
+                          if prior_park < position < first and step.kind == access_kind and step.material == source_id]
+                park_kind = "move_plate" if index == 0 else "stack_plate"
+                next_first = min((position for position, step in enumerate(events)
+                                  if step.kind == "transfer" and step.source == top_first[index + 1]),
+                                 default=len(events)) if index + 1 < source_count else len(events)
+                park = [(position, step) for position, step in enumerate(events)
+                        if last < position < next_first and step.kind == park_kind and step.material == source_id]
+                if not access or not park:
+                    issues.append(f"quadrant layout: {source_id} needs {access_kind} into the work slot before its transfers and {park_kind} into the processed slot afterward")
+                    continue
+                stage_slots.append(access[-1][1].destination_slot)
+                processed_slots.append(park[0][1].destination_slot)
+                prior_park = park[0][0]
+            if (len(stage_slots) == source_count and len(processed_slots) == source_count
+                    and (None in stage_slots or len(set(stage_slots)) != 1
+                         or None in processed_slots or len(set(processed_slots)) != 1
+                         or stage_slots[0] == processed_slots[0]
+                         or stage_slots[0] in occupied or processed_slots[0] in occupied)):
+                issues.append("quadrant layout: reserve one initially empty work slot and one distinct initially empty processed-stack slot")
+    return issues
+
+
+def _add_isolated_source_setup_questions(plan: "ProtocolPlan", source: IngestedProtocol) -> None:
+    """Require explicit review of the rack order and within-source reuse policy."""
+    from .models import ProtocolQuestion
+
+    if not _quadrant_request(source):
+        return
+    text = " ".join(paragraph.text for paragraph in source.paragraphs).lower()
+    if "cross contamination" not in text and "cross-contamination" not in text:
+        return
+    source_order = list(dict.fromkeys(step.source for step in _transfer_steps(plan) if step.source))
+    rack_ids = [material.id for material in plan.materials if material.role == "tips"]
+    if len(source_order) < 2 or len(source_order) != len(rack_ids):
+        return
+    pairing = ", ".join(f"{source_id} → {rack_id}" for source_id, rack_id in zip(source_order, rack_ids))
+    questions = [
+        ProtocolQuestion(id="source-isolation:tip-strategy", path="/setup/tip_strategy",
+                         prompt="Confirm fresh_each_source: use one clean tip set for both destination transfers from a source, then change tips before the next source."),
+        ProtocolQuestion(id="source-isolation:rack-order", path="/setup/tip_rack_ids",
+                         prompt=f"Confirm rack order for top-to-bottom source processing. Proposed pairing: {pairing}. Verify each rack is separately loaded with the requested tip type."),
+        ProtocolQuestion(id="source-isolation:reuse-reason", path="/setup/tip_reuse_reason",
+                         prompt="Confirm the reuse rationale: both 1536 destinations start empty, and each source's ST10 tip set touches only that source and its two destinations."),
+        ProtocolQuestion(id="source-isolation:tip-disposal", path="/setup/tip_disposal_id",
+                         prompt="Confirm where each used tip set goes. Returning it to its own now-empty rack is a proposal; those tips must never be picked again."),
+    ]
+    plan.questions = [question for question in plan.questions if question.id not in {new.id for new in questions}]
+    plan.questions.extend(questions)
+    destinations = {step.destination for step in _transfer_steps(plan) if step.destination}
+    plan.questions = [question for question in plan.questions if not question.id.startswith("1536-alignment:")]
+    for index, material in enumerate(plan.materials):
+        if material.id in destinations:
+            plan.questions.append(ProtocolQuestion(
+                id=f"1536-alignment:{material.id}", path=f"/materials/{index}/deck_slot",
+                prompt=f"Confirm the 1536-well alignment and teachpoint for {material.name} at its proposed deck slot before execution.",
+            ))
+
+
+def _recognized_quadrant_plan(
+    source: IngestedProtocol, context: dict[str, Any], *, answers: dict[str, Any] | None,
+    feedback: list[str] | None,
+) -> "ProtocolPlan | None":
+    """Build a review draft for one unambiguous, common full-head request.
+
+    This narrow path avoids a long model generation for the exact four-source,
+    two-destination workflow. It only uses catalog entries with unique verified
+    geometry and leaves all inventory and experimental setup for review.
+    Any extra instruction, later correction, or ambiguous catalog falls through
+    to the local model.
+    """
+    from .models import ProtocolPlan
+
+    if len(source.paragraphs) != 1 or answers or feedback or context.get("current_plan"):
+        return None
+    request = re.sub(r"\s+", " ", source.paragraphs[0].text.strip().lower())
+    pattern = (
+        r"i have (?:4|four) 384(?:[- ]well)? plates and i want to transfer "
+        r"5\s*(?:ul|µl|μl) from each plate into the (?:4|four) quadrants of "
+        r"(?:2|two) 1536(?:[- ]well)? plates[.!?]? "
+        r"i can(?:not|'?t) have any cross[- ]contamination[.!?]? "
+        r"please help me (?:layout|lay out) the deck and write the protocol "
+        r"to do the transfer[.!?]?"
+    )
+    if not re.fullmatch(pattern, request):
+        return None
+    if not str(context.get("head_type") or "").startswith("HT_384_") or context.get("has_gripper") is not True:
+        return None
+
+    def plates(wells: int, rows: int, cols: int, spacing: float, min_capacity: float) -> list[dict[str, Any]]:
+        return [row for row in context.get("labware") or [] if isinstance(row, dict)
+                and row.get("base_class") == "microplate"
+                and row.get("wells") == wells and row.get("rows") == rows and row.get("cols") == cols
+                and math.isclose(float(row.get("spacing_x_mm") or 0), spacing, abs_tol=1e-6)
+                and math.isclose(float(row.get("spacing_y_mm") or 0), spacing, abs_tol=1e-6)
+                and float(row.get("well_volume_ul") or 0) >= min_capacity]
+
+    sources = plates(384, 16, 24, 4.5, 10)
+    destinations = plates(1536, 32, 48, 2.25, 5)
+    tip_pairs = [row for row in context.get("tipbox_choices") or [] if isinstance(row, dict)
+                 and row.get("tip_definition_id") == "st_10ul"
+                 and row.get("wells") == 384 and row.get("rows") == 16 and row.get("cols") == 24
+                 and row.get("execution_ready") is True
+                 and float(row.get("tip_capacity_ul") or 0) >= 5]
+    if len(sources) != 1 or len(destinations) != 1 or len(tip_pairs) != 1:
+        return None
+    source_labware, destination_labware, tip_pair = sources[0], destinations[0], tip_pairs[0]
+    citation = source.paragraphs[0].id
+    materials: list[dict[str, Any]] = [
+        {"id": f"source_{number}", "name": f"384 source plate {number} (proposed bottom-to-top order)",
+         "role": "liquid", "labware_id": source_labware["id"], "deck_slot": 9,
+         "stack_order": number - 1}
+        for number in range(1, 5)
+    ]
+    materials.extend([
+        {"id": "destination_1", "name": "1536 destination plate 1", "role": "liquid",
+         "labware_id": destination_labware["id"], "deck_slot": 5},
+        {"id": "destination_2", "name": "1536 destination plate 2", "role": "liquid",
+         "labware_id": destination_labware["id"], "deck_slot": 8},
+    ])
+    materials.extend([
+        {"id": f"tips_source_{number}", "name": f"384 ST10 tips dedicated to source plate {number}",
+         "role": "tips", "labware_id": tip_pair["labware_id"],
+         "tip_definition_id": tip_pair["tip_definition_id"], "deck_slot": 5 - number}
+        for number in range(4, 0, -1)
+    ])
+    quadrant = {1: "A1", 2: "A2", 3: "B1", 4: "B2"}
+    steps: list[dict[str, Any]] = []
+    for index, number in enumerate(range(4, 0, -1)):
+        source_id = f"source_{number}"
+        steps.append({"id": f"access_source_{number}",
+                      "kind": "destack_plate" if index < 3 else "move_plate",
+                      "description": "Proposed top-first access from source stack to empty work slot 6.",
+                      "material": source_id, "destination_slot": 6,
+                      "source_paragraph_ids": [citation]})
+        for destination_number in (1, 2):
+            steps.append({"id": f"source_{number}_to_destination_{destination_number}",
+                          "kind": "transfer", "description": ("Transfer every source well to the same "
+                          f"proposed quadrant {quadrant[number]} on destination {destination_number}."),
+                          "source": source_id, "destination": f"destination_{destination_number}",
+                          "source_anchor": "A1", "destination_anchor": quadrant[number],
+                          "volume_ul": 5.0, "source_paragraph_ids": [citation],
+                          "source_values": [{"field": "volume_ul", "value": 5.0, "unit": "uL",
+                                             "paragraph_id": citation}]})
+        steps.append({"id": f"park_source_{number}",
+                      "kind": "move_plate" if index == 0 else "stack_plate",
+                      "description": "Proposed processed-source stack at slot 7.",
+                      "material": source_id, "destination_slot": 7,
+                      "source_paragraph_ids": [citation]})
+    plan = ProtocolPlan.model_validate({
+        "name": "Four-source 384-to-1536 quadrant transfer",
+        "description": ("Review draft: four 384 sources stacked at slot 9; separate ST10 racks at "
+                        "slots 1–4; 1536 destinations at slots 5 and 8; slots 6 and 7 are "
+                        "initially empty work and processed-stack positions. Source identity, "
+                        "quadrant map, plate alignment, deck clearance, tip inventory and "
+                        "liquid-handling settings require scientist confirmation."),
+        "materials": materials, "steps": steps,
+        "questions": [
+            {"id": "draft:source-order", "path": "/materials/0/stack_order",
+             "prompt": "Confirm physical source identity and bottom-to-top stack order: source 1 bottom through source 4 top."},
+            {"id": "draft:plate-types", "path": "/materials/0/labware_id",
+             "prompt": "Confirm that the proposed catalog 384 and 1536 plate types match the physical plates."},
+            {"id": "draft:starting-volume", "path": "/materials/0/initial_volume_ul",
+             "prompt": "Confirm starting and dead volume for every source well; each source supplies 5 uL to each of two destinations."},
+            {"id": "draft:liquid-class", "path": "/setup/liquid_class",
+             "prompt": "Choose and confirm a validated 5 uL ST10 liquid class for this source and destination geometry."},
+            {"id": "draft:head-mode", "path": "/setup/head_mode",
+             "prompt": "Confirm the 384-channel all-barrels head mode and full-plate footprint before execution."},
+            {"id": "draft:deck-clearance", "path": "/materials/3/deck_slot",
+             "prompt": "Confirm source-stack gripper clearance and the proposed deck slots 1–9, including empty work slot 6 and processed slot 7."},
+            {"id": "draft:quadrants", "path": "/steps/0/destination_slot",
+             "prompt": "Confirm source-to-quadrant mapping on BOTH destinations: source 1→A1, 2→A2, 3→B1, 4→B2."},
+        ],
+    })
+    return plan
+
+
 def _check_tipbox_guidance(
     plan: "ProtocolPlan", source: IngestedProtocol, context: dict[str, Any],
 ) -> tuple[list[str], list[dict[str, Any]]]:
@@ -397,6 +780,7 @@ def _check_tipbox_guidance(
     issues: list[str] = []
     recommendations: list[dict[str, Any]] = []
     latest_text = source.paragraphs[-1].text if source.paragraphs else ""
+    layout_requested = _requested_deck_layout(source)
     for index, material in enumerate(plan.materials):
         if material.role != "tips":
             continue
@@ -441,6 +825,8 @@ def _check_tipbox_guidance(
             continue
         for field_name in ("deck_slot", "available_tips", "initial_volume_ul", "dead_volume_ul", "well_volumes_ul"):
             value = getattr(material, field_name)
+            if field_name == "deck_slot" and layout_requested and value is not None:
+                continue
             if value not in (None, {}) and value != previous.get(field_name):
                 issues.append(f"{path}/{field_name}: a catalog recommendation does not establish placement or inventory; preserve the prior value or leave it unknown")
         recommendations.append({
@@ -449,6 +835,7 @@ def _check_tipbox_guidance(
             "labware_id": pair[0], "tip_definition_id": pair[1],
             "scientist_confirmed": False,
             "question_id": recommendation_id,
+            "deck_slot_proposal": material.deck_slot if layout_requested else None,
         })
     return issues, recommendations
 
@@ -457,10 +844,13 @@ def _add_tipbox_confirmation_questions(plan: "ProtocolPlan", recommendations: li
     from .models import ProtocolQuestion
 
     for recommendation in recommendations:
+        deck_slot = recommendation.get("deck_slot_proposal")
+        placement = (f"confirm proposed deck slot {deck_slot}" if deck_slot is not None
+                     else "specify its deck slot")
         question = ProtocolQuestion(
             id=recommendation["question_id"], path=recommendation["path"] + "/labware_id",
             prompt=(f"Confirm the catalog recommendation {recommendation['labware_id']} with "
-                    f"tip {recommendation['tip_definition_id']} for the active head, and specify its deck slot and available tips."),
+                    f"tip {recommendation['tip_definition_id']} for the active head, {placement}, and verify its available tips."),
         )
         plan.questions = [q for q in plan.questions if q.id != question.id]
         plan.questions.append(question)
@@ -518,6 +908,26 @@ async def extract_protocol_plan(
         raise ProtocolGroundingError("Select at least one source paragraph before extracting a plan.")
     cfg = config or LocalLLMConfig.from_env()
     supplied_context = _tipbox_context(context, source)
+    recognized = _recognized_quadrant_plan(source, supplied_context, answers=answers, feedback=feedback)
+    if recognized is not None:
+        issues = _check_grounding(recognized, source)
+        issues.extend(_check_quadrant_materials(recognized, source, supplied_context))
+        tipbox_issues, recommendations = _check_tipbox_guidance(recognized, source, supplied_context)
+        issues.extend(tipbox_issues)
+        if issues:
+            raise ProtocolGroundingError("The catalog-backed quadrant draft failed validation: " + "; ".join(issues[:8]))
+        _add_tipbox_confirmation_questions(recognized, recommendations)
+        _add_isolated_source_setup_questions(recognized, source)
+        logger.info("protocol_catalog_quadrant_draft", source_id=source.source_id,
+                    head_type=supplied_context.get("head_type"), material_count=len(recognized.materials),
+                    step_count=len(recognized.steps))
+        return ExtractionResult(plan=recognized, metadata={
+            "provider": "catalog_template", "model": None, "http_attempts": 0,
+            "extraction_attempts": 0, "attempts": [], "layout_template": "four_384_to_two_1536",
+            "source_id": source.source_id,
+            "source_paragraph_ids": [paragraph.id for paragraph in source.paragraphs],
+            "catalog_recommendations": recommendations,
+        })
     user_payload: dict[str, Any] = {"source": source.model_dump(), "context": supplied_context, "answers": answers or {}}
     if feedback:
         user_payload["validation_feedback"] = feedback
@@ -541,10 +951,12 @@ async def extract_protocol_plan(
             issues = [f"{'.'.join(str(v) for v in error['loc'])}: {error['msg']}" for error in exc.errors()][:30]
         else:
             issues = _check_grounding(plan, source)
+            issues.extend(_check_quadrant_materials(plan, source, supplied_context))
             tipbox_issues, recommendations = _check_tipbox_guidance(plan, source, supplied_context)
             issues.extend(tipbox_issues)
             if not issues:
                 _add_tipbox_confirmation_questions(plan, recommendations)
+                _add_isolated_source_setup_questions(plan, source)
                 return ExtractionResult(plan=plan, metadata={
                     **result.metadata, "extraction_attempts": attempt + 1, "attempts": history,
                     "source_id": source.source_id, "source_paragraph_ids": [p.id for p in source.paragraphs],

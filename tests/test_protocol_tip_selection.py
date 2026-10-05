@@ -36,6 +36,7 @@ def fixture(head="HT_384_D_70", *, interleaved=False):
     rack = context["labware"][1]
     if interleaved:
         rack.update(rows=16, cols=24, wells=384, spacing_x_mm=4.5, spacing_y_mm=4.5)
+    plan["materials"][2]["available_tips"] = "full"
     # Explicitly synthetic dimensions, not inferred measurements for real tips.
     rack.update(tip_definition_id="test-small", supported_tip_ids=["test-small", "test-large"])
     context.update(head_type=head, tip_definitions=[

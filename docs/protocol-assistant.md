@@ -68,6 +68,23 @@ The checked-in catalog currently records these box–tip links:
 | 96LT; 8LT where its selected footprint fits | `lw-b0704e550d2a` (96 LT200, 8×12) | `lt_200ul` | Tip length needs confirmation before execution. |
 | 96LT; 8LT where its selected footprint fits | `lw-cadcb0f0f9c1`, `lw-0c182cad7c78` (96 LT250, 8×12) | `lt_250ul` | 55.2 mm length is recorded for the LT head. |
 
+`lw-96st-provisional` is a **visual draft** for a requested 96-position ST box,
+not an approved rack. It uses the 96LT grid (8×12, 9 mm pitch) and every other
+opening of the checked-in 384ST mesh (about 3.3 mm diameter, 25 mm deep). Its
+3D frame measures about 127.7 × 85.4 × 49.5 mm. The catalog footprint
+(127.76 × 85.48 mm) and 50 mm thickness are inherited local values, not
+measurements of a physical 96ST box. The 2.25 mm X/Y ST teachpoint offsets
+come from [Agilent's Bravo guide](https://automation.help.agilent.com/AutomationSolutionsKB14/Bravo%20User%20Guide/SetUp.04.08.html).
+Agilent's [consumables guide](https://www.agilent.com/cs/library/brochures/brochure-pipette-and-microplate-5994-5118en-agilent.pdf)
+documents ST tips in 384-position racks for 96ST heads; we found no published
+specification for a distinct 96-position ST rack. The draft remains marked
+provisional, is restricted to the two 96ST head IDs, and has no linked tip
+types. Tip selection and pickup stay blocked until the scientist confirms the
+physical rack, dimensions and suitable tip types. Compare the model in the
+Labware Catalog against the source asset:
+
+![Existing 384ST and provisional 96ST models](media/96st-provisional-comparison.png)
+
 The 384 ST box's ST10/ST70 sharing was confirmed by the scientist. The
 [Agilent consumables guide](https://www.agilent.com/cs/library/brochures/brochure-pipette-and-microplate-5994-5118en-agilent.pdf)
 lists 384-position ST tip racks for both 96ST and 384ST heads, and LT250 rack
@@ -76,6 +93,60 @@ teach-tip record for its own workflow; do not substitute it for the 96LT
 record. Head/box/tip compatibility in the
 catalog does not certify this machine's pickup/ejection calibration or the
 liquid class for a particular protocol.
+
+## Four-source 384-to-1536 quadrant draft
+
+For a request to transfer 5 µL from each well of four 384-well source plates
+into the same assigned quadrant on **both** initially empty 1536-well plates,
+the 384ST-head draft keeps four separate source materials, four separate
+384-position ST10 tip boxes, and two destination materials.
+The exact example request uses a catalog-backed draft when the active profile
+has a 384ST head, gripper, and one verified matching plate and ST10 rack type.
+This avoids a long local-model completion for this common layout; the result
+still requires the same scientist review and validation as other drafts.
+
+A reviewable nine-position layout is:
+
+| Deck position | Draft assignment |
+| --- | --- |
+| 1–4 | Four distinct 384 ST10 tip boxes, one per source plate |
+| 5 and 8 | Two 1536-well destination plates |
+| 6 | Empty working position for the current source plate |
+| 7 | Empty position for the processed source-plate stack |
+| 9 | Four source plates stacked bottom-to-top |
+
+The Designer shows the proposed seven occupied positions and the source stack
+before setup approval. This example is generated from the exact 16-step draft
+using a test catalog with matching plate and ST10 rack geometry; the scientist
+must confirm the actual catalog items and deck positions.
+
+![Proposed seven-position deck with four source plates stacked at position 9](media/1536-transfer-deck-layout.png)
+
+The [full Designer draft](media/1536-transfer-draft-designer.png) shows the
+read-only step graph alongside that deck layout.
+
+The draft processes the stack top-first. Each source is moved to 6, transferred
+to one of A1, A2, B1 or B2 on each destination, and moved to 7 before the
+next source is accessed. Its 384-tip set is used only for that source's two
+transfers, returned to its own emptied box as **spent**, and never selected
+again. This is eight full-head 5 µL transfers and 1,536 distinct tips. Each
+source well supplies 10 µL total; each destination well receives 5 µL. The
+compiled workflow asks the operator to inspect the four fresh racks before
+every run and to remove and label the returned tips as spent afterward.
+The assistant asks for confirmation of source-to-quadrant and source-to-rack
+pairings, the stack order, actual plate IDs and starting/dead volumes, liquid
+class, and the 1536-well alignment and teachpoints. The catalog's 1536 Labcyte
+entry is a 32×48 grid at 2.25 mm pitch.
+
+[Agilent's replication guide](https://automation.help.agilent.com/AutomationSolutionsKB13/vworks4_ug/08_LiquidHandling.12.15.html)
+describes four 384-well sources into 1536-well quadrants and changing the
+tip box with each source plate. Its
+[384ST tip compatibility table](https://www.agilent.com/cs/library/technicaloverviews/public/te-bravo-automated-liquid-handling-384st-10-ul-tip-5990-3645en-agilent.pdf)
+allows ST10 tips with 1536-well plates and excludes ST70. The checked-in
+destination catalog lists 5.5 µL per well; 5 µL is close to that limit, so
+confirm the exact destination plate and calibrated dispense behavior before
+approval. [Beckman's 1536LDV consumables guide](https://media.beckman.com/-/media/pdf-assets/brochures/echo-acoustic-liquid-handler-consumables-brochure.pdf?rev=121d941cb16b47829be390bd8641fe59)
+gives a 1–5.5 µL working range for its 1536LDV plates.
 
 ## Prepare a protocol
 
@@ -111,7 +182,8 @@ and bounded nested repeats. Head footprints must be physically reachable.
 Unsupported operations must remain explicit manual handoffs.
 
 Tip supply racks and disposal containers are separate materials. A supply can
-be full or list exactly which tips remain. An empty tip box used for disposal
+be marked **inspected full** or list exactly which fresh tips remain. An
+unconfirmed rack blocks compilation. An empty tip box used for disposal
 must be marked explicitly empty. Reusing tips requires a written justification.
 Manual handoffs eject tips before pausing; return any manually handled labware
 to its declared location before confirming completion.

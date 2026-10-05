@@ -11,7 +11,8 @@ from .models import ProtocolPlan, ProtocolSetup
 from .validation import _sources, prepare_protocol
 
 ALLOWED_NODE_TYPES = frozenset({"flow/Start", "flow/End", "tips/TipsOn", "tips/TipsOff",
-    "liquid/Aspirate", "liquid/Dispense", "liquid/Mix", "plate/PickPlace", "system/Wait", "system/Manual"})
+    "liquid/Aspirate", "liquid/Dispense", "liquid/Mix", "plate/PickPlace", "plate/Stack",
+    "plate/Destack", "system/Wait", "system/Manual"})
 
 
 class ProtocolCompilationError(ValueError):

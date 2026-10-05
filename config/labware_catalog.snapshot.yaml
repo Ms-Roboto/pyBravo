@@ -27,8 +27,8 @@ labware:
   lid_resting_height_mm: 0.0
   lid_departure_height_mm: 0.0
   max_robot_handling_speed: fast
-  rows: 0
-  cols: 0
+  rows: 32
+  cols: 48
   well_depth_mm: 5.2
   offset_x_mm: 3.375
   offset_y_mm: 3.375
@@ -369,3 +369,38 @@ labware:
   model_3d: null
   can_mount: false
   can_be_mounted: false
+- id: lw-96st-provisional
+  name: 96 ST Tip Box (provisional model)
+  provisional: true
+  compatible_head_types:
+  - HT_96_D_70
+  - HT_96_D_70_S2
+  kind: sbs_plate
+  vendor: ''
+  catalog_number: ''
+  description: >-
+    Proposed 96-position ST rack for visual review only. The 8x12 grid at 9 mm
+    pitch follows the requested 96LT spacing; the 3.3 mm support-hole opening
+    is derived from the checked-in 384ST mesh. The external 127.76 x 85.48 mm
+    footprint and 50 mm catalog thickness are borrowed from the existing 384ST
+    record, not confirmed for a physical 96ST product. Agilent documents 2.25 mm
+    ST teachpoint-to-well offsets. No tip types are approved for this rack until
+    the scientist confirms the model and physical dimensions.
+  base_class: tip_box
+  wells: 96
+  length_mm: 127.76
+  width_mm: 85.48
+  height_mm: 50.0
+  stack_height_mm: 0.0
+  gripper_offset_mm: 10.0
+  rows: 8
+  cols: 12
+  offset_x_mm: 2.25
+  offset_y_mm: 2.25
+  spacing_x_mm: 9.0
+  spacing_y_mm: 9.0
+  well_diameter_mm: 3.3
+  disposable_tip_capacity_ul: 0.0
+  tip_definition_id: ''
+  supported_tip_ids: []
+  model_3d: /labware-assets/lw-96st-provisional/96_ST_Tip_Box_Provisional.gltf

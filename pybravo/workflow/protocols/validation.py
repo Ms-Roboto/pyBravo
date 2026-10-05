@@ -218,7 +218,10 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                 "transfer": {"source", "destination", "source_anchor", "destination_anchor", "volume_ul"},
                 "mix": {"material", "anchor", "volume_ul", "cycles"},
                 "wait": {"duration_s"}, "manual": {"message", "duration_s"},
-                "move_plate": {"material", "destination_slot"}, "repeat": set(),
+                "move_plate": {"material", "destination_slot"},
+                "stack_plate": {"material", "destination_slot"},
+                "destack_plate": {"material", "destination_slot"},
+                "repeat": set(),
             }[step.kind]
             for unused in parameter_fields - allowed_fields:
                 if getattr(step, unused) is not None:
@@ -253,7 +256,9 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
     materials: dict[str, Any] = {}
     definitions: dict[str, dict] = {}
     locations: dict[str, int] = {}
-    occupancy: dict[int, str] = {}
+    # Each deck slot holds material IDs in bottom-to-top order.
+    occupancy: dict[int, list[str]] = {}
+    slot_materials: dict[int, list[tuple[int, Any]]] = {}
     volumes: dict[str, dict[tuple[int, int], float]] = {}
     fresh_tips: dict[str, set[tuple[int, int]]] = {}
     discarded_tips: dict[str, set[tuple[int, int]]] = {}
@@ -268,24 +273,29 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             result.issue("unknown_labware", path + "/labware_id", "Choose labware from the active catalog.", f"Which catalog labware holds {material.name}?")
             continue
         definitions[material.id] = definition
+        if definition.get("provisional"):
+            result.issue("provisional_labware", path + "/labware_id",
+                         "Provisional labware is for visual review only and cannot be used in an executable protocol.",
+                         f"Which verified catalog labware replaces {material.name}?")
         slot = material.deck_slot
         if slot is None or not 1 <= slot <= 9:
             result.issue("deck_slot", path + "/deck_slot", "Deck slot must be an integer from 1 to 9.", f"Which deck slot holds {material.name}?")
-        elif slot in occupancy:
-            result.issue("deck_collision", path + "/deck_slot", f"Deck slot {slot} is already assigned to {occupancy[slot]}.")
         else:
             locations[material.id] = slot
-            occupancy[slot] = material.id
-            result.deck[str(slot)] = [{"labware_id": material.labware_id, "name": material.name,
+            slot_materials.setdefault(slot, []).append((i, material))
+            deck_entries[material.id] = {"labware_id": material.labware_id, "name": material.name,
                 "kind": definition.get("kind", ""), "base_class": definition.get("base_class", ""),
                 "wells": definition.get("wells", 0), "is_lidded": False, "is_sealed": False,
-                "tip_definition_id": selected_tip_id(material.tip_definition_id, definition) or ""}]
-            deck_entries[material.id] = result.deck[str(slot)][0]
+                "tip_definition_id": selected_tip_id(material.tip_definition_id, definition) or ""}
             if _is_tip_box(definition):
-                result.deck[str(slot)][0].update(
-                    tipbox_fill_state="empty" if material.role == "waste" or material.available_tips == [] else "full",
-                    available_tips=material.available_tips,
-                )
+                if material.role == "waste" or material.available_tips is not None:
+                    deck_entries[material.id].update(
+                        tipbox_fill_state="empty" if material.role == "waste" or material.available_tips == [] else "full",
+                    )
+                    if isinstance(material.available_tips, list):
+                        deck_entries[material.id]["available_tips"] = material.available_tips
+                else:
+                    deck_entries[material.id]["tip_inventory_status"] = "unconfirmed"
         rows, cols = int(definition.get("rows") or 0), int(definition.get("cols") or 0)
         if material.role == "liquid":
             if rows <= 0 or cols <= 0 or not _positive(definition.get("well_volume_ul")):
@@ -311,13 +321,20 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         elif material.role == "tips":
             if not _is_tip_box(definition) or rows <= 0 or cols <= 0 or rows * cols != definition.get("wells"):
                 result.issue("tip_labware", path + "/labware_id", "Tip supplies must use a catalog tip box with valid geometry.")
-            cells = {(r, c) for r in range(rows) for c in range(cols)}
-            if material.available_tips is not None:
+            allowed_cells = {(r, c) for r in range(rows) for c in range(cols)}
+            cells: set[tuple[int, int]] = set()
+            if material.available_tips is None:
+                result.issue("tip_inventory_unconfirmed", path + "/available_tips",
+                             "A scientist must confirm the actual fresh-tip wells before this protocol can be compiled.",
+                             f"Which fresh tip wells are present in {material.name}?")
+            elif material.available_tips == "full":
+                cells = allowed_cells
+            else:
                 chosen: set[tuple[int, int]] = set()
                 for anchor in material.available_tips:
                     try:
                         cell = well_cell(anchor)
-                        if cell not in cells or cell in chosen:
+                        if cell not in allowed_cells or cell in chosen:
                             raise ValueError("Tip inventory must name distinct existing wells.")
                         chosen.add(cell)
                     except ValueError as error:
@@ -330,6 +347,33 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             discarded_tips[material.id] = set()
         elif not any(x in str(definition.get("kind", "")) + " " + str(definition.get("base_class", "")) for x in ("trash", "waste")):
             result.issue("waste_labware", path + "/labware_id", "Tip disposal requires a catalog waste receptacle or an explicitly empty tip box.")
+    for slot, members in slot_materials.items():
+        if len(members) == 1:
+            index, material = members[0]
+            if material.stack_order not in (None, 0):
+                result.issue("stack_order", f"/materials/{index}/stack_order", "A single plate must have stack_order 0 or omit it.")
+            ordered = members
+        else:
+            orders = [material.stack_order for _, material in members]
+            if sorted(order for order in orders if order is not None and order >= 0) != list(range(len(members))) or len(set(orders)) != len(members):
+                if all(order is None for order in orders):
+                    result.issue("deck_collision", f"/materials/{members[1][0]}/deck_slot",
+                                 f"Deck slot {slot} has multiple materials without an explicit stack order.")
+                for index, _ in members:
+                    result.issue("stack_order", f"/materials/{index}/stack_order", f"Slot {slot} needs unique stack_order values 0 through {len(members) - 1}, bottom to top.")
+                ordered = members
+            else:
+                ordered = sorted(members, key=lambda pair: pair[1].stack_order)
+            for index, material in members:
+                definition = definitions[material.id]
+                if material.role != "liquid" or _is_tip_box(definition):
+                    result.issue("stack_labware", f"/materials/{index}/deck_slot", "Only liquid plates may share a deck slot as a stack.")
+                if material.labware_id != members[0][1].labware_id:
+                    result.issue("stack_labware", f"/materials/{index}/labware_id", "A reviewed stack must use the same catalog plate type throughout.")
+                if not _positive(definition.get("height_mm")) or not _positive(definition.get("stack_height_mm")):
+                    result.issue("stack_geometry", f"/materials/{index}/labware_id", "Stacked plates need catalog height and stacking height before execution.")
+        occupancy[slot] = [material.id for _, material in ordered]
+        result.deck[str(slot)] = [deck_entries[material.id] for _, material in ordered]
     mode, head_type, liquid_class = None, None, None
     if liquid_steps:
         try:
@@ -361,8 +405,8 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                     if count is not None and count != getattr(mode, field_name):
                         result.issue("head_count", f"/setup/head_mode/{field_name}", "The specified channel count does not match this head mode.")
         if setup.tip_strategy is None:
-            result.issue("tip_strategy", "/setup/tip_strategy", "Select an explicit tip strategy.", "Use fresh tips for each liquid step, or intentionally reuse them?")
-        if setup.tip_strategy == "reuse_all" and not (setup.tip_reuse_reason or "").strip():
+            result.issue("tip_strategy", "/setup/tip_strategy", "Select an explicit tip strategy.", "Use fresh tips for each step or each source, or intentionally reuse them?")
+        if setup.tip_strategy in {"reuse_all", "fresh_each_source"} and not (setup.tip_reuse_reason or "").strip():
             result.issue("tip_reuse_reason", "/setup/tip_reuse_reason", "Tip reuse requires a scientist's contamination assessment.", "Why is reusing these tips acceptable for this procedure?")
         liquid_classes = _catalog(context, "liquid_classes")
         liquid_class = liquid_classes.get(setup.liquid_class)
@@ -377,13 +421,36 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         for material_id in setup.tip_rack_ids:
             if material_id not in fresh_tips:
                 result.issue("tip_supply", "/setup/tip_rack_ids", f"{material_id!r} is not a valid tip supply.")
-        disposal = materials.get(setup.tip_disposal_id)
-        if disposal is None or disposal.role != "waste" or disposal.id not in locations:
-            result.issue("tip_disposal", "/setup/tip_disposal_id", "Select a configured waste material for used tips.", "Where should used tips be discarded?")
+        if setup.tip_disposal_id == "return_to_source_rack":
+            if setup.tip_strategy != "fresh_each_source":
+                result.issue("tip_disposal", "/setup/tip_disposal_id", "Returning used tips to their own supply racks requires fresh_each_source, so spent tips cannot be reused for another source.")
+        else:
+            disposal = materials.get(setup.tip_disposal_id)
+            if disposal is None or disposal.role != "waste" or disposal.id not in locations:
+                result.issue("tip_disposal", "/setup/tip_disposal_id", "Select a configured waste material or return_to_source_rack for used tips.", "Where should used tips be discarded?")
     tips_used = 0
     loaded_tip: dict | None = None
+    returned_tips: dict[str, set[tuple[int, int]]] = {}
+    rack_owner: dict[str, str] = {}
     consumed: dict[str, float] = {}
     run_steps: list[dict] = []
+    returned_supply_racks = (
+        [material_id for material_id in setup.tip_rack_ids if material_id in fresh_tips and material_id in locations]
+        if setup.tip_disposal_id == "return_to_source_rack" and liquid_steps else []
+    )
+
+    def operator_checkpoint(phase: str, message: str) -> None:
+        result.operations.append({"type": "system/Manual", "properties": {"message": message},
+                                  "step_id": f"tip-rack-{phase}", "path": "/setup/tip_rack_ids",
+                                  "description": "Fresh-tip check" if phase == "preflight" else "Spent-tip removal",
+                                  "source_paragraph_ids": []})
+        run_steps.append({"id": f"tip-rack-{phase}", "kind": "manual", "message": message,
+                          "source_paragraph_ids": []})
+
+    if returned_supply_racks:
+        rack_labels = ", ".join(f"{material_id} (slot {locations[material_id]})" for material_id in returned_supply_racks)
+        operator_checkpoint("preflight", "Before every run, inspect fresh tip racks " + rack_labels +
+                            ". Confirm the recorded fresh-tip inventory and that none contains tips returned from a prior run.")
 
     def rack_selections(material_id: str, occupied: set[tuple[int, int]], purpose: str) -> list[TipSelection]:
         definition = definitions[material_id]
@@ -417,13 +484,20 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         result.operations.append({"type": node_type, "properties": properties, "step_id": step.id, "path": path,
                                   "description": step.description, "source_paragraph_ids": list(step.source_paragraph_ids)})
 
-    def pick_tips(step: ProtocolStep, path: str) -> None:
+    def pick_tips(step: ProtocolStep, path: str, source_id: str | None) -> None:
         nonlocal loaded_tip, tips_used
         if loaded_tip is not None or mode is None or head_type is None:
             return
         for material_id in setup.tip_rack_ids:
+            if setup.tip_strategy == "fresh_each_source" and material_id in rack_owner and rack_owner[material_id] != source_id:
+                continue
             definition = definitions.get(material_id)
             if definition is None or material_id not in locations or material_id not in fresh_tips:
+                continue
+            declared_heads = definition.get("compatible_head_types") or []
+            if declared_heads and head_type.name not in declared_heads:
+                result.issue("tip_rack_head_compatibility", "/setup/tip_rack_ids",
+                             f"Tip rack {material_id!r} is not approved for {head_type.name}.")
                 continue
             rows, cols = int(definition.get("rows") or 0), int(definition.get("cols") or 0)
             selections = rack_selections(material_id, fresh_tips[material_id], "pickup")
@@ -474,7 +548,10 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             cells = selected_tip_wells(rows, cols, selection)
             fresh_tips[material_id].difference_update(cells)
             tips_used += len(cells)
-            loaded_tip = {"capacity_ul": capacity, "rack": material_id, "tip_id": tip_id}
+            loaded_tip = {"capacity_ul": capacity, "rack": material_id, "tip_id": tip_id,
+                          "selection": selection, "cells": set(cells), "source": source_id}
+            if setup.tip_strategy == "fresh_each_source" and source_id is not None:
+                rack_owner[material_id] = source_id
             add("tips/TipsOn", {"location": locations[material_id], "head_mode": mode.to_dict(), **tip_properties(selection)}, step, path)
             return
         result.issue("tip_inventory_exhausted", path, "No compatible legal tip footprint remains in the selected supplies.")
@@ -483,12 +560,21 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         nonlocal loaded_tip
         if loaded_tip is None:
             return
-        material_id = setup.tip_disposal_id
+        material_id = loaded_tip["rack"] if setup.tip_disposal_id == "return_to_source_rack" else setup.tip_disposal_id
         if material_id not in locations or material_id not in definitions:
             loaded_tip = None
             return
         properties = {"location": locations[material_id]}
-        if material_id in discarded_tips and mode is not None:
+        if setup.tip_disposal_id == "return_to_source_rack":
+            # A full-head pickup empties its original positions. Return only
+            # to those exact positions; fresh_tips stays consumed permanently.
+            cells = loaded_tip["cells"]
+            already_returned = returned_tips.setdefault(material_id, set())
+            if cells & (already_returned | fresh_tips[material_id]):
+                result.issue("disposal_capacity", path, "The original rack wells are not empty for this used-tip return.")
+            already_returned.update(cells)
+            properties.update(tip_properties(loaded_tip["selection"]))
+        elif material_id in discarded_tips and mode is not None:
             definition = definitions[material_id]
             tip_id = loaded_tip["tip_id"]
             explicit = materials[material_id].tip_definition_id
@@ -519,6 +605,18 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         if material is None or material.role != "liquid" or definition is None or material_id not in locations:
             result.issue("liquid_material", path + "/" + field_name, "Choose a configured liquid material.", f"Which material is used as {field_name}?")
             return []
+        slot = locations[material_id]
+        if not occupancy.get(slot) or occupancy[slot][-1] != material_id:
+            result.issue("buried_plate", path + "/" + field_name,
+                         f"{material.name} is not the top plate at slot {slot}; destack the plates above it first.")
+            return []
+        # Agilent's Bravo compatibility guidance excludes ST70 tips from
+        # 1536-well microplates. The rack may support both ST10 and ST70, so
+        # the selected tip identity, not the box name, determines this check.
+        if definition.get("wells") == 1536 and loaded_tip is not None and loaded_tip["tip_id"] == "st_70ul":
+            result.issue("tip_plate_compatibility", path + "/" + field_name,
+                         "Agilent ST70 tips are not compatible with 1536-well plates; select an approved smaller ST tip.")
+            return []
         anchor_path = path + "/" + ({"source": "source_anchor", "destination": "destination_anchor"}.get(field_name, "anchor"))
         try:
             cell = well_cell(anchor or "")
@@ -542,7 +640,12 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             if not _positive(step.volume_ul):
                 result.issue("liquid_volume", path + "/volume_ul", "Pipetting volume must be finite and positive.", "What volume should be pipetted per channel (uL)?")
                 continue
-            pick_tips(step, path)
+            source_id = step.source if step.kind == "transfer" else step.material
+            if setup.tip_strategy == "fresh_each_source" and loaded_tip is not None and loaded_tip["source"] != source_id:
+                discard(step, path)
+            pick_tips(step, path, source_id)
+            if loaded_tip is not None:
+                details["tip_rack_id"] = loaded_tip["rack"]
             if loaded_tip and step.volume_ul > loaded_tip["capacity_ul"] + _EPS:
                 result.issue("tip_volume_exceeded", path + "/volume_ul", f"Volume exceeds the permitted tip/head capacity of {loaded_tip['capacity_ul']:g} uL.")
             liquid_props = {"volume": step.volume_ul, "liquid_class": (liquid_class or {}).get("name") or setup.liquid_class, "distance_from_bottom": setup.distance_from_bottom_mm,
@@ -601,7 +704,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                             props["duration_s"] = step.duration_s
                     add("system/Manual", props, step, path)
                     details["message"] = step.message
-        elif step.kind == "move_plate":
+        elif step.kind in {"move_plate", "stack_plate", "destack_plate"}:
             discard(step, path)
             if context.get("has_gripper") is not True:
                 result.issue("gripper_unavailable", path, "This instrument has no configured gripper; use a manual handoff instead.")
@@ -612,17 +715,52 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             if destination is None or not 1 <= destination <= 9:
                 result.issue("move_destination", path + "/destination_slot", "Specify a deck destination between 1 and 9.")
                 continue
-            if destination in occupancy:
+            source = locations[step.material]
+            if source == destination:
+                result.issue("move_collision", path + "/destination_slot", "Source and destination slots must differ.")
+                continue
+            if not occupancy.get(source) or occupancy[source][-1] != step.material:
+                result.issue("buried_plate", path + "/material", "Only the top plate of a stack may be moved.")
+                continue
+            definition = definitions.get(step.material)
+            if definition is None or (step.kind != "move_plate" and (materials[step.material].role != "liquid" or _is_tip_box(definition))):
+                result.issue("move_material", path + "/material", "Stack and Destack require a configured liquid plate.")
+                continue
+            destination_stack = occupancy.get(destination, [])
+            if step.kind == "stack_plate":
+                if not destination_stack:
+                    result.issue("stack_destination", path + "/destination_slot", "Stack Plate requires an existing plate at the destination; use Move Plate for the first plate.")
+                    continue
+                if any(definitions[mid].get("id") != definition.get("id") for mid in destination_stack):
+                    result.issue("stack_labware", path + "/destination_slot", "The destination stack must contain the same catalog plate type.")
+                    continue
+            elif destination_stack:
                 result.issue("move_collision", path + "/destination_slot", f"Deck slot {destination} is occupied.")
                 continue
-            source = locations[step.material]
-            del occupancy[source]
-            occupancy[destination] = step.material
+            if step.kind == "move_plate" and len(occupancy[source]) != 1:
+                result.issue("move_stack", path + "/material", "Move Plate requires a single source plate; use Destack Plate for a source stack.")
+                continue
+            if step.kind == "destack_plate" and len(occupancy[source]) < 2:
+                result.issue("destack_source", path + "/material", "Destack Plate requires at least two source plates; use Move Plate for a single plate.")
+                continue
+            occupancy[source].pop()
+            if not occupancy[source]:
+                del occupancy[source]
+            occupancy.setdefault(destination, []).append(step.material)
             locations[step.material] = destination
-            add("plate/PickPlace", {"pick_location": source, "place_location": destination}, step, path)
+            node_type, properties = {
+                "move_plate": ("plate/PickPlace", {"pick_location": source, "place_location": destination}),
+                "stack_plate": ("plate/Stack", {"source_location": source, "base_location": destination}),
+                "destack_plate": ("plate/Destack", {"source_location": source, "destination_location": destination}),
+            }[step.kind]
+            add(node_type, properties, step, path)
             details.update(material=step.material, source_slot=source, destination_slot=destination)
     if expanded:
         discard(*expanded[-1])
+    if returned_tips:
+        spent_labels = ", ".join(f"{material_id} (slot {locations[material_id]})" for material_id in returned_supply_racks)
+        operator_checkpoint("postflight", "These racks now contain returned spent tips: " + spent_labels +
+                            ". Remove and label them spent; install fresh racks before any later run.")
     # Mix cycles expand to two physical operations each; enforce a workload bound
     # in addition to the serialized graph bound to reject huge nested requests.
     work = sum((2 * int(o["properties"].get("cycles") or 1)) if o["type"] == "liquid/Mix" else 1 for o in result.operations)
@@ -631,8 +769,10 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
     result.report["summary"] = {"expanded_steps": len(expanded), "compiled_operations": len(result.operations), "physical_operations": work,
         "tips_required": tips_used, "channels": mode.num_channels if mode else 0, "reagent_consumption_ul": consumed,
         "final_volumes_ul": {mid: {well_name(cell): round(v, 9) for cell, v in wells.items()} for mid, wells in volumes.items()},
-        "final_deck": {str(slot): material for slot, material in occupancy.items()}, "run_steps": run_steps,
-        "manual_checkpoints": sum(s.kind == "manual" for s, _ in expanded)}
+        "final_deck": {str(slot): stack[-1] for slot, stack in occupancy.items()},
+        "final_deck_stacks": {str(slot): list(stack) for slot, stack in occupancy.items()}, "run_steps": run_steps,
+        "spent_tip_rack_ids": [material_id for material_id in returned_supply_racks if returned_tips.get(material_id)],
+        "manual_checkpoints": sum(s.kind == "manual" for s, _ in expanded) + int(bool(returned_supply_racks)) + int(bool(returned_tips))}
     result.report["ok"] = not any(i["severity"] == "error" for i in result.report["issues"])
     result.report["valid"] = result.report["ok"]
     result.report["run_sheet"] = result.report["summary"]

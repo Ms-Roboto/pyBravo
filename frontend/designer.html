@@ -699,7 +699,12 @@ body {
 .protocol-draft-banner { position:absolute; top:10px; left:12px; right:12px; z-index:5; border:1px solid var(--btn-primary-border); border-radius:5px; padding:10px 12px; background:var(--bg-panel); font-size:11px; line-height:1.5; color:var(--text); }
 .protocol-draft-banner strong { color:var(--accent); margin-right:8px; }
 .protocol-draft-banner a { color:var(--accent); white-space:nowrap; }
-body.protocol-preview-active .left-panel { display:none; }
+body.protocol-preview-active .left-panel { display:flex; }
+body.protocol-preview-active #section-tasks { display:none; }
+body.protocol-preview-active #section-deck .deck-cell { pointer-events:none; }
+body.protocol-preview-active #section-deck .panel-section-body { display:block; }
+.protocol-draft-deck-list { margin:10px 8px; padding:9px; border:1px solid var(--border); border-radius:4px; font-size:10px; line-height:1.5; color:var(--text-dim); }
+.protocol-draft-deck-list strong { display:block; color:var(--text); margin-bottom:4px; }
 body.protocol-preview-active .toolbar-btn:disabled { opacity:.4; cursor:not-allowed; }
 body.protocol-preview-active #viewport-float { display:none; }
 .protocol-review-property { margin-bottom:12px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; line-height:1.5; }
@@ -868,6 +873,7 @@ body.protocol-preview-active #viewport-float { display:none; }
                         <span class="deck-label">Empty</span>
                     </div>
                 </div>
+                <div class="protocol-draft-deck-list" id="protocol-draft-deck-list" hidden></div>
             </div>
         </div>
     </div>
@@ -1625,7 +1631,8 @@ function updateDeckCell(location) {
         cell.classList.add('assigned');
         cell.setAttribute('data-kind', kindClass);
         const stackLabel = stack.length > 1 ? ` (${stack.length})` : '';
-        label.textContent = (top.name || top.labware_id || 'Assigned') + stackLabel;
+        const inventoryLabel = top.proposed && top.tip_inventory_status === 'unconfirmed' ? ' · tips unconfirmed' : '';
+        label.textContent = (top.name || top.labware_id || 'Assigned') + stackLabel + inventoryLabel;
     } else {
         cell.classList.add('empty');
         cell.classList.remove('assigned');
@@ -1638,6 +1645,21 @@ function updateDeckCell(location) {
 function updateDeckSummary() {
     const count = Object.values(designerState.deckConfig).filter(s => s && s.length > 0).length;
     document.getElementById('deck-summary').textContent = `${count}/9 configured`;
+    const list = document.getElementById('protocol-draft-deck-list');
+    const stacks = Object.entries(designerState.deckConfig).filter(([, items]) => items?.length > 1);
+    list.hidden = !isProtocolDraftTab() || !stacks.length;
+    list.replaceChildren(...stacks.map(([location, items]) => {
+        const group = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = `Position ${location} · proposed stack, bottom → top`;
+        group.appendChild(title);
+        for (const [index, item] of items.entries()) {
+            const row = document.createElement('div');
+            row.textContent = `${index}. ${item.name || item.labware_id || 'Unspecified labware'}`;
+            group.appendChild(row);
+        }
+        return group;
+    }));
 }
 
 function syncDeckTo3D() {
@@ -1673,6 +1695,10 @@ function syncDeckTo3D() {
             };
             // Mark tipbox fill state
             if (config.tipbox_fill_state) detail.tipbox_fill_state = config.tipbox_fill_state;
+            // A chat draft has not validated the loaded-tip inventory. Show
+            // the rack itself without drawing an invented full set of tips.
+            if (config.proposed && getLabwareKindClass(config) === 'tip_box'
+                && config.tip_inventory_status !== 'full') detail.tipbox_fill_state = 'empty';
             return detail;
         });
     }
@@ -7779,7 +7805,7 @@ function updateProtocolDraftControls() {
     const tab = getActiveTab();
     const id = tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_session_id;
     if (id) document.getElementById('protocol-draft-review').href = '/protocol-assistant?session=' + encodeURIComponent(id);
-    if (draft) document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.`;
+    if (draft) document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;
 }
 function renderProtocolReviewProperties(body, node) {
     const fields = [
@@ -7904,6 +7930,7 @@ function displayProtocolPreview(envelope, {activate = true} = {}) {
         openTabs.push(tab); index = openTabs.length - 1;
     }
     tab.graph.configure(preview.graph);
+    tab.deckConfig = JSON.parse(JSON.stringify(preview.deck || {}));
     tab.name = 'Draft · ' + (preview.name || envelope.session.name || 'Protocol conversation');
     tab.description = preview.description || '';
     tab.protocolMetadata = {protocol_chat_draft: true, protocol_chat_session_id: envelope.session.id, protocol_revision: envelope.session.revision, protocol_materials: JSON.parse(JSON.stringify(preview.protocol_materials || []))};
@@ -7911,10 +7938,12 @@ function displayProtocolPreview(envelope, {activate = true} = {}) {
     tab.dirty = false;
     if (activate) {
         if (activeTabIdx === index) {
-            designerState.graph = tab.graph; currentWorkflowName = tab.name;
+            designerState.graph = tab.graph; designerState.deckConfig = tab.deckConfig; currentWorkflowName = tab.name;
             designerState.graphCanvas?.setGraph(tab.graph);
+            for (let location = 1; location <= 9; location++) updateDeckCell(location);
+            syncDeckTo3D();
         } else switchToTab(index);
-        document.getElementById('protocol-draft-summary').textContent = `Revision ${envelope.session.revision} · ${(preview.graph.nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.`;
+        document.getElementById('protocol-draft-summary').textContent = `Revision ${envelope.session.revision} · ${(preview.graph.nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;
         renderTabStrip();
         requestAnimationFrame(() => {
             const canvas = designerState.graphCanvas;

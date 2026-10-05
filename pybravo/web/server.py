@@ -817,6 +817,8 @@ class LabwareTypeRequest(BaseModel):
     labware_class_ids: list[str] | None = None
     tip_definition_id: str | None = None
     supported_tip_ids: list[str] | None = None
+    provisional: bool | None = None
+    compatible_head_types: list[str] | None = None
 
 
 class LabwareClassRequest(BaseModel):

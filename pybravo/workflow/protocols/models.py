@@ -41,16 +41,21 @@ class ProtocolMaterial(StrictModel):
     role: Literal["liquid", "tips", "waste"] = "liquid"
     labware_id: str | None = None
     deck_slot: int | None = None
+    # Bottom plate is 0. Materials sharing a deck slot must form a contiguous
+    # stack; the order is never inferred from the model's list order.
+    stack_order: int | None = None
     initial_volume_ul: float | None = None
     dead_volume_ul: float | None = None
     well_volumes_ul: dict[str, float] = Field(default_factory=dict)
-    available_tips: list[str] | None = None
+    # A scientist may confirm an inspected full rack without serializing every
+    # well. A list records the exact remaining fresh wells of a partial rack.
+    available_tips: list[str] | Literal["full"] | None = None
     tip_definition_id: str | None = None
 
 
 class ProtocolStep(StrictModel):
     id: str = Field(min_length=1, max_length=100)
-    kind: Literal["transfer", "mix", "manual", "wait", "move_plate", "repeat"]
+    kind: Literal["transfer", "mix", "manual", "wait", "move_plate", "stack_plate", "destack_plate", "repeat"]
     description: str = ""
     source_paragraph_ids: list[str] = Field(default_factory=list)
     source_values: list[NumericEvidence] = Field(default_factory=list)
@@ -89,7 +94,7 @@ class ProtocolHeadMode(StrictModel):
 class ProtocolSetup(StrictModel):
     name: str = ""
     head_mode: ProtocolHeadMode | None = None
-    tip_strategy: Literal["fresh_each_step", "reuse_all"] | None = None
+    tip_strategy: Literal["fresh_each_step", "fresh_each_source", "reuse_all"] | None = None
     tip_reuse_reason: str | None = None
     tip_rack_ids: list[str] = Field(default_factory=list)
     tip_disposal_id: str | None = None

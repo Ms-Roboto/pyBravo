@@ -37,7 +37,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -175,7 +176,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -314,7 +316,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -473,7 +476,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -637,7 +641,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -783,7 +788,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -935,7 +941,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -1081,7 +1088,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -1228,7 +1236,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -1366,7 +1375,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -1499,7 +1509,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -1639,7 +1650,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -1779,7 +1791,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -1919,7 +1932,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -2200,7 +2214,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -2340,7 +2355,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
@@ -2489,7 +2505,8 @@
             "name": "Fresh tips",
             "role": "tips",
             "labware_id": "rack",
-            "deck_slot": 3
+            "deck_slot": 3,
+            "available_tips": "full"
           },
           {
             "id": "waste",
