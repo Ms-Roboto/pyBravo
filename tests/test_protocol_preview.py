@@ -44,6 +44,19 @@ def test_incomplete_plan_builds_deterministic_non_executable_cited_preview():
     assert properties["_source_citation"]["paragraph_ids"] == ["p1"]
 
 
+def test_transfer_review_node_names_aspirate_and_dispense_without_creating_commands():
+    plan = unfinished_plan()
+    plan["steps"][0].update(source_anchor="A1", destination_anchor="B2", volume_ul=5.0)
+    workflow = build_chat_preview(plan, "chat", 1)
+    nodes = workflow["graph"]["nodes"]
+    assert [node["type"] for node in nodes] == ["flow/Start", PREVIEW_NODE_TYPE, "flow/End"]
+    assert nodes[1]["properties"]["summary"] == (
+        "Aspirate 5 uL/channel from Buffer source (A1), then dispense 5 uL/channel "
+        "into Sample plate (B2)."
+    )
+    assert nodes[1]["properties"]["kind"] == "transfer"
+
+
 def test_all_operations_are_visible_review_nodes_and_every_link_is_wired():
     plan = unfinished_plan()
     plan["steps"].extend([

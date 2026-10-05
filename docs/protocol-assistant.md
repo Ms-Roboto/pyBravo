@@ -37,6 +37,13 @@ finish the physical setup, validate and strictly simulate the plan, record
 scientist approval, and export the compiled workflow back to the designer.
 That export contains the executable nodes and the reviewed deck configuration.
 
+An editable **transfer** is one source-to-destination instruction. Once the
+setup validates, the compiler creates separate **Aspirate** and **Dispense**
+robot nodes at the stated volume. For the four-source, two-destination draft,
+the eight 5 µL transfers become eight 5 µL aspirations and eight 5 µL
+dispenses. The compiler does not combine both destinations into one 10 µL
+aspiration from each source well.
+
 The chat and setup panel offer **box–tip pairs** for the active head. The box
 records physical geometry; the tip definition records capacity, length, and
 compatible heads. One box may support several independent tip types, so select

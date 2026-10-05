@@ -98,9 +98,10 @@ def _summary(step: ProtocolStep, material_names: dict[str, str]) -> str:
         return material_names.get(identity, identity) if identity else "unspecified material"
 
     if step.kind == "transfer":
-        summary = (f"Transfer {_quantity(step.volume_ul, 'uL/channel')} from {material(step.source)} "
-                   f"({step.source_anchor or 'well unspecified'}) to {material(step.destination)} "
-                   f"({step.destination_anchor or 'well unspecified'}).")
+        volume = _quantity(step.volume_ul, 'uL/channel')
+        summary = (f"Aspirate {volume} from {material(step.source)} "
+                   f"({step.source_anchor or 'well unspecified'}), then dispense {volume} into "
+                   f"{material(step.destination)} ({step.destination_anchor or 'well unspecified'}).")
     elif step.kind == "mix":
         summary = (f"Mix {_quantity(step.volume_ul, 'uL/channel')} in {material(step.material)} "
                    f"({step.anchor or 'well unspecified'}) for {_quantity(step.cycles, 'cycles')}.")
