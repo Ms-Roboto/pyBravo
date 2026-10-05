@@ -134,10 +134,25 @@ async def structured_json(
                     response = await client.post(url, json=body)
             except (httpx.HTTPError, TimeoutError) as exc:
                 if attempt == cfg.retries:
-                    raise ProtocolLLMError(
-                        f"Local model at {cfg.base_url} did not respond within its request budget. "
-                        "Check the server or use a smaller protocol selection; no cloud fallback was attempted."
-                    ) from exc
+                    # A refused connection can fail immediately; it must not
+                    # look like a slow generation that needs a longer budget.
+                    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+                        detail = (f"Could not connect to the local model at {cfg.base_url} "
+                                  f"after {attempt + 1} attempt(s). Check the host name, network connection, "
+                                  "and whether the model server is running.")
+                    elif isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+                        detail = (f"Local model at {cfg.base_url} timed out after {attempt + 1} attempt(s) "
+                                  f"with a {cfg.timeout_s:g}-second request limit. For a long generation, "
+                                  "increase PYBRAVO_DRAFTER_TIMEOUT (up to 300 seconds), or use a smaller "
+                                  "protocol selection.")
+                    else:
+                        detail = (f"The connection to the local model at {cfg.base_url} failed "
+                                  f"after {attempt + 1} attempt(s) ({type(exc).__name__}). "
+                                  "Check the model server and network connection.")
+                    logger.warning("protocol_local_transport_failed", model=cfg.model, base_url=cfg.base_url,
+                                   attempts=attempt + 1, elapsed_s=round(time.monotonic() - started, 3),
+                                   timeout_s=cfg.timeout_s, error_type=type(exc).__name__)
+                    raise ProtocolLLMError(detail + " No cloud fallback was attempted.") from exc
             else:
                 if response.status_code < 400:
                     return response, attempt + 1

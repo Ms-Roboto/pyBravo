@@ -72,9 +72,30 @@ async def test_timeout_retries_are_bounded():
         raise httpx.ReadTimeout("timed out")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
-        with pytest.raises(ProtocolLLMError, match="no cloud fallback"):
+        with pytest.raises(ProtocolLLMError, match="No cloud fallback"):
             await structured_json([], {}, config=LocalLLMConfig(retries=1), http_client=client)
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize("exception,expected,not_expected", [
+    (httpx.ConnectError("Connection refused"), "Could not connect", "request limit"),
+    (httpx.ConnectTimeout("Connection timed out"), "Could not connect", "PYBRAVO_DRAFTER_TIMEOUT"),
+    (httpx.ReadTimeout("Read timed out"), "120-second request limit", "Could not connect"),
+    (TimeoutError(), "PYBRAVO_DRAFTER_TIMEOUT", "Could not connect"),
+    (httpx.RemoteProtocolError("Server disconnected"), "RemoteProtocolError", "request limit"),
+])
+async def test_transport_failures_distinguish_connectivity_from_generation_timeout(exception, expected, not_expected):
+    def handle(request):
+        raise exception
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(ProtocolLLMError) as caught:
+            await structured_json([], {}, config=LocalLLMConfig(retries=0), http_client=client)
+    message = str(caught.value)
+    assert expected in message
+    assert not_expected not in message
+    assert "1 attempt(s)" in message
+    assert caught.value.__cause__ is exception
 
 
 @pytest.mark.parametrize("envelope, expected", [
