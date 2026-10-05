@@ -687,6 +687,11 @@ body {
 .protocol-chat-tipboxes select { min-width:0; width:100%; color:var(--text); background:var(--bg-input); border:1px solid var(--border); border-radius:4px; padding:6px; font:11px var(--sans); }
 .protocol-chat-tipboxes p { color:var(--text-dim); }
 .protocol-chat-tipboxes a { color:var(--accent); }
+.protocol-chat-capabilities { padding:10px 12px; border-top:1px solid var(--border); font-size:11px; line-height:1.45; max-height:170px; overflow:auto; }
+.protocol-chat-capabilities summary { cursor:pointer; color:var(--accent); }
+.protocol-chat-capabilities ul { margin:8px 0 0; padding-left:18px; }
+.protocol-chat-capabilities li { margin:5px 0; }
+.protocol-chat-capabilities small { display:block; color:var(--text-dim); }
 .protocol-chat-questions ul { padding-left:17px; line-height:1.5; margin-top:6px; }
 .protocol-chat-form { border-top:1px solid var(--border); padding:12px; display:grid; gap:9px; }
 .protocol-chat-form label { font-size:11px; color:var(--text-dim); }
@@ -766,6 +771,7 @@ body.protocol-preview-active #viewport-float { display:none; }
         <p class="protocol-chat-intro">Describe your procedure, then answer questions or request changes. Each reply updates a separate draft on the canvas.</p>
         <div class="protocol-chat-messages" id="protocol-chat-messages" role="log" aria-label="Conversation" aria-live="polite"></div>
         <div class="protocol-chat-questions" id="protocol-chat-questions"></div>
+        <details class="protocol-chat-capabilities" id="protocol-chat-capabilities" hidden><summary>Options this Bravo can propose</summary><div id="protocol-chat-capability-list"></div></details>
         <div class="protocol-chat-tipboxes" id="protocol-chat-tipboxes" hidden></div>
         <form class="protocol-chat-form" id="protocol-chat-form">
             <label for="protocol-chat-message">Procedure or reply</label>
@@ -7770,7 +7776,7 @@ document.getElementById('task-prompt-abort')?.addEventListener('click', () => {
 });
 
 // ── Protocol conversation and review-only preview ───────────────────
-const protocolChat = { envelope: null, pending: false, pendingMessage: '', sessionId: null };
+const protocolChat = { envelope: null, pending: false, pendingMessage: '', sessionId: null, capabilities: null, capabilityRequest: null };
 const PROTOCOL_CHAT_STORAGE = 'pybravo-designer-protocol-chat';
 function isProtocolDraftTab(tab = getActiveTab()) {
     return Boolean(tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_draft);
@@ -7784,7 +7790,40 @@ function setProtocolChatOpen(open) {
     document.getElementById('protocol-chat-panel').hidden = !open;
     document.getElementById('btn-protocol-chat').setAttribute('aria-expanded', String(open));
     document.body.classList.toggle('protocol-chat-open', open);
+    if (open) loadProtocolCapabilities(true);
     requestAnimationFrame(() => designerState.graphCanvas?.resize());
+}
+function renderProtocolCapabilities() {
+    const details = document.getElementById('protocol-chat-capabilities');
+    const body = document.getElementById('protocol-chat-capability-list');
+    const manifest = protocolChat.capabilities;
+    details.hidden = !manifest;
+    body.replaceChildren();
+    if (!manifest) return;
+    const intro = document.createElement('p');
+    intro.textContent = `${manifest.machine?.head_type || 'Configured head'} · manifest ${manifest.schema_version}. These are planning choices; materials and setup still need validation.`;
+    const items = document.createElement('ul');
+    for (const operation of manifest.assistant_operations || []) {
+        if (operation.selectable !== true || operation.availability === 'unavailable') continue;
+        const item = document.createElement('li');
+        const name = document.createElement('strong'); name.textContent = operation.id;
+        item.appendChild(name);
+        if (operation.lowers_to?.length) {
+            const lower = document.createElement('small');
+            lower.textContent = 'Bravo steps: ' + operation.lowers_to.map(value => value.split('/').at(-1)).join(' → ');
+            item.appendChild(lower);
+        }
+        items.appendChild(item);
+    }
+    body.append(intro, items);
+}
+async function loadProtocolCapabilities(refresh = false) {
+    if ((!refresh && protocolChat.capabilities) || protocolChat.capabilityRequest) return;
+    if (refresh) { protocolChat.capabilities = null; renderProtocolCapabilities(); }
+    protocolChat.capabilityRequest = protocolChatRequest('/capabilities');
+    try { protocolChat.capabilities = await protocolChat.capabilityRequest; renderProtocolCapabilities(); }
+    catch (_) { /* Chat remains available if capability discovery is temporarily unavailable. */ }
+    finally { protocolChat.capabilityRequest = null; }
 }
 function updateProtocolDraftControls() {
     const draft = isProtocolDraftTab();

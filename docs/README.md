@@ -18,6 +18,7 @@ Start here. The pages below are ordered roughly the way you will need them.
 | [User guide](user-guide.md) | The web UI, end to end |
 | [Workflows](workflows.md) | Building and running protocols in the designer |
 | [Protocol Assistant](protocol-assistant.md) | Local-model extraction, review, strict simulation and reusable protocols |
+| [Bravo Capability Manifest](bravo-capability-manifest.md) | Versioned, machine-derived options for protocol-planning models |
 | [Configuration](configuration.md) | Profiles, environment variables, config files |
 
 ## Build on it

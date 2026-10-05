@@ -54,6 +54,10 @@ function envelope(revision) {
         await page.waitForFunction(()=>document.querySelector('.wf-tab-name')?.textContent==='Existing scientist workflow');
         const original=await page.evaluate(()=>window.designerState.graph.serialize());
         await page.locator('#btn-protocol-chat').click();
+        await page.locator('#protocol-chat-capabilities summary').waitFor({state:'visible'});
+        await page.locator('#protocol-chat-capabilities summary').click();
+        assert.match(await page.locator('#protocol-chat-capabilities').innerText(),/transfer/);
+        assert.match(await page.locator('#protocol-chat-capabilities').innerText(),/Aspirate → Dispense/);
         await page.locator('#protocol-chat-message').fill('Wait before inspecting the plate.');
         await page.locator('#protocol-chat-send').click();
         assert.equal(await page.locator('#protocol-chat-message').isDisabled(),true);

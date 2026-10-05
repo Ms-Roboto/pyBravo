@@ -68,6 +68,15 @@ async def test_full_review_release_library_and_setup_lifecycle(environment):
         assert (await client.get("/protocol-assistant")).status_code == 200
         context = (await client.get("/api/protocols/context")).json()
         assert context["labware"] and context["tip_definitions"] and context["context_hash"]
+        manifest_response = await client.get("/api/protocols/capabilities")
+        assert manifest_response.status_code == 200
+        manifest = manifest_response.json()
+        assert manifest["schema_version"] == "0.1.0"
+        assert manifest["context_hash"] == context["context_hash"]
+        assert "profile" not in manifest
+        assert next(row for row in manifest["assistant_operations"] if row["id"] == "transfer")["lowers_to"] == [
+            "liquid/Aspirate", "liquid/Dispense",
+        ]
         session = await session_with_plan(client)
         denied = await client.post(f"/api/protocols/{session['id']}/export-workflow")
         assert denied.status_code == 409

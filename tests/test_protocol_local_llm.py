@@ -17,6 +17,7 @@ from pybravo.workflow.protocols.llm import (
     extract_protocol_plan,
     structured_json,
 )
+from pybravo.workflow.protocols.models import ProtocolPlan
 
 
 def _completion(payload=None, *, content=None, finish_reason="stop"):
@@ -135,6 +136,47 @@ async def test_extraction_keeps_unknowns_and_manual_steps(monkeypatch):
     assert result.plan.decisions == []
     assert result.metadata["source_paragraph_ids"] == [source.paragraphs[0].id]
     assert "Unknown values MUST remain null" in captured[0][0]["content"]
+
+
+async def test_model_receives_capability_options_without_controller_configuration(monkeypatch):
+    source = ingest_text("Manually inspect the plate.")
+    captured = {}
+
+    async def complete(messages, schema, **kwargs):
+        captured.update(json.loads(messages[1]["content"])["context"])
+        return StructuredResponse({"name": "Inspect", "materials": [], "steps": [{
+            "id": "inspect", "kind": "manual", "message": "Manually inspect the plate.",
+            "source_paragraph_ids": [source.paragraphs[0].id],
+        }]}, {"model": "qwen"})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    await extract_protocol_plan(source, context={
+        "head_type": "HT_96_D_70", "has_gripper": True, "context_hash": "test-context",
+        "profile": {"connection": {"address": "controller-secret"}},
+        "labware": [{"id": "plate", "name": "Plate", "rows": 8, "cols": 12,
+                     "model_3d": "/large/asset.gltf", "connection": "controller-secret"}],
+        "tip_definitions": [], "tipbox_choices": [],
+    })
+    options = captured["capability_options"]
+    assert options["schema_version"] == "0.1.0"
+    transfer = next(item for item in options["assistant_operations"] if item["id"] == "transfer")
+    assert transfer["selectable"] is True
+    assert transfer["lowers_to"] == ["liquid/Aspirate", "liquid/Dispense"]
+    assert "profile" not in captured
+    assert "model_3d" not in captured["labware"][0]
+    assert "controller-secret" not in json.dumps(captured)
+
+
+def test_assistant_choice_guard_rejects_plate_move_without_gripper():
+    from pybravo.workflow.protocols.capabilities import build_capability_manifest, compact_capability_options
+
+    options = compact_capability_options(build_capability_manifest({
+        "head_type": "HT_96_D_70", "has_gripper": False, "context_hash": "test-context",
+    }))
+    plan = ProtocolPlan.model_validate({"name": "Move plate", "steps": [
+        {"id": "move", "kind": "move_plate", "material": "plate", "destination_slot": 2},
+    ]})
+    assert "not selectable" in llm._check_capability_choices(plan, options)[0]
 
 
 async def test_citation_repair_then_failure_is_bounded(monkeypatch):

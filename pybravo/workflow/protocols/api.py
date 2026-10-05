@@ -137,6 +137,14 @@ async def context():
     return machine_context(_bravo())
 
 
+@router.get("/api/protocols/capabilities")
+async def capabilities():
+    """Publish a sanitized, read-only capability manifest for the active profile."""
+    from pybravo.workflow.protocols.capabilities import build_capability_manifest
+
+    return build_capability_manifest(machine_context(_bravo()))
+
+
 @router.get("/api/protocols/library")
 async def library():
     return {"items": _store.list("library")}

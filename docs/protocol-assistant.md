@@ -9,6 +9,12 @@ strict simulation → approval → designer**. The local model proposes structur
 data. A deterministic compiler supplies the executable operations. Generated
 Python is not accepted in this path.
 
+The [Bravo Capability Manifest](bravo-capability-manifest.md) describes the
+configured head's selectable planning operations, catalog-backed tip and
+labware choices, geometry patterns, and review requirements in a versioned
+machine-readable format. It is discovery information for planning; validation
+and approval still govern executable workflows.
+
 ## Start with the local model
 
 Install the optional `llm` dependencies with `pip install -e '.[llm]'`, or run
