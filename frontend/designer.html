@@ -5324,7 +5324,7 @@ function deserializeWorkflow(data) {
     const sessionId = (data && typeof data.drafter_session_id === 'string') ? data.drafter_session_id : '';
     const desc = (data && typeof data.description === 'string') ? data.description : '';
     const protocolMetadata = {};
-    for (const key of ['protocol_session_id', 'protocol_revision', 'protocol', 'protocol_chat_draft', 'protocol_chat_session_id']) {
+    for (const key of ['protocol_session_id', 'protocol_revision', 'protocol', 'protocol_chat_draft', 'protocol_chat_session_id', 'protocol_materials']) {
         if (data && data[key] !== undefined) protocolMetadata[key] = JSON.parse(JSON.stringify(data[key]));
     }
     if (wfId) {
@@ -7819,8 +7819,9 @@ function renderProtocolTipboxes(envelope) {
     panel.replaceChildren(); panel.hidden = !envelope;
     if (!envelope) return;
     const preview = envelope.preview || {};
-    const choices = (Array.isArray(preview.tipbox_choices) ? preview.tipbox_choices : []).filter(choice => choice.labware_id && choice.tip_definition_id && ['rows','cols','wells','spacing_x_mm','spacing_y_mm','tip_capacity_ul','tip_length_mm'].every(field => Number(choice[field]) > 0));
-    const heading = document.createElement('strong'); heading.textContent = 'Compatible tipboxes · ' + (preview.head_type || 'active head'); panel.appendChild(heading);
+    const planningOnly = choice => choice.execution_ready === false && Array.isArray(choice.missing_metadata) && choice.missing_metadata.length === 1 && choice.missing_metadata[0] === 'tip_length';
+    const choices = (Array.isArray(preview.tipbox_choices) ? preview.tipbox_choices : []).filter(choice => choice.labware_id && choice.tip_definition_id && ['rows','cols','wells','spacing_x_mm','spacing_y_mm','tip_capacity_ul'].every(field => Number(choice[field]) > 0) && (Number(choice.tip_length_mm) > 0 || planningOnly(choice)));
+    const heading = document.createElement('strong'); heading.textContent = 'Compatible box / tip choices · ' + (preview.head_type || 'active head'); panel.appendChild(heading);
     const explanation = document.createElement('p');
     if (!choices.length) {
         explanation.textContent = preview.tipbox_choices_reason || 'No verified compatible tipbox is available in the active catalog. Check the head assignment, rack geometry, and tip definition.';
@@ -7829,20 +7830,21 @@ function renderProtocolTipboxes(envelope) {
     }
     const select = document.createElement('select'); select.id = 'protocol-chat-tipbox-select'; select.setAttribute('aria-label', 'Compatible tipbox and tip definition');
     const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'Choose a catalog rack / tip pairing…'; select.appendChild(empty);
-    for (const [index, choice] of choices.entries()) {
-        const option = document.createElement('option'); option.value = String(index);
-        option.textContent = `${choice.labware_name} · ${choice.rows} × ${choice.cols} · ${choice.tip_name} (${choice.tip_capacity_ul} µL)`; select.appendChild(option);
+    const choiceKey = choice => JSON.stringify([choice.labware_id, choice.tip_definition_id]);
+    for (const choice of choices) {
+        const option = document.createElement('option'); option.value = choiceKey(choice);
+        option.textContent = `${choice.labware_name} · ${choice.rows} × ${choice.cols} · ${choice.tip_name} (${choice.tip_capacity_ul} µL)${planningOnly(choice) ? ' · Planning only: tip length missing' : ''}`; select.appendChild(option);
     }
-    if (previous && choices[Number(previous)]) select.value = previous;
+    if (choices.some(choice => choiceKey(choice) === previous)) select.value = previous;
     select.disabled = protocolChat.pending;
     const button = document.createElement('button'); button.type = 'button'; button.id = 'protocol-chat-tipbox-use'; button.className = 'toolbar-btn'; button.textContent = 'Add choice to message'; button.disabled = protocolChat.pending || !select.value;
-    explanation.textContent = 'Send the choice to update the draft. Deck position and available tips still require review.';
+    explanation.textContent = 'A box may support several tips. Choose the loaded tip explicitly and send the choice. Planning-only pairs require the missing tip length before validation can pass; deck position and available tips still require review.';
     select.addEventListener('change', () => { button.disabled = protocolChat.pending || !select.value; });
     button.addEventListener('click', () => {
-        const choice = choices[Number(select.value)];
+        const choice = choices.find(item => choiceKey(item) === select.value);
         if (!choice || select.value === '' || protocolChat.pending) return;
         const input = document.getElementById('protocol-chat-message');
-        const sentence = `Use the catalog tipbox "${choice.labware_name}" (labware_id: ${choice.labware_id}) with tip definition "${choice.tip_name}" (tip_definition_id: ${choice.tip_definition_id}). Keep deck placement and actual tip availability unresolved unless I already supplied them.`;
+        const sentence = `Use the catalog tipbox "${choice.labware_name}" (labware_id: ${choice.labware_id}) with tip definition "${choice.tip_name}" (tip_definition_id: ${choice.tip_definition_id}).${planningOnly(choice) ? ' This pair is for planning only: its tip length is missing and must be recorded before validation can pass.' : ''} Keep deck placement and actual tip availability unresolved unless I already supplied them.`;
         input.value = input.value.trim() ? input.value.trimEnd() + '\n\n' + sentence : sentence;
         protocolChatStatus('Tipbox choice added to your message. Review it and press Send to update the draft.'); input.focus();
     });
@@ -7904,7 +7906,7 @@ function displayProtocolPreview(envelope, {activate = true} = {}) {
     tab.graph.configure(preview.graph);
     tab.name = 'Draft · ' + (preview.name || envelope.session.name || 'Protocol conversation');
     tab.description = preview.description || '';
-    tab.protocolMetadata = {protocol_chat_draft: true, protocol_chat_session_id: envelope.session.id, protocol_revision: envelope.session.revision};
+    tab.protocolMetadata = {protocol_chat_draft: true, protocol_chat_session_id: envelope.session.id, protocol_revision: envelope.session.revision, protocol_materials: JSON.parse(JSON.stringify(preview.protocol_materials || []))};
     tab.protocolChatEnvelope = envelope;
     tab.dirty = false;
     if (activate) {

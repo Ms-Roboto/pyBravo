@@ -18,7 +18,7 @@ from tests.test_protocol_compiler import protocol_fixture
 def liquid_workflow(monkeypatch):
     plan, setup, context, sources = protocol_fixture()
     context["head_type"] = "HT_96_D_70"
-    context["tip_definitions"] = [{"id": "st_30ul", "capacity_ul": 30.0, "compatible_heads": ["HT_96_D_70"]}]
+    context["tip_definitions"] = [{"id": "st_30ul", "capacity_ul": 30.0, "length_mm": 26.1, "compatible_heads": ["HT_96_D_70"]}]
     rack = context["labware"][1]
     rack.update(tip_definition_id="st_30ul", supported_tip_ids=["st_30ul"], height_mm=50.0,
                 disposable_tip_capacity_ul=30.0)

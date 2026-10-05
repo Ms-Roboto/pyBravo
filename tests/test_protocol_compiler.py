@@ -12,7 +12,7 @@ def protocol_fixture():
              "wells": 96, "spacing_x_mm": 9.0, "spacing_y_mm": 9.0, "well_volume_ul": 200.0, "well_depth_mm": 10.0}
     rack = {**plate, "id": "rack", "name": "96 tips", "kind": "tip_box", "base_class": "tip_box", "tip_definition_id": "tips-200", "supported_tip_ids": ["tips-200"]}
     context = {"head_type": "HT_96_D_200", "has_gripper": True, "labware": [plate, rack],
-               "tip_definitions": [{"id": "tips-200", "capacity_ul": 200.0, "compatible_heads": ["HT_96_D_200"]}],
+               "tip_definitions": [{"id": "tips-200", "capacity_ul": 200.0, "length_mm": 50.0, "compatible_heads": ["HT_96_D_200"]}],
                "liquid_classes": [{"id": "water", "name": "Water"}]}
     plan = {"name": "Reviewed buffer transfer", "materials": [
         {"id": "buffer", "name": "Buffer", "labware_id": "plate", "deck_slot": 1, "initial_volume_ul": 100.0, "dead_volume_ul": 10.0},

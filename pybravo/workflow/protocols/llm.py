@@ -250,8 +250,18 @@ questions for missing values, with JSON-pointer paths to fields. Use the actual
 catalog IDs only when they are explicitly established by the source or supplied
 setup. Preserve one-to-one source/destination well mapping; do not infer A1.
 
-Active-head tipbox guidance: context.tipbox_choices contains verified catalog
-pairs for the configured head. You MAY recommend a listed exact labware_id and
+Active-head tipbox guidance: context.tipbox_choices contains catalog-compatible
+box/tip pairs for the configured head. Box identity and loaded tip identity are
+independent: one box can support multiple tip definitions. Preserve every stated
+tip choice and never replace it with the box's default, name, or capacity.
+A scientist can change only the tip on an already specified box, or only the box
+while keeping a stated tip, when the resulting exact pair is listed.
+execution_ready=false means a compatible planning choice still lacks measured
+metadata (for example tip_length). Keep that selected tip and ask for catalog
+completion; do not substitute another tip or claim it is ready to run.
+required_head_mode, when present, is a restriction on using that pair, not
+permission to silently change the scientist's selected head mode.
+You MAY recommend a listed exact labware_id and
 tip_definition_id on a tips material. A recommendation is a catalog proposal,
 not a source fact or scientist approval. Keep decisions empty and never create
 source_values from catalog geometry/capacity. Clearly ask the scientist to
@@ -314,6 +324,7 @@ _STEP_ALLOWED_PARAMETERS = {
 _TIPBOX_CHOICE_FIELDS = (
     "labware_id", "labware_name", "tip_definition_id", "tip_name", "rows", "cols", "wells",
     "spacing_x_mm", "spacing_y_mm", "tip_capacity_ul", "tip_length_mm",
+    "execution_ready", "missing_metadata", "tip_row_stride", "tip_col_stride", "required_head_mode",
 )
 _MAX_TIPBOX_CHOICES = 32
 
@@ -331,7 +342,9 @@ def _tipbox_context(context: dict[str, Any] | None, source: IngestedProtocol | N
 
     def priority(row: dict) -> int:
         pair = (row.get("labware_id"), row.get("tip_definition_id"))
-        if all(isinstance(value, str) and value.strip() for value in pair) and _mentions_pair(latest_text, pair):
+        if all(isinstance(value, str) and value.strip() for value in pair) and (
+            _mentions_pair(latest_text, pair) or any(_selects_pair(latest_text, pair, old) for old in prior_pairs)
+        ):
             return 0
         return 1 if pair in prior_pairs else 2
 
@@ -356,6 +369,17 @@ def _mentions_pair(text: str, pair: tuple[str, str]) -> bool:
 
 def _mentions_identity(text: str, identity: str) -> bool:
     return bool(re.search(r"(?<![\w-])" + re.escape(identity) + r"(?![\w-])", text))
+
+
+def _selects_pair(text: str, pair: tuple[str, str], previous: tuple[str, str]) -> bool:
+    """An explicit one-field edit need not restate the unchanged container/tip."""
+    if not all(pair):
+        return False
+    if _mentions_pair(text, pair):
+        return True
+    return any(pair[index] != previous[index] and _mentions_identity(text, pair[index])
+               and pair[1 - index] == previous[1 - index] and bool(previous[1 - index])
+               for index in (0, 1))
 
 
 def _check_tipbox_guidance(
@@ -398,15 +422,15 @@ def _check_tipbox_guidance(
             issues.append(f"{path}: tipbox IDs must be one exact labware_id/tip_definition_id pair from context.tipbox_choices; leave both null if unknown")
             continue
         if pair not in choices:
-            if any(_mentions_pair(paragraph.text, pair) for paragraph in source.paragraphs):
+            if any(_mentions_pair(paragraph.text, pair) for paragraph in source.paragraphs) or _selects_pair(latest_text, pair, old_pair):
                 # Preserve an explicit scientist statement in a review draft.
                 # This is not a catalog recommendation and cannot validate
                 # until the active machine catalog accepts the pair.
                 continue
             issues.append(f"{path}: tipbox IDs must be one exact labware_id/tip_definition_id pair from context.tipbox_choices; leave both null if unknown")
             continue
-        explicitly_selected = any(_mentions_pair(paragraph.text, pair) for paragraph in source.paragraphs)
-        if all(old_pair) and pair != old_pair and not _mentions_pair(latest_text, pair):
+        explicitly_selected = any(_mentions_pair(paragraph.text, pair) for paragraph in source.paragraphs) or _selects_pair(latest_text, pair, old_pair)
+        if all(old_pair) and pair != old_pair and not _selects_pair(latest_text, pair, old_pair):
             issues.append(f"{path}: preserve the already specified tipbox pair {old_pair}; the latest scientist message did not select this replacement")
             continue
         recommendation_id = "catalog-tipbox:" + material.id

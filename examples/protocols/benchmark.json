@@ -125,7 +125,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -263,7 +264,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -421,7 +423,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -584,7 +587,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -729,7 +733,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -880,7 +885,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -1025,7 +1031,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -1171,7 +1178,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -1308,7 +1316,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -1438,7 +1447,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -1577,7 +1587,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -1716,7 +1727,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -1855,7 +1867,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -1994,7 +2007,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -2134,7 +2148,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -2273,7 +2288,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -2421,7 +2437,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [
@@ -2560,7 +2577,8 @@
             "capacity_ul": 200.0,
             "compatible_heads": [
               "HT_96_D_200"
-            ]
+            ],
+            "length_mm": 50.0
           }
         ],
         "liquid_classes": [

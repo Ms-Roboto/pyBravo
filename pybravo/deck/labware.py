@@ -404,6 +404,8 @@ class MongoLabwareCatalog(LabwareCatalog):
                     "plate_dimensions_mm": 1,
                     "plate_properties": 1,
                     "well_dimensions_mm": 1,
+                    "tip_definition_id": 1,
+                    "supported_tip_ids": 1,
                     "model_3d": 1,
                     "legacy_raw": 1,
                 },

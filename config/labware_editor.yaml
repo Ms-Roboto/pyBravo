@@ -312,6 +312,8 @@ labware_types:
     filter_channel_resting_depth_mm: null
     requires_insert: None
   well_dimensions_mm:
+    rows: 16
+    cols: 24
     volume_ul: null
     depth_mm: null
     diameter_mm: null
@@ -332,8 +334,12 @@ labware_types:
     url: /labware-assets/lw-4914769d0af7/ST_Tip_Box.gltf
     filename: ST_Tip_Box.gltf
     format: gltf
-  tip_definition_id: ''
-  supported_tip_ids: []
+  # The ST10 rack also accepts 70 uL ST tips (scientist-confirmed).
+  # Rack naming/defaults do not select the consumable loaded by the scientist.
+  tip_definition_id: st_10ul
+  supported_tip_ids:
+  - st_10ul
+  - st_70ul
 - kind: sbs_plate
   name: 96 Costar 3596 clear cell culture PS flt btm
   vendor: Costar
@@ -644,6 +650,8 @@ labware_types:
     filter_channel_resting_depth_mm: null
     requires_insert: None
   well_dimensions_mm:
+    rows: 8
+    cols: 12
     volume_ul: null
     depth_mm: null
     diameter_mm: null
@@ -654,13 +662,14 @@ labware_types:
     well_geometry: 1
     well_bottom_shape: 2
     tip_source: agilent
-    disposable_tip_capacity_ul: 10
+    disposable_tip_capacity_ul: 200
     disposable_tip_length_mm: null
   pf400: {}
   planar_motor: {}
   labware_class_ids: []
-  tip_definition_id: ''
-  supported_tip_ids: []
+  tip_definition_id: lt_200ul
+  supported_tip_ids:
+  - lt_200ul
   model_3d: null
 - labware_type_id: lw-651f80d816b1
   name: TestPlate

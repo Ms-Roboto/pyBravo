@@ -16,6 +16,39 @@ function uniq(arr) {
   return Array.from(new Set(arr))
 }
 
+function rackMetadataPatch(entry, values, tips, catalogLoaded) {
+  const dimension = (value, label) => {
+    if (String(value ?? '').trim() === '') return null
+    const number = Number(value)
+    if (!Number.isSafeInteger(number) || number <= 0) throw new Error(`${label} must be a positive whole number, or blank if unknown.`)
+    return number
+  }
+  const rows = dimension(values.rows, 'Rows')
+  const cols = dimension(values.cols, 'Columns')
+  if (rows !== null && cols !== null && rows * cols !== Number(entry.wells)) {
+    throw new Error(`Rows × columns must equal the saved well count (${entry.wells}).`)
+  }
+  const tipId = values.tipId || ''
+  const supported = uniq(values.supportedTipIds || [])
+  const changed = tipId !== (entry.tip_definition_id || '') ||
+    JSON.stringify([...supported].sort()) !== JSON.stringify([...(entry.supported_tip_ids || [])].sort())
+  if (changed && !catalogLoaded) throw new Error('Load the tip catalog before changing tip links.')
+  if (catalogLoaded) {
+    const known = new Set(tips.map(tip => tip.tip_id))
+    const missing = uniq([tipId, ...supported].filter(id => id && !known.has(id)))
+    if (missing.length) throw new Error(`Choose or remove tip IDs missing from the catalog: ${missing.join(', ')}.`)
+  }
+  if (tipId && supported.length && !supported.includes(tipId)) {
+    throw new Error('The primary tip definition must also be selected in supported tip IDs, or leave the supported list empty.')
+  }
+  return { rows, cols, tip_definition_id: tipId, supported_tip_ids: supported }
+}
+
+function tipCompatibilitySummary(tip) {
+  const heads = Array.isArray(tip?.compatible_heads) ? tip.compatible_heads.filter(head => typeof head === 'string' && head) : []
+  return heads.length ? uniq(heads).join(', ') : 'No compatible head IDs recorded'
+}
+
 function TabButton({ active, onClick, children }) {
   return (
     <button
@@ -266,6 +299,9 @@ function LabwareDashboard() {
 
   const [labwareTypes, setLabwareTypes] = useState([])
   const [labwareClasses, setLabwareClasses] = useState([])
+  const [tipDefinitions, setTipDefinitions] = useState([])
+  const [tipCatalogLoaded, setTipCatalogLoaded] = useState(false)
+  const [tipCatalogError, setTipCatalogError] = useState('')
   const [loading, setLoading] = useState(true)
 
   const [selectedTypeId, setSelectedTypeId] = useState('')
@@ -304,12 +340,28 @@ function LabwareDashboard() {
   const label = useMemo(() => ({ fontSize: '0.85em', color: '#bbb', marginBottom: 6, fontWeight: 'bold' }), [])
   const fieldLabel = useMemo(() => ({ color: '#bbb', textAlign: 'right' }), [])
 
+  const fetchTipCatalog = async () => {
+    setTipCatalogLoaded(false)
+    setTipCatalogError('')
+    try {
+      const response = await fetch(`${API_URL}/api/tips`)
+      const data = await response.json()
+      if (!response.ok || !Array.isArray(data.tips)) throw new Error(data.detail || 'Failed to load the tip catalog')
+      setTipDefinitions(data.tips.filter(tip => typeof tip?.tip_id === 'string' && tip.tip_id).sort((a, b) => a.tip_id.localeCompare(b.tip_id)))
+      setTipCatalogLoaded(true)
+    } catch (e) {
+      setTipDefinitions([])
+      setTipCatalogError(e.message || String(e))
+    }
+  }
+
   const fetchAll = async () => {
     try {
       setLoading(true)
       const [typesRes, classesRes] = await Promise.all([
         fetch(`${API_URL}/labware/types`),
         fetch(`${API_URL}/labware/classes`),
+        fetchTipCatalog(),
       ])
       const typesJson = await typesRes.json().catch(() => ({}))
       const classesJson = await classesRes.json().catch(() => ({}))
@@ -514,6 +566,8 @@ function LabwareDashboard() {
 
   // -------- Pipette/Well Definition tab state (editable) --------
   const [wdVolumeUl, setWdVolumeUl] = useState('')
+  const [wdRows, setWdRows] = useState('')
+  const [wdCols, setWdCols] = useState('')
   const [wdDepthMm, setWdDepthMm] = useState('')
   const [wdDiameterMm, setWdDiameterMm] = useState('')
   const [wdOffsetX, setWdOffsetX] = useState('')
@@ -527,6 +581,10 @@ function LabwareDashboard() {
   const [tipCapacityUl, setTipCapacityUl] = useState(10)
   const [thirdPartyTipCapacityUl, setThirdPartyTipCapacityUl] = useState('')
   const [disposableTipLengthMm, setDisposableTipLengthMm] = useState('')
+  const [tipDefinitionId, setTipDefinitionId] = useState('')
+  const [supportedTipIds, setSupportedTipIds] = useState([])
+  const missingTipIds = uniq([tipDefinitionId, ...supportedTipIds].filter(id => id && !tipDefinitions.some(tip => tip.tip_id === id)))
+  const selectedTipDefinitions = tipDefinitions.filter(tip => tip.tip_id === tipDefinitionId || supportedTipIds.includes(tip.tip_id))
 
   // -------- Image tab state (upload) --------
   const [imageFile, setImageFile] = useState(null)
@@ -551,6 +609,8 @@ function LabwareDashboard() {
     if (!selectedType) return
     const wd = selectedType.well_dimensions_mm || {}
     const f = (v) => (v === null || v === undefined) ? '' : String(v)
+    setWdRows(wd.rows === 0 ? '' : f(wd.rows))
+    setWdCols(wd.cols === 0 ? '' : f(wd.cols))
     setWdVolumeUl(f(wd.volume_ul))
     setWdDepthMm(f(wd.depth_mm))
     setWdDiameterMm(f(wd.diameter_mm))
@@ -566,7 +626,9 @@ function LabwareDashboard() {
     setTipCapacityUl(Number.isFinite(Number(cap)) ? Number(cap) : 10)
     setThirdPartyTipCapacityUl(f(cap))
     setDisposableTipLengthMm(f(wd.disposable_tip_length_mm))
-  }, [selectedTypeId])
+    setTipDefinitionId(selectedType.tip_definition_id || '')
+    setSupportedTipIds([...(selectedType.supported_tip_ids || [])])
+  }, [selectedType])
 
   const saveWellDefinition = async () => {
     if (!selectedType) return
@@ -580,10 +642,17 @@ function LabwareDashboard() {
       }
 
       const capacity = tipSource === 'third_party' ? n(thirdPartyTipCapacityUl) : Number(tipCapacityUl)
+      const rack = rackMetadataPatch(selectedType, {
+        rows: wdRows, cols: wdCols, tipId: tipDefinitionId, supportedTipIds,
+      }, tipDefinitions, tipCatalogLoaded)
 
       const payload = {
+        tip_definition_id: rack.tip_definition_id,
+        supported_tip_ids: rack.supported_tip_ids,
         well_dimensions_mm: {
           ...(selectedType.well_dimensions_mm || {}),
+          rows: rack.rows,
+          cols: rack.cols,
           volume_ul: n(wdVolumeUl),
           depth_mm: n(wdDepthMm),
           diameter_mm: n(wdDiameterMm),
@@ -1270,6 +1339,10 @@ function LabwareDashboard() {
                         <div style={{ border: '1px solid #333', borderRadius: 12, padding: 14, background: '#111' }}>
                           <div style={{ color: '#fff', fontWeight: 'bold', marginBottom: 10 }}>Well Positions</div>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 10, alignItems: 'center' }}>
+                            <label htmlFor="rack-rows" style={fieldLabel}>Rows</label>
+                            <input id="rack-rows" type="number" min="1" step="1" placeholder="Unknown" value={wdRows} onChange={(e) => setWdRows(e.target.value)} style={input} disabled={busy} />
+                            <label htmlFor="rack-columns" style={fieldLabel}>Columns</label>
+                            <input id="rack-columns" type="number" min="1" step="1" placeholder="Unknown" value={wdCols} onChange={(e) => setWdCols(e.target.value)} style={input} disabled={busy} />
                             <div style={fieldLabel}>Row-wise teachpoint to well (mm)</div>
                             <input value={wdOffsetX} onChange={(e) => setWdOffsetX(e.target.value)} style={input} disabled={busy} />
                             <div style={fieldLabel}>Column-wise teachpoint to well (mm)</div>
@@ -1278,6 +1351,36 @@ function LabwareDashboard() {
                             <input value={wdPitchX} onChange={(e) => setWdPitchX(e.target.value)} style={input} disabled={busy} />
                             <div style={fieldLabel}>Column-wise well to well (mm)</div>
                             <input value={wdPitchY} onChange={(e) => setWdPitchY(e.target.value)} style={input} disabled={busy} />
+                          </div>
+                          <div style={{ color: '#aaa', fontSize: '0.85em', marginTop: 10 }}>Enter the documented grid. Rows × columns must equal the saved well count ({selectedType.wells}); leave unknown dimensions blank.</div>
+                        </div>
+
+                        <div style={{ border: '1px solid #333', borderRadius: 12, padding: 14, background: '#111' }}>
+                          <div style={{ color: '#fff', fontWeight: 'bold', marginBottom: 10 }}>Catalog Tip Definitions</div>
+                          <div style={{ color: '#aaa', fontSize: '0.85em', marginBottom: 12 }}>Select the tips this rack is documented to support. Head IDs below come from the tip catalog; rack geometry must also match.</div>
+                          {tipCatalogError && <div role="status" style={{ color: '#faad14', marginBottom: 10 }}>{tipCatalogError}. Refresh to retry; existing tip links are preserved.</div>}
+                          {!tipCatalogLoaded && !tipCatalogError && <div role="status" style={{ color: '#aaa', marginBottom: 10 }}>Loading tip catalog…</div>}
+                          <label htmlFor="rack-tip-definition" style={{ ...label, display: 'block' }}>Primary tip definition</label>
+                          <select id="rack-tip-definition" value={tipDefinitionId} onChange={(e) => setTipDefinitionId(e.target.value)} style={input} disabled={busy || !tipCatalogLoaded}>
+                            <option value="">Not specified</option>
+                            {missingTipIds.filter(id => id === tipDefinitionId).map(id => <option key={id} value={id} disabled>{id} — missing from catalog</option>)}
+                            {tipDefinitions.map(tip => <option key={tip.tip_id} value={tip.tip_id}>{tip.tip_id} — {tip.label || tip.tip_id}</option>)}
+                          </select>
+                          <fieldset style={{ border: '1px solid #333', borderRadius: 8, margin: '14px 0', padding: 10 }} disabled={busy || !tipCatalogLoaded}>
+                            <legend style={{ color: '#bbb' }}>Supported tip IDs</legend>
+                            {!tipDefinitions.length && tipCatalogLoaded && <div style={{ color: '#aaa' }}>No tip definitions in the catalog.</div>}
+                            {[...tipDefinitions.map(tip => ({ id: tip.tip_id, label: tip.label || tip.tip_id })), ...missingTipIds.map(id => ({ id, label: 'missing from catalog' }))].map(tip => (
+                              <label key={tip.id} style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#ddd', marginBottom: 6 }}>
+                                <input type="checkbox" checked={supportedTipIds.includes(tip.id)} disabled={missingTipIds.includes(tip.id) && !supportedTipIds.includes(tip.id)} onChange={(e) => setSupportedTipIds(ids => e.target.checked ? uniq([...ids, tip.id]) : ids.filter(id => id !== tip.id))} />
+                                {tip.id} — {tip.label}
+                              </label>
+                            ))}
+                          </fieldset>
+                          <div aria-label="Compatible head IDs" style={{ color: '#bbb', fontSize: '0.85em', overflowWrap: 'anywhere' }}>
+                            <div style={{ fontWeight: 'bold', marginBottom: 6 }}>Compatible head IDs by selected tip</div>
+                            {selectedTipDefinitions.map(tip => <div key={tip.tip_id} style={{ marginBottom: 6 }}>{tip.tip_id}: {tipCompatibilitySummary(tip)}</div>)}
+                            {!tipDefinitionId && !supportedTipIds.length && <div>No tip definitions selected.</div>}
+                            {missingTipIds.map(id => <div key={id}>{id}: compatibility unavailable</div>)}
                           </div>
                         </div>
 

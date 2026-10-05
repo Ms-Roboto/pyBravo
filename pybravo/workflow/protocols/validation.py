@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from pybravo.head_mode import (
+    TipSelection,
     head_geometry_for_type,
     legal_tipbox_anchors,
     normalize_head_mode,
@@ -24,6 +25,7 @@ from pybravo.head_mode import (
 from pybravo.types import HeadType
 
 from .models import ProtocolPlan, ProtocolSetup, ProtocolStep
+from .tipbox_choices import catalog_tip_ids, rack_tip_stride, selected_tip_id
 
 MAX_OPERATIONS = 1000
 MAX_NESTING = 8
@@ -255,6 +257,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
     volumes: dict[str, dict[tuple[int, int], float]] = {}
     fresh_tips: dict[str, set[tuple[int, int]]] = {}
     discarded_tips: dict[str, set[tuple[int, int]]] = {}
+    deck_entries: dict[str, dict] = {}
     for i, material in enumerate(plan.materials):
         path = f"/materials/{i}"
         if material.id in materials:
@@ -276,7 +279,8 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             result.deck[str(slot)] = [{"labware_id": material.labware_id, "name": material.name,
                 "kind": definition.get("kind", ""), "base_class": definition.get("base_class", ""),
                 "wells": definition.get("wells", 0), "is_lidded": False, "is_sealed": False,
-                "tip_definition_id": material.tip_definition_id or definition.get("tip_definition_id", "")}]
+                "tip_definition_id": selected_tip_id(material.tip_definition_id, definition) or ""}]
+            deck_entries[material.id] = result.deck[str(slot)][0]
             if _is_tip_box(definition):
                 result.deck[str(slot)][0].update(
                     tipbox_fill_state="empty" if material.role == "waste" or material.available_tips == [] else "full",
@@ -381,6 +385,34 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
     consumed: dict[str, float] = {}
     run_steps: list[dict] = []
 
+    def rack_selections(material_id: str, occupied: set[tuple[int, int]], purpose: str) -> list[TipSelection]:
+        definition = definitions[material_id]
+        rows, cols = int(definition.get("rows") or 0), int(definition.get("cols") or 0)
+        stride = rack_tip_stride(head_type, definition)
+        issue_path = "/setup/tip_rack_ids" if purpose == "pickup" else "/setup/tip_disposal_id"
+        if stride is None:
+            result.issue("tip_pitch" if purpose == "pickup" else "disposal_pitch", issue_path,
+                         "Tip rack grid and pitch must support the configured head.")
+            return []
+        if stride == 2:
+            if mode.subset_type != "all_barrels" or (mode.row_count, mode.column_count) != (8, 12):
+                result.issue("interleaved_head_mode", "/setup/head_mode", "A 96ST head uses a 384 tip rack only with all 96 barrels and alternate-well addressing.")
+                return []
+            selections = [TipSelection(location=locations[material_id], row=row, col=col, row_count=8,
+                                       column_count=12, row_stride=2, col_stride=2)
+                          for row, col in ((0, 0), (0, 1), (1, 0), (1, 1))]
+            return [selection for selection in selections
+                    if (set(selected_tip_wells(rows, cols, selection)) <= occupied if purpose == "pickup"
+                        else not set(selected_tip_wells(rows, cols, selection)) & occupied)]
+        return [tipbox_selection(locations[material_id], anchor.row, anchor.col, mode)
+                for anchor in legal_tipbox_anchors(rows, cols, mode, occupied, purpose=purpose)]
+
+    def tip_properties(selection: TipSelection) -> dict:
+        properties = {"tip_anchor_row": selection.row, "tip_anchor_col": selection.col}
+        if selection.row_stride != 1 or selection.col_stride != 1:
+            properties.update(row_stride=selection.row_stride, col_stride=selection.col_stride)
+        return properties
+
     def add(node_type: str, properties: dict, step: ProtocolStep, path: str) -> None:
         result.operations.append({"type": node_type, "properties": properties, "step_id": step.id, "path": path,
                                   "description": step.description, "source_paragraph_ids": list(step.source_paragraph_ids)})
@@ -389,32 +421,35 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         nonlocal loaded_tip, tips_used
         if loaded_tip is not None or mode is None or head_type is None:
             return
-        head_geometry = head_geometry_for_type(head_type)
         for material_id in setup.tip_rack_ids:
             definition = definitions.get(material_id)
             if definition is None or material_id not in locations or material_id not in fresh_tips:
                 continue
             rows, cols = int(definition.get("rows") or 0), int(definition.get("cols") or 0)
-            if not (math.isclose(float(definition.get("spacing_x_mm") or 0), head_geometry.pitch_x_mm) and math.isclose(float(definition.get("spacing_y_mm") or 0), head_geometry.pitch_y_mm)):
-                result.issue("tip_pitch", "/setup/tip_rack_ids", "Tip rack pitch must match the configured head pitch.")
-                continue
-            anchors = legal_tipbox_anchors(rows, cols, mode, fresh_tips[material_id], purpose="pickup")
-            if not anchors:
+            selections = rack_selections(material_id, fresh_tips[material_id], "pickup")
+            if not selections:
                 continue
             material = materials[material_id]
-            tip_id = material.tip_definition_id or definition.get("tip_definition_id")
+            tip_id = selected_tip_id(material.tip_definition_id, definition)
             tip = tips.get(tip_id)
             if tip is None:
-                result.issue("tip_definition", "/setup/tip_rack_ids", f"Tip rack {material_id!r} needs an approved tip definition.")
+                material_path = f"/materials/{plan.materials.index(material)}/tip_definition_id"
+                result.issue("tip_definition", material_path, f"Tip rack {material_id!r} needs an explicitly selected catalog tip definition.",
+                             f"Which tip definition is loaded in {material.name}?")
                 continue
             head_memberships = [tip.get(key) for key in ("compatible_heads", "supported_head_types") if tip.get(key)]
             if not head_memberships or any(head_type.name not in membership for membership in head_memberships):
                 result.issue("tip_head_compatibility", "/setup/tip_rack_ids", f"Tip {tip_id!r} has no explicit compatibility with {head_type.name}.")
                 continue
-            supported = definition.get("supported_tip_ids") or []
-            primary = definition.get("tip_definition_id")
-            if (not supported and not primary) or (supported and tip_id not in supported) or (not supported and tip_id != primary):
+            if tip_id not in catalog_tip_ids(definition):
                 result.issue("tip_rack_compatibility", "/setup/tip_rack_ids", f"Tip {tip_id!r} is not explicitly linked to rack {material_id!r}.")
+                continue
+            if tip.get("kind", "tip") != "tip":
+                result.issue("tip_kind", "/setup/tip_rack_ids", "Disposable-tip protocols require a pipette tip definition.")
+                continue
+            if not _positive(tip.get("length_mm")):
+                result.issue("tip_length", f"/materials/{plan.materials.index(material)}/tip_definition_id",
+                             f"Selected tip {tip_id!r} needs a finite positive catalog length before execution.")
                 continue
             capacity = tip.get("capacity_ul")
             if not _positive(capacity):
@@ -435,13 +470,12 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                     result.issue("liquid_class_head", "/setup/liquid_class", "The liquid class is not calibrated for this head.")
                 if liquid_class.get("machine_id") and liquid_class["machine_id"] != context.get("machine_id"):
                     result.issue("liquid_class_machine", "/setup/liquid_class", "The liquid class is not calibrated for this instrument.")
-            anchor = anchors[0]
-            selection = tipbox_selection(locations[material_id], anchor.row, anchor.col, mode)
+            selection = selections[0]
             cells = selected_tip_wells(rows, cols, selection)
             fresh_tips[material_id].difference_update(cells)
             tips_used += len(cells)
-            loaded_tip = {"capacity_ul": capacity, "rack": material_id}
-            add("tips/TipsOn", {"location": locations[material_id], "head_mode": mode.to_dict(), "tip_anchor_row": anchor.row, "tip_anchor_col": anchor.col}, step, path)
+            loaded_tip = {"capacity_ul": capacity, "rack": material_id, "tip_id": tip_id}
+            add("tips/TipsOn", {"location": locations[material_id], "head_mode": mode.to_dict(), **tip_properties(selection)}, step, path)
             return
         result.issue("tip_inventory_exhausted", path, "No compatible legal tip footprint remains in the selected supplies.")
 
@@ -456,17 +490,25 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         properties = {"location": locations[material_id]}
         if material_id in discarded_tips and mode is not None:
             definition = definitions[material_id]
-            geometry = head_geometry_for_type(head_type)
-            if not (math.isclose(float(definition.get("spacing_x_mm") or 0), geometry.pitch_x_mm) and math.isclose(float(definition.get("spacing_y_mm") or 0), geometry.pitch_y_mm)):
-                result.issue("disposal_pitch", "/setup/tip_disposal_id", "Disposal rack pitch must match the configured head.")
+            tip_id = loaded_tip["tip_id"]
+            explicit = materials[material_id].tip_definition_id
+            assigned = deck_entries[material_id]
+            if tip_id not in catalog_tip_ids(definition) or (explicit and explicit != tip_id):
+                result.issue("disposal_tip_compatibility", "/setup/tip_disposal_id", f"Disposal rack does not support the selected tip {tip_id!r}.")
+            elif discarded_tips[material_id] and assigned.get("tip_definition_id") != tip_id:
+                result.issue("disposal_tip_type", "/setup/tip_disposal_id", "Different tip definitions cannot share one tracked return rack; select a waste receptacle instead.")
+            else:
+                # This rack starts empty; bind its inventory to the actual tip
+                # being returned, without replacing the scientific selection.
+                assigned["tip_definition_id"] = tip_id
             rows, cols = int(definition.get("rows") or 0), int(definition.get("cols") or 0)
-            anchors = legal_tipbox_anchors(rows, cols, mode, discarded_tips[material_id], purpose="return")
-            if not anchors:
+            selections = rack_selections(material_id, discarded_tips[material_id], "return")
+            if not selections:
                 result.issue("disposal_capacity", path, "The used-tip receptacle has no legal remaining footprint.")
             else:
-                anchor = anchors[0]
-                properties.update(tip_anchor_row=anchor.row, tip_anchor_col=anchor.col)
-                cells = selected_tip_wells(rows, cols, tipbox_selection(locations[material_id], anchor.row, anchor.col, mode))
+                selection = selections[0]
+                properties.update(tip_properties(selection))
+                cells = selected_tip_wells(rows, cols, selection)
                 discarded_tips[material_id].update(cells)
         add("tips/TipsOff", properties, step, path)
         loaded_tip = None

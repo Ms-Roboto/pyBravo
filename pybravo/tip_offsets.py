@@ -1,16 +1,17 @@
-"""Per-(head, tip box) Tips On / Tips Off geometry overrides.
+"""Per-(head, tip box, tip) Tips On / Tips Off geometry overrides.
 
 The Tips On press depth/tolerance and the Tips Off eject depth (Z) and ejector
-throw (W) depend on the physical combination of head type and tip box: a long
+throw (W) depend on the physical combination of head type, tip box, and tip: a long
 LT200 tip needs to eject much further above the box than a short ST10 tip, and a
 deeper-engaging tip trips the Tips On force-press accept window if it is sized
 for a shorter tip.
 
 These overrides live in ``config/tip_offsets.yaml`` and are resolved at Tips On /
 Tips Off time by matching the active head type and the tip box labware (by name,
-case/whitespace-insensitive, or by ``labware_type_id``). Any field left unset on
-a matching entry — or the absence of any matching entry — falls back to the
-profile's ``safety.*`` defaults (``tips_off_z_offset`` / ``tips_off_w_position``)
+case/whitespace-insensitive, or by ``labware_type_id``), and optionally the tip
+definition ID. A tip-specific row never applies to another tip in the same box.
+An unset field, or the absence of a matching row, falls back to the profile's
+``safety.*`` defaults (``tips_off_z_offset`` / ``tips_off_w_position``)
 and the global :data:`pybravo.types.TIPBOX_JOG_TOLERANCE` for the press window.
 """
 
@@ -32,7 +33,7 @@ _STORE_PATH = Path(__file__).resolve().parents[1] / "config" / "tip_offsets.yaml
 
 @dataclass(frozen=True)
 class TipOffsetEntry:
-    """One (head, tip box) override row from ``tip_offsets.yaml``.
+    """One (head, tip box, optional tip) override row from ``tip_offsets.yaml``.
 
     Every numeric field is optional; ``None`` means "fall back to the profile
     default for this field". Matching requires ``head_type`` plus at least one of
@@ -42,6 +43,7 @@ class TipOffsetEntry:
     head_type: str
     tipbox: str = ""
     tipbox_id: str = ""
+    tip_id: str = ""
     tips_off_z_offset: float | None = None
     tips_off_w_position: float | None = None
     tips_on_jog_tolerance: float | None = None
@@ -102,28 +104,36 @@ class TipOffsetTable:
         *,
         tipbox_name: str = "",
         tipbox_id: str = "",
+        tip_id: str = "",
     ) -> TipOffsetEntry | None:
-        """Return the first entry matching ``head_type`` and the tip box.
+        """Return the first entry matching head, box, and optional tip ID.
 
         A row matches when its head type matches AND either its tip box id or its
-        tip box name matches the supplied values. Id match is preferred but a
-        name match is equally accepted (entries are scanned in file order).
+        tip box name matches the supplied values. A tip-specific match takes
+        precedence over a generic box row; file order breaks ties.
         """
         head = _normalize_head(head_type)
         if not head:
             return None
         name_key = _normalize_key(tipbox_name)
         id_key = _normalize_key(tipbox_id)
+        tip_key = _normalize_key(tip_id)
+        generic_match = None
         for entry in self._entries:
             if _normalize_head(entry.head_type) != head:
                 continue
+            if entry.tip_id and _normalize_key(entry.tip_id) != tip_key:
+                continue
             entry_id = _normalize_key(entry.tipbox_id)
             entry_name = _normalize_key(entry.tipbox)
-            if entry_id and id_key and entry_id == id_key:
+            if not ((entry_id and id_key and entry_id == id_key)
+                    or (entry_name and name_key and entry_name == name_key)):
+                continue
+            if entry.tip_id:
                 return entry
-            if entry_name and name_key and entry_name == name_key:
-                return entry
-        return None
+            if generic_match is None:
+                generic_match = entry
+        return generic_match
 
     def resolve(
         self,
@@ -131,13 +141,14 @@ class TipOffsetTable:
         *,
         tipbox_name: str = "",
         tipbox_id: str = "",
+        tip_id: str = "",
         default_z_offset: float,
         default_w_position: float,
         default_jog_tolerance: float = TIPBOX_JOG_TOLERANCE,
         default_z_on_offset: float = 0.0,
     ) -> ResolvedTipOffsets:
-        """Resolve offsets for a (head, tip box), filling gaps with defaults."""
-        entry = self.find(head_type, tipbox_name=tipbox_name, tipbox_id=tipbox_id)
+        """Resolve offsets for a (head, tip box, tip), filling gaps with defaults."""
+        entry = self.find(head_type, tipbox_name=tipbox_name, tipbox_id=tipbox_id, tip_id=tip_id)
         if entry is None:
             return ResolvedTipOffsets(
                 tips_off_z_offset=float(default_z_offset),
@@ -148,6 +159,10 @@ class TipOffsetTable:
                 source="profile defaults",
             )
         label = entry.tipbox or entry.tipbox_id or "?"
+        source = f"tip_offsets[{_normalize_head(entry.head_type)} / {label}"
+        if entry.tip_id:
+            source += f" / {entry.tip_id}"
+        source += "]"
         return ResolvedTipOffsets(
             tips_off_z_offset=float(
                 entry.tips_off_z_offset
@@ -170,7 +185,7 @@ class TipOffsetTable:
                 else default_z_on_offset
             ),
             matched=True,
-            source=f"tip_offsets[{_normalize_head(entry.head_type)} / {label}]",
+            source=source,
         )
 
 
@@ -190,6 +205,7 @@ def _entries_from_raw(raw: dict[str, Any]) -> list[TipOffsetEntry]:
                 head_type=head,
                 tipbox=str(item.get("tipbox") or item.get("tipbox_name") or "").strip(),
                 tipbox_id=str(item.get("tipbox_id") or item.get("labware_type_id") or "").strip(),
+                tip_id=str(item.get("tip_id") or item.get("tip_definition_id") or "").strip(),
                 tips_off_z_offset=_coerce_float(item.get("tips_off_z_offset")),
                 tips_off_w_position=_coerce_float(item.get("tips_off_w_position")),
                 tips_on_jog_tolerance=_coerce_float(item.get("tips_on_jog_tolerance")),

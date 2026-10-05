@@ -40,7 +40,7 @@ def ids(choices):
 def test_full_head_format_and_st_lt_are_both_required():
     racks, tips = catalog()
     assert ids(compatible_tipbox_choices("HT_384_D_70", racks, tips)) == [("rack-384-st", "st_10ul")]
-    assert ids(compatible_tipbox_choices("HT_96_D_70", racks, tips)) == [("rack-96-st", "st_10ul")]
+    assert ids(compatible_tipbox_choices("HT_96_D_70", racks, tips)) == [("rack-384-st", "st_10ul"), ("rack-96-st", "st_10ul")]
     assert ids(compatible_tipbox_choices("HT_96_D_200", racks, tips)) == [("rack-96-lt", "lt_250ul")]
     # Renaming an incompatible rack never changes its geometry or tip mapping.
     racks[2]["name"] = "384 ST perfect match"
@@ -60,7 +60,7 @@ def test_incomplete_or_contradictory_geometry_is_excluded(field, value):
 @pytest.mark.parametrize("changes", [
     {"compatible_heads": []}, {"compatible_heads": ["HT_96_D_200"]},
     {"compatible_heads": ["HT_384_D_70"], "supported_head_types": ["HT_96_D_200"]},
-    {"length_mm": None}, {"length_mm": 0}, {"capacity_ul": 0},
+    {"capacity_ul": 0},
     {"capacity_ul": float("inf")}, {"kind": "cartridge"},
 ])
 def test_tip_definition_must_explicitly_support_head_and_have_known_geometry(changes):
@@ -136,12 +136,13 @@ def test_context_exposes_filtered_choices_and_invalidates_when_tip_definition_ch
     definition = TipDefinition(tip_id="st_10ul", label="10 uL short tip", capacity_ul=10.0,
                                length_mm=None, source="test", compatible_heads=("HT_384_D_70",))
     second = context.machine_context(bravo)
-    assert second["tipbox_choices"] == []
-    assert "known length" in second["tipbox_choices_reason"]
+    assert second["tipbox_choices"][0]["execution_ready"] is False
+    assert second["tipbox_choices"][0]["missing_metadata"] == ["tip_length"]
+    assert second["tipbox_choices"][0]["tip_length_mm"] is None
     assert second["context_hash"] != first["context_hash"]
 
 
-def test_real_snapshot_384_rack_is_an_incomplete_candidate_without_guessed_fields():
+def test_real_snapshot_384_rack_has_recorded_st10_pair_and_grid():
     from pathlib import Path
 
     import yaml
@@ -153,12 +154,35 @@ def test_real_snapshot_384_rack_is_an_incomplete_candidate_without_guessed_field
     _, tips = catalog()
     choices = compatible_tipbox_choices("HT_384_D_70", [rack], tips)
     candidates = tipbox_catalog_candidates("HT_384_D_70", [rack], tips)
-    assert choices == []
-    assert candidates == [{"labware_id": rack["id"], "labware_name": rack["name"],
-                           "rows": 0, "cols": 0, "wells": 384, "spacing_x_mm": 4.5, "spacing_y_mm": 4.5,
-                           "verified": False, "missing_metadata": ["rows_cols", "tip_link"]}]
+    assert ids(choices) == [("lw-4914769d0af7", "st_10ul")]
+    assert (choices[0]["rows"], choices[0]["cols"]) == (16, 24)
+    assert candidates == []
     assert rack == original
-    assert "tip_definition_id" not in candidates[0]
+
+
+def test_checked_in_tipbox_links_agree_across_runtime_editor_and_seed():
+    import json
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1] / "config"
+    snapshot = yaml.safe_load((root / "labware_catalog.snapshot.yaml").read_text())["labware"]
+    editor = yaml.safe_load((root / "labware_editor.yaml").read_text())["labware_types"]
+    seed = json.loads((root / "labware_types.seed.json").read_text())
+    expected = {
+        "lw-4914769d0af7": ((16, 24), "st_10ul", 10.0),
+        "lw-b0704e550d2a": ((8, 12), "lt_200ul", 200.0),
+    }
+    for identity, (grid, tip_id, capacity) in expected.items():
+        for rows, key in ((snapshot, "id"), (editor, "labware_type_id"), (seed, "labware_type_id")):
+            rack = next(row for row in rows if row[key] == identity)
+            wells = rack.get("well_dimensions_mm", rack)
+            assert rack["base_class"] == "tip_box"
+            assert (wells["rows"], wells["cols"]) == grid
+            assert float(wells["disposable_tip_capacity_ul"]) == capacity
+            assert rack["tip_definition_id"] == tip_id
+            assert rack["supported_tip_ids"] == (["st_10ul", "st_70ul"] if tip_id == "st_10ul" else [tip_id])
 
 
 @pytest.mark.parametrize("changes", [
@@ -227,11 +251,11 @@ def test_snapshot_calibration_excludes_long_tip_candidates_for_short_tip_heads()
     tips = [asdict(tip) for tip in load_tip_definitions()]
     assert tipbox_catalog_candidates("HT_96_D_70", snapshot, tips, tip_offsets=offsets) == []
     for head in ("HT_384_D_70", "HT_16_D_ST"):
-        result = tipbox_catalog_candidates(head, snapshot, tips, tip_offsets=offsets)
-        assert [row["labware_id"] for row in result] == ["lw-4914769d0af7"]
-        assert result[0]["missing_metadata"] == ["rows_cols", "tip_link"]
+        assert tipbox_catalog_candidates(head, snapshot, tips, tip_offsets=offsets) == []
+        assert ids(compatible_tipbox_choices(head, snapshot, tips)) == [("lw-4914769d0af7", "st_10ul"), ("lw-4914769d0af7", "st_70ul")]
     long = tipbox_catalog_candidates("HT_96_D_200", snapshot, tips, tip_offsets=offsets)
-    assert [row["labware_id"] for row in long] == ["lw-b0704e550d2a"]
+    assert long == []
+    assert compatible_tipbox_choices("HT_96_D_200", snapshot, tips)[0]["execution_ready"] is False
 
 
 def test_calibration_filters_by_exact_rack_identity_not_st_lt_name_substrings():

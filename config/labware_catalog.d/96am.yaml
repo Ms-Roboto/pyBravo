@@ -80,8 +80,8 @@ labware:
   lid_resting_height_mm: 39.85
   lid_departure_height_mm: 27.0
   max_robot_handling_speed: fast
-  rows: 0
-  cols: 0
+  rows: 8
+  cols: 12
   well_depth_mm: 0.0
   offset_x_mm: 0.0
   offset_y_mm: 0.0
@@ -90,8 +90,12 @@ labware:
   well_volume_ul: 0.0
   well_diameter_mm: 0.0
   disposable_tip_capacity_ul: 250.0
-  tip_definition_id: ''
-  supported_tip_ids: []
+  # 19477-002 is also a 96LT tip rack in Agilent's consumables guide.
+  # Keep the 96LT (55.2 mm) and AssayMAP (55.5 mm) tip records separate.
+  tip_definition_id: am_lt250_teach
+  supported_tip_ids:
+  - am_lt250_teach
+  - lt_250ul
   model_3d: ''
   can_mount: false
   can_be_mounted: false
@@ -122,8 +126,8 @@ labware:
   lid_resting_height_mm: 0.0
   lid_departure_height_mm: 0.0
   max_robot_handling_speed: fast
-  rows: 0
-  cols: 0
+  rows: 8
+  cols: 12
   well_depth_mm: 0.0
   offset_x_mm: 0.0
   offset_y_mm: 0.0
@@ -132,8 +136,12 @@ labware:
   well_volume_ul: 0.0
   well_diameter_mm: 0.0
   disposable_tip_capacity_ul: 250.0
-  tip_definition_id: ''
-  supported_tip_ids: []
+  # Standard LT250 box supports the 96LT and AssayMAP tip records separately;
+  # their recorded lengths differ and must not be substituted.
+  tip_definition_id: am_lt250_teach
+  supported_tip_ids:
+  - am_lt250_teach
+  - lt_250ul
   model_3d: ''
   can_mount: false
   can_be_mounted: false
@@ -163,8 +171,8 @@ labware:
   lid_resting_height_mm: 39.85
   lid_departure_height_mm: 27.0
   max_robot_handling_speed: fast
-  rows: 0
-  cols: 0
+  rows: 8
+  cols: 12
   well_depth_mm: 0.0
   offset_x_mm: 0.0
   offset_y_mm: 0.0
@@ -173,8 +181,11 @@ labware:
   well_volume_ul: 0.0
   well_diameter_mm: 0.0
   disposable_tip_capacity_ul: 250.0
-  tip_definition_id: ''
-  supported_tip_ids: []
+  # This vendor definition specifies the 55.5 mm AssayMAP teach tip.
+  # The separate generic lt_250ul definition is 55.2 mm; do not substitute it.
+  tip_definition_id: am_lt250_teach
+  supported_tip_ids:
+  - am_lt250_teach
   model_3d: ''
   can_mount: false
   can_be_mounted: false

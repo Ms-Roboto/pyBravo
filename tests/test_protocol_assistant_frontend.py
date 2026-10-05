@@ -65,11 +65,12 @@ deserializeWorkflow(reviewed);
 assert.deepEqual(serializeWorkflow().graph.nodes,reviewed.graph.nodes);
 const ordinary=new LGraph();configureWorkflowGraph(ordinary,{graph:reviewed.graph});
 assert.equal(ordinary.getNodeById(1).properties.pipette_technique,'');
-const preview={...reviewed,id:'chat-preview',protocol_chat_draft:true,protocol_chat_session_id:'chat1'};
+const preview={...reviewed,id:'chat-preview',protocol_chat_draft:true,protocol_chat_session_id:'chat1',protocol_materials:[{id:'tips',labware_id:'shared-st-box',tip_definition_id:'st70'}]};
 delete preview.protocol_session_id;
 deserializeWorkflow(preview);
 assert.equal(serializeWorkflow().protocol_chat_draft,true);
 assert.equal(serializeWorkflow().protocol_chat_session_id,'chat1');
+assert.deepEqual(serializeWorkflow().protocol_materials,preview.protocol_materials);
 """
     script = tmp_path / "designer-roundtrip.cjs"
     script.write_text(source)

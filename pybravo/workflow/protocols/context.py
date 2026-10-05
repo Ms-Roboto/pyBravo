@@ -38,8 +38,8 @@ def machine_context(bravo) -> dict:
         head, context["labware"], tips, tip_offsets=context["tip_offsets"],
     )
     context["tipbox_choices_reason"] = "" if context["tipbox_choices"] else (
-        f"No catalog tip box has a verified rack grid and linked tip definition with "
-        f"known length and explicit compatibility for {head}. Complete the catalog metadata "
+        f"No catalog tip box has a verified rack grid and explicitly linked tip definition "
+        f"compatible with {head}. Complete the catalog metadata "
         "or select the correct configured head before choosing tips."
     )
     context["profile_hash"] = digest(profile)

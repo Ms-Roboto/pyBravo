@@ -11,7 +11,7 @@ const fresh = value => JSON.parse(JSON.stringify(value));
 const setup = {name:'Water qualification',head_mode:{subset_type:'single_barrel',subset_config:'back_left',row_count:null,column_count:null},tip_strategy:'fresh_each_step',tip_rack_ids:['tips'],tip_disposal_id:'tips',liquid_class:'water',distance_from_bottom_mm:1,tip_reuse_reason:null};
 const plan = {schema_version:'1',name:'Water transfer',description:'',materials:[{id:'source',name:'Water reservoir',role:'liquid',labware_id:'reservoir',deck_slot:1,initial_volume_ul:500,dead_volume_ul:20,well_volumes_ul:{}},{id:'target',name:'Destination plate',role:'liquid',labware_id:'plate',deck_slot:2,initial_volume_ul:0,dead_volume_ul:0,well_volumes_ul:{}},{id:'tips',name:'Tips',role:'tips',labware_id:'tiprack',deck_slot:3,tip_definition_id:'tip250',available_tips:['A1']}],steps:[{id:'transfer',kind:'transfer',description:'Transfer water',source:'source',destination:'target',source_anchor:'A1',destination_anchor:'A1',volume_ul:null,source_paragraph_ids:['p1'],source_values:[]},{id:'manual',kind:'manual',description:'Inspect the plate',message:'Inspect the plate and return it to position 2.',source_paragraph_ids:['p2'],source_values:[]}],decisions:[],questions:[{id:'volume',path:'/steps/0/volume_ul',prompt:'What transfer volume should be used?'},{id:'catalog-tipbox:tips',path:'/materials/2/labware_id',prompt:'Confirm the model-selected tipbox and tip definition.'}]};
 const compatibleTipbox={labware_id:'tiprack',labware_name:'Head-compatible rack',tip_definition_id:'tip250',tip_name:'250 µL tips',rows:8,cols:12,wells:96,spacing_x_mm:9,spacing_y_mm:9,tip_capacity_ul:250,tip_length_mm:50};
-let tipboxChoices=[compatibleTipbox,{...compatibleTipbox,labware_id:'bad-rack',labware_name:'Unverified geometry',spacing_x_mm:0}];
+let tipboxChoices=[compatibleTipbox,{...compatibleTipbox,tip_definition_id:'tip70',tip_name:'ST 70 µL tips',tip_capacity_ul:70,tip_length_mm:null,execution_ready:false,missing_metadata:['tip_length']},{...compatibleTipbox,labware_id:'bad-rack',labware_name:'Unverified geometry',spacing_x_mm:0}];
 let tipboxReason='';
 const tipboxCandidates=[{labware_id:'incomplete-rack',labware_name:'Incomplete catalog tipbox',rows:0,cols:0,wells:96,spacing_x_mm:9,spacing_y_mm:9,verified:false,missing_metadata:['rows_cols','tip_link']}];
 let session, savedSetup, library = [], requests = [];
@@ -26,7 +26,7 @@ async function run(){
         let body=req.postData()?JSON.parse(req.postData()):null;
         requests.push({method:req.method(),endpoint,body});
         let result;
-        if(endpoint==='/context')result={tipbox_choices:tipboxChoices,tipbox_choices_reason:tipboxReason,tipbox_catalog_candidates:tipboxCandidates,profile_name:'Test Bravo',head_type:'ST',labware:[{id:'reservoir',name:'Reservoir'},{id:'plate',name:'96-well plate'},{id:'tiprack',name:'Tip rack'}],tip_definitions:[{id:'tip250',name:'250 µL tips'},{id:'mismatched-tip',name:'Unverified pairing'}],liquid_classes:[{id:'water',name:'Water'}]};
+        if(endpoint==='/context')result={tipbox_choices:tipboxChoices,tipbox_choices_reason:tipboxReason,tipbox_catalog_candidates:tipboxCandidates,profile_name:'Test Bravo',head_type:'ST',labware:[{id:'reservoir',name:'Reservoir'},{id:'plate',name:'96-well plate'},{id:'tiprack',name:'Tip rack'}],tip_definitions:[{id:'tip250',name:'250 µL tips'},{id:'tip70',name:'ST 70 µL tips'},{id:'mismatched-tip',name:'Unverified pairing'}],liquid_classes:[{id:'water',name:'Water'}]};
         else if(endpoint==='/setups'&&req.method()==='GET')result={items:[{id:'setup1',name:'Water qualification',setup,materials:plan.materials}]};
         else if(endpoint==='/setups'){savedSetup=body;result={id:'saved',...body};}
         else if(endpoint==='/library')result={items:library};
@@ -110,22 +110,26 @@ async function run(){
         await page.locator('#save-setup').click();
         await page.waitForFunction(()=>document.querySelector('#notice').textContent.includes('Reusable setup saved'));
         assert.equal(savedSetup.materials.length,3);
-        assert.equal(await page.locator('#setup-tipbox-select option').count(),2,'Incomplete catalog geometry must not be offered');
+        assert.equal(await page.locator('#setup-tipbox-select option').count(),3,'One box can offer multiple tips; incomplete geometry is excluded');
+        assert.equal(await page.locator('#setup-tipbox-select').inputValue(),'','Do not default to the first compatible tip');
+        assert.match(await page.locator('#setup-tipbox-select').innerText(),/Planning only: tip length missing/);
         await page.locator('#setup-tipbox-candidates summary').click();
         assert.match(await page.locator('#setup-tipbox-candidates').innerText(),/Incomplete catalog tipbox/);
         assert.match(await page.locator('#setup-tipbox-candidates').innerText(),/rack rows and columns, linked tip definition/);
         assert.equal(await page.locator('#setup-tipbox-candidates button, #setup-tipbox-candidates select, #setup-tipbox-candidates input').count(),0,'Candidates cannot be selected as verified choices');
 
-        await page.locator('#setup-tipbox-select').selectOption({index:1});
+        await page.locator('#setup-tipbox-select').selectOption(JSON.stringify(['tiprack','tip70']));
+        assert.match(await page.locator('#setup-tipbox-choices').innerText(),/record the missing tip length/);
         await page.locator('#setup-tipbox-choices').screenshot({path:'/tmp/protocol-assistant-tipbox-choices.png'});
         await page.locator('#add-compatible-tipbox').click();
         const lastMaterial=page.locator('#materials > .row-card').last();
         assert.equal(await lastMaterial.locator('[data-path$="/labware_id"]').inputValue(),'tiprack');
-        assert.equal(await lastMaterial.locator('[data-path$="/tip_definition_id"]').inputValue(),'tip250');
+        assert.equal(await lastMaterial.locator('[data-path$="/tip_definition_id"]').inputValue(),'tip70');
         assert.equal(await lastMaterial.locator('[data-path$="/deck_slot"]').inputValue(),'','Adding compatibility choice must not invent deck placement');
         await page.locator('#save').click();
         await page.waitForFunction(()=>document.querySelector('#save').disabled);
         const selectedRack=session.plan.materials.at(-1);
+        assert.equal(selectedRack.tip_definition_id,'tip70','Save retains the selected tip instead of the other tip for this box');
         assert.equal(selectedRack.deck_slot,null);
         assert.equal(selectedRack.available_tips,null);
         assert.ok(session.setup.tip_rack_ids.includes(selectedRack.id));

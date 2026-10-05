@@ -37,24 +37,45 @@ finish the physical setup, validate and strictly simulate the plan, record
 scientist approval, and export the compiled workflow back to the designer.
 That export contains the executable nodes and the reviewed deck configuration.
 
-The chat and setup panel offer tip-box choices for the active head. A verified
-choice has a matching rack grid and pitch, an explicit rack-to-tip definition
-link, and a tip definition that names the head and has known capacity and
-length. A 384-channel head only receives 384-position choices; a 16-channel
-short-tip head receives racks whose recorded grid and pitch can hold its full
-footprint and whose tips explicitly support that head. Choosing a chat option
-adds its exact IDs to your message for review before you send it. Choosing one
-in setup adds an unplaced tip material, leaving deck slot and actual tip
-inventory blank. A model-proposed pair asks for explicit scientist confirmation
-of both IDs before validation.
+The chat and setup panel offer **box–tip pairs** for the active head. The box
+records physical geometry; the tip definition records capacity, length, and
+compatible heads. One box may support several independent tip types, so select
+the exact tip loaded in that box for this run. A compatible pair needs an
+explicit box-to-tip link and matching head/box geometry. Pairs missing a tip
+length are labeled **Planning only**: they can be drafted, but validation and
+execution remain blocked until that length is recorded. A full 96ST head can
+take an interleaved 96-tip quadrant from a documented 384-position ST rack;
+the full 384ST head uses that rack's complete grid. Choosing a chat option
+adds its exact box and tip IDs to your message for review before you send it.
+Choosing one in setup adds an unplaced tip material, leaving deck slot and
+actual tip inventory blank. A model-proposed pair asks for explicit scientist
+confirmation of both IDs before validation. A multi-tip box never silently
+selects its catalog default.
 
 Imported racks with a plausible recorded format or pitch but incomplete
 metadata appear separately as **catalog candidates**. These help identify
 which labware record needs work; they are not selectable as verified pairs.
 The model may mention a candidate as a lead, but cannot turn its name into a
 tip definition or deck assignment. Complete the listed fields in the labware
-and tip editors, then reload the active catalog to make a verified choice
+and tip editors, then reload the active catalog to make a compatible choice
 available.
+
+The checked-in catalog currently records these box–tip links:
+
+| Head family | Box | Tip options | Status |
+| --- | --- | --- | --- |
+| 384ST; 96ST full head via 384-rack quadrant; 16ST where its selected footprint fits | `lw-4914769d0af7` (384 ST, 16×24) | `st_10ul`, `st_70ul` | ST10 has a measured 19.9 mm length; ST70 needs its length before execution. |
+| 96LT; 8LT where its selected footprint fits | `lw-b0704e550d2a` (96 LT200, 8×12) | `lt_200ul` | Tip length needs confirmation before execution. |
+| 96LT; 8LT where its selected footprint fits | `lw-cadcb0f0f9c1`, `lw-0c182cad7c78` (96 LT250, 8×12) | `lt_250ul` | 55.2 mm length is recorded for the LT head. |
+
+The 384 ST box's ST10/ST70 sharing was confirmed by the scientist. The
+[Agilent consumables guide](https://www.agilent.com/cs/library/brochures/brochure-pipette-and-microplate-5994-5118en-agilent.pdf)
+lists 384-position ST tip racks for both 96ST and 384ST heads, and LT250 rack
+`19477-002` for 96LT. The catalog also retains a separate 55.5 mm AssayMAP
+teach-tip record for its own workflow; do not substitute it for the 96LT
+record. Head/box/tip compatibility in the
+catalog does not certify this machine's pickup/ejection calibration or the
+liquid class for a particular protocol.
 
 ## Prepare a protocol
 

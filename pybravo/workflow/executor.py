@@ -1504,6 +1504,9 @@ class WorkflowExecutor:
                         int(properties.get("location", 1)),
                         int(anchor_row or 0),
                         int(anchor_col or 0),
+                        **({"row_stride": int(properties.get("row_stride", 1)),
+                            "col_stride": int(properties.get("col_stride", 1))}
+                           if "row_stride" in properties or "col_stride" in properties else {}),
                     )
                 except Exception:
                     if self._strict_validation or self._reviewed_protocol:
@@ -2174,6 +2177,9 @@ class WorkflowExecutor:
                         int(loc),
                         int(node_anchor_row or 0),
                         int(node_anchor_col or 0),
+                        **({"row_stride": int(properties.get("row_stride", 1)),
+                            "col_stride": int(properties.get("col_stride", 1))}
+                           if "row_stride" in properties or "col_stride" in properties else {}),
                     )
                 except Exception:
                     pass

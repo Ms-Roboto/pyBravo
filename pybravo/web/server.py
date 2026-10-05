@@ -62,6 +62,14 @@ from pybravo.tips import (
 from pybravo.types import Axis, HeadType, SpeedLevel, safe_home_order
 from pybravo.vision_client import VisionServiceClient, VisionServiceError
 from pybravo.web.middleware import RequestLoggingMiddleware
+
+# `python -m pybravo.web.server` executes this module as __main__. Protocol
+# Assistant imports pybravo.web.server lazily to access the active Bravo. Share
+# this module object under its canonical name so that import does not create a
+# second, uninitialized server whose fallback profile has the wrong head.
+if __name__ == "__main__":
+    sys.modules["pybravo.web.server"] = sys.modules[__name__]
+
 from pybravo.workflow.protocols import api as protocol_api
 
 logger = logging.getLogger(__name__)

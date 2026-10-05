@@ -82,8 +82,9 @@ async function save(){
 
 function render(){const s=state.session;$('session-bar').hidden=!s;$('source-panel').hidden=!s;$('session-name').textContent=s?.plan?.name||s?.name||'Prepare a protocol for Bravo';if(s){$('protocol-name').value=s.name||s.plan?.name||'';$('publish-name').value=s.plan?.name||s.name||'';$('source-reviewed').checked=state.sourceReviewedKey===reviewKey();renderSource();}renderSetup();renderPlan();renderReview();gates();}
 function renderSource(){const s=state.session;$('original-pdf').hidden=!s.source?.metadata?.original_pdf;$('original-pdf').href='/api/protocols/'+encodeURIComponent(s.id)+'/source-pdf';const paragraphs=list(s.source?.paragraphs);if(!s.selected_paragraph_ids)s.selected_paragraph_ids=paragraphs.map(item=>item.id);const selected=new Set(s.selected_paragraph_ids);$('source-description').textContent=`${paragraphs.length} passages · ${selected.size} selected${s.source?.name?' · '+s.source.name:''}`;$('source-paragraphs').replaceChildren(...paragraphs.map(p=>{const checkbox=el('input',{type:'checkbox',checked:selected.has(p.id),'aria-label':`Include ${p.id}${p.page?' on page '+p.page:''}`});checkbox.addEventListener('change',()=>{const chosen=new Set(s.selected_paragraph_ids);checkbox.checked?chosen.add(p.id):chosen.delete(p.id);s.selected_paragraph_ids=[...chosen];dirty();$('source-reviewed').checked=false;});return el('label',{class:'source-row',id:'source-'+p.id},checkbox,el('span',{},el('span',{class:'source-meta'},`${p.id}${p.page?' · Page '+p.page:''}`),el('span',{class:'source-text'},p.text)));}));}
+function planningOnlyTipboxChoice(choice){return choice.execution_ready===false&&Array.isArray(choice.missing_metadata)&&choice.missing_metadata.length===1&&choice.missing_metadata[0]==='tip_length';}
 function verifiedTipboxChoices(){
-    return list(state.context.tipbox_choices).filter(choice=>choice.labware_id&&choice.tip_definition_id&&['rows','cols','wells','spacing_x_mm','spacing_y_mm','tip_capacity_ul','tip_length_mm'].every(field=>Number(choice[field])>0));
+    return list(state.context.tipbox_choices).filter(choice=>choice.labware_id&&choice.tip_definition_id&&['rows','cols','wells','spacing_x_mm','spacing_y_mm','tip_capacity_ul'].every(field=>Number(choice[field])>0)&&(Number(choice.tip_length_mm)>0||planningOnlyTipboxChoice(choice)));
 }
 function tipboxChoiceKey(choice){return JSON.stringify([choice.labware_id,choice.tip_definition_id]);}
 function renderTipboxCandidates(panel,hasVerifiedChoices){
@@ -104,14 +105,14 @@ function renderTipboxChoices(){
     const panel=$('setup-tipbox-choices');
     const previous=$('setup-tipbox-select')?.value;
     const choices=verifiedTipboxChoices();
-    panel.replaceChildren(el('h3',{},`Head-compatible tipboxes · ${state.context.head_type||'active head'}`));
+    panel.replaceChildren(el('h3',{},`Head-compatible box / tip choices · ${state.context.head_type||'active head'}`));
     if(!choices.length){
         panel.append(el('p',{class:'muted',style:'font-size:12px'},state.context.tipbox_choices_reason||'No verified compatible tipbox is available in the active catalog. Check the head assignment, rack geometry, and tip definition.'),el('a',{href:'/labware-editor',target:'_blank',rel:'noopener'},'Review the labware catalog'));
         renderTipboxCandidates(panel,false);
         return;
     }
     const select=el('select',{id:'setup-tipbox-select'});
-    select.append(el('option',{value:''},'Choose a verified rack and tip definition…'),...choices.map(choice=>el('option',{value:tipboxChoiceKey(choice)},`${choice.labware_name} · ${choice.rows} × ${choice.cols} · ${choice.tip_name} (${choice.tip_capacity_ul} µL)`)));
+    select.append(el('option',{value:''},'Choose a catalog rack and tip definition…'),...choices.map(choice=>el('option',{value:tipboxChoiceKey(choice)},`${choice.labware_name} · ${choice.rows} × ${choice.cols} · ${choice.tip_name} (${choice.tip_capacity_ul} µL)${planningOnlyTipboxChoice(choice)?' · Planning only: tip length missing':''}`)));
     if(choices.some(choice=>tipboxChoiceKey(choice)===previous))select.value=previous;
     const add=el('button',{id:'add-compatible-tipbox',class:'small',disabled:state.busy||!state.session||!select.value,onclick:()=>{
         const choice=verifiedTipboxChoices().find(item=>tipboxChoiceKey(item)===select.value);
@@ -127,8 +128,8 @@ function renderTipboxChoices(){
         const field=document.querySelector(`[data-path="/materials/${index}/deck_slot"]`);
         field?.scrollIntoView({behavior:'smooth',block:'center'});field?.focus();
     }},'Add tipbox to draft');
-    const details=el('p',{class:'muted',style:'font-size:11px;margin:8px 0 0'},'Catalog compatibility does not establish deck placement, available tips, or readiness to run.');
-    select.addEventListener('change',()=>{add.disabled=state.busy||!state.session||!select.value;const choice=choices.find(item=>tipboxChoiceKey(item)===select.value);details.textContent=choice?`Rack: ${choice.labware_id} · Tips: ${choice.tip_definition_id}. Assign deck position and tip availability after adding.`:'Catalog compatibility does not establish deck placement, available tips, or readiness to run.';});
+    const details=el('p',{class:'muted',style:'font-size:11px;margin:8px 0 0'},'A box may support several tips. Choose the loaded tip explicitly; catalog compatibility does not establish deck placement, available tips, or readiness to run.');
+    select.addEventListener('change',()=>{add.disabled=state.busy||!state.session||!select.value;const choice=choices.find(item=>tipboxChoiceKey(item)===select.value);details.textContent=choice?`Rack: ${choice.labware_id} · Tips: ${choice.tip_definition_id}.${planningOnlyTipboxChoice(choice)?' Planning only: record the missing tip length in the tip editor before validation can pass.':''} Assign deck position and tip availability after adding.`:'Choose the loaded tip explicitly. Catalog compatibility does not establish readiness to run.';});
     panel.append(el('div',{class:'actions',style:'margin-top:8px'},el('label',{class:'field',style:'flex:1;min-width:240px'},'Catalog rack / tip pairing',select),add),details);
     renderTipboxCandidates(panel,true);
 }

@@ -1,8 +1,9 @@
-"""Tests for per-(head, tip box) Tips On / Tips Off offset resolution."""
+"""Tests for per-(head, tip box, tip) Tips On / Tips Off offset resolution."""
 
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -78,6 +79,50 @@ def test_resolve_matches_by_id_when_name_differs():
     )
     assert resolved.matched is True
     assert resolved.tips_off_z_offset == 25.0
+
+
+def test_tip_specific_calibration_does_not_follow_the_box_to_another_tip():
+    table = TipOffsetTable([
+        TipOffsetEntry(
+            head_type="HT_384_D_70", tipbox_id="st-box", tip_id="st_10ul",
+            tips_off_z_offset=14.0, tips_off_w_position=-7.0,
+        ),
+    ])
+    calibrated = _resolve(table, HeadType.HT_384_D_70, tipbox_id="st-box", tip_id="st_10ul")
+    different_tip = _resolve(table, HeadType.HT_384_D_70, tipbox_id="st-box", tip_id="st_70ul")
+    unspecified_tip = _resolve(table, HeadType.HT_384_D_70, tipbox_id="st-box")
+    assert calibrated.matched and calibrated.tips_off_z_offset == 14.0
+    assert "st_10ul" in calibrated.source
+    assert not different_tip.matched and different_tip.tips_off_z_offset == 15.0
+    assert not unspecified_tip.matched
+
+
+def test_tip_specific_calibration_precedes_a_generic_box_row():
+    table = TipOffsetTable([
+        TipOffsetEntry(head_type="HT_384_D_70", tipbox_id="st-box", tips_off_z_offset=20.0),
+        TipOffsetEntry(head_type="HT_384_D_70", tipbox_id="st-box", tip_id="st_10ul", tips_off_z_offset=14.0),
+    ])
+    assert _resolve(table, HeadType.HT_384_D_70, tipbox_id="st-box", tip_id="st_10ul").tips_off_z_offset == 14.0
+    assert _resolve(table, HeadType.HT_384_D_70, tipbox_id="st-box", tip_id="st_70ul").tips_off_z_offset == 20.0
+
+
+def test_tip_id_is_loaded_from_yaml(tmp_path):
+    path = tmp_path / "tip_offsets.yaml"
+    path.write_text(
+        "offsets:\n  - head_type: HT_384_D_70\n    tipbox_id: st-box\n"
+        "    tip_id: st_10ul\n    tips_off_z_offset: 14.0\n",
+        encoding="utf-8",
+    )
+    table = load_tip_offset_table(path)
+    assert table.find(HeadType.HT_384_D_70, tipbox_id="st-box", tip_id="st_10ul") is not None
+    assert table.find(HeadType.HT_384_D_70, tipbox_id="st-box", tip_id="st_70ul") is None
+
+
+def test_checked_in_st10_calibration_does_not_apply_to_st70():
+    path = Path(__file__).resolve().parents[1] / "config" / "tip_offsets.yaml"
+    table = load_tip_offset_table(path)
+    assert table.find(HeadType.HT_384_D_70, tipbox_id="lw-4914769d0af7", tip_id="st_10ul") is not None
+    assert table.find(HeadType.HT_384_D_70, tipbox_id="lw-4914769d0af7", tip_id="st_70ul") is None
 
 
 def test_resolve_head_mismatch_falls_back():
@@ -165,6 +210,39 @@ def _patch_table(monkeypatch, entries):
     table = TipOffsetTable(entries)
     monkeypatch.setattr("pybravo.bravo.get_tip_offset_table", lambda **_: table)
     return table
+
+
+def test_bravo_uses_attached_tip_for_shared_box_calibration(monkeypatch):
+    _patch_table(monkeypatch, [
+        TipOffsetEntry(
+            head_type="HT_384_D_70", tipbox_id="shared-st-box", tip_id="st_10ul",
+            tips_off_z_offset=14.0,
+        ),
+    ])
+    profile = BravoProfile.default()
+    profile.head.head_type = HeadType.HT_384_D_70
+    bravo = Bravo(profile=profile)
+    box = Labware.from_definition(LabwareDefinition(
+        id="shared-st-box", name="Shared ST box", kind="tip_box", base_class="tip_box",
+        tip_definition_id="st_10ul", supported_tip_ids=["st_10ul", "st_70ul"],
+    ))
+    bravo._tip_definition_id = "st_70ul"
+
+    assert not bravo._resolve_tip_offsets(box).matched
+    assert bravo._resolve_tip_offsets(box, tip_id="st_10ul").tips_off_z_offset == 14.0
+
+
+def test_explicit_tip_without_length_cannot_use_teach_tip_fallback():
+    profile = BravoProfile.default()
+    profile.head.head_type = HeadType.HT_384_D_70
+    bravo = Bravo(profile=profile)
+    box = Labware.from_definition(LabwareDefinition(
+        id="shared-st-box", name="Shared ST box", kind="tip_box", base_class="tip_box",
+        tip_definition_id="st_70ul", supported_tip_ids=["st_10ul", "st_70ul"],
+    ))
+
+    with pytest.raises(RuntimeError, match="Tip length is not configured for 'st_70ul'"):
+        bravo._tip_length_for_labware(box)
 
 
 @pytest.mark.asyncio

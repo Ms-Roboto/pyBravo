@@ -49,6 +49,45 @@ def _supports_head(tip: Mapping[str, Any], head: HeadType) -> bool:
     )
 
 
+def catalog_tip_ids(rack: Mapping[str, Any]) -> frozenset[str]:
+    """Explicit consumables supported by a rack, independent of its default."""
+    supported = rack.get("supported_tip_ids") or []
+    if not isinstance(supported, (list, tuple)) or not all(isinstance(value, str) for value in supported):
+        return frozenset()
+    links = {value for value in supported if value}
+    primary = rack.get("tip_definition_id")
+    if isinstance(primary, str) and primary and (not supported or primary in links):
+        links.add(primary)
+    return frozenset(links)
+
+
+def selected_tip_id(explicit: str | None, rack: Mapping[str, Any]) -> str | None:
+    """A rack supporting several consumables cannot choose the loaded tip."""
+    if explicit:
+        return explicit
+    links = catalog_tip_ids(rack)
+    return next(iter(links)) if len(links) == 1 else None
+
+
+def rack_tip_stride(head: HeadType, rack: Mapping[str, Any]) -> int | None:
+    """Supported rack address patterns; stride two requires a full 96ST head."""
+    geometry = head_geometry_for_type(head)
+    rows, cols, wells = rack.get("rows"), rack.get("cols"), rack.get("wells")
+    if not all(_positive_integer(value) for value in (rows, cols, wells)) or rows * cols != wells:
+        return None
+    px, py = rack.get("spacing_x_mm"), rack.get("spacing_y_mm")
+    if not (_positive(px) and _positive(py)):
+        return None
+    if head in {HeadType.HT_96_D_70, HeadType.HT_96_D_70_S2} and (rows, cols) == (16, 24):
+        if math.isclose(px, 4.5, abs_tol=1e-6) and math.isclose(py, 4.5, abs_tol=1e-6):
+            return 2
+    grid_fits = ((rows, cols) == (geometry.rows, geometry.columns) if geometry.columns > 1
+                 else rows >= geometry.rows and cols >= geometry.columns)
+    if grid_fits and math.isclose(px, geometry.pitch_x_mm, abs_tol=1e-6) and math.isclose(py, geometry.pitch_y_mm, abs_tol=1e-6):
+        return 1
+    return None
+
+
 def _candidate_calibration_allows_head(
     rack_id: str, rack: Mapping[str, Any], head: HeadType,
     tips: Mapping[str, Mapping[str, Any]], links: set[str],
@@ -92,10 +131,10 @@ def compatible_tipbox_choices(
 ) -> list[dict]:
     """Return explicit compatible rack/tip pairs without filling missing metadata.
 
-    For full 96/384-channel heads the rack must have that head's complete grid,
-    regardless of the currently selected subset. For narrow 8/16-channel heads,
-    the actual catalog grid must contain the complete head at matching pitch;
-    no rack format is inferred from a short-tip/long-tip name or selected mode.
+    A 96ST head may use a 384 ST rack through explicit alternate-well addressing,
+    only with all barrels. Other full heads require their complete grid. Narrow
+    heads require a rack containing their footprint at the recorded pitch.
+    Unknown tip lengths are selectable for planning but block execution.
     """
     try:
         if isinstance(head_type, bool):
@@ -105,7 +144,6 @@ def compatible_tipbox_choices(
         return []
     if not head.is_disposable:
         return []
-    geometry = head_geometry_for_type(head)
     racks = _unique_rows(labware, "id", "labware_id")
     tips = _unique_rows(tip_definitions, "tip_id", "id")
     choices = []
@@ -113,38 +151,26 @@ def compatible_tipbox_choices(
         if "tip_box" not in {rack.get("kind"), rack.get("base_class")}:
             continue
         rows, cols, wells = rack.get("rows"), rack.get("cols"), rack.get("wells")
-        if not all(_positive_integer(value) for value in (rows, cols, wells)) or rows * cols != wells:
-            continue
-        if geometry.columns > 1:
-            if (rows, cols) != (geometry.rows, geometry.columns):
-                continue
-        elif rows < geometry.rows or cols < geometry.columns:
+        stride = rack_tip_stride(head, rack)
+        if stride is None:
             continue
         px, py = rack.get("spacing_x_mm"), rack.get("spacing_y_mm")
-        if not (_positive(px) and _positive(py)
-                and math.isclose(px, geometry.pitch_x_mm, rel_tol=0, abs_tol=1e-6)
-                and math.isclose(py, geometry.pitch_y_mm, rel_tol=0, abs_tol=1e-6)):
-            continue
-        supported = rack.get("supported_tip_ids") or []
-        if not isinstance(supported, (list, tuple)) or not all(isinstance(identity, str) for identity in supported):
-            continue
-        primary = rack.get("tip_definition_id")
-        linked_ids = set(supported)
-        if isinstance(primary, str) and primary and (not supported or primary in supported):
-            linked_ids.add(primary)
-        for tip_id in sorted(linked_ids):
+        for tip_id in sorted(catalog_tip_ids(rack)):
             tip = tips.get(tip_id)
             if tip is None or tip.get("kind", "tip") != "tip" or not _supports_head(tip, head):
                 continue
             capacity, length = tip.get("capacity_ul"), tip.get("length_mm")
-            if not (_positive(capacity) and _positive(length)):
+            if not _positive(capacity):
                 continue
+            missing = [] if _positive(length) else ["tip_length"]
             choices.append({
                 "labware_id": rack_id, "labware_name": str(rack.get("name") or rack_id),
                 "tip_definition_id": tip_id, "tip_name": str(tip.get("label") or tip.get("name") or tip_id),
                 "rows": rows, "cols": cols, "wells": wells,
                 "spacing_x_mm": px, "spacing_y_mm": py,
-                "tip_capacity_ul": capacity, "tip_length_mm": length,
+                "tip_capacity_ul": capacity, "tip_length_mm": length if not missing else None,
+                "execution_ready": not missing, "missing_metadata": missing,
+                **({"tip_row_stride": 2, "tip_col_stride": 2, "required_head_mode": "all_barrels"} if stride == 2 else {}),
             })
     return sorted(choices, key=lambda row: (row["labware_name"].casefold(), row["labware_id"], row["tip_capacity_ul"], row["tip_definition_id"]))
 
@@ -202,11 +228,7 @@ def tipbox_catalog_candidates(
         elif (known_rows and rows < geometry.rows) or (known_cols and cols < geometry.columns):
             continue
         missing = [] if known_rows and known_cols else ["rows_cols"]
-        supported = rack.get("supported_tip_ids") or []
-        primary = rack.get("tip_definition_id")
-        links = {identity for identity in supported if isinstance(identity, str) and identity} if isinstance(supported, (list, tuple)) else set()
-        if isinstance(primary, str) and primary and (not supported or primary in links):
-            links.add(primary)
+        links = catalog_tip_ids(rack)
         if not _candidate_calibration_allows_head(rack_id, rack, head, tips, links, offsets):
             continue
         if not links:

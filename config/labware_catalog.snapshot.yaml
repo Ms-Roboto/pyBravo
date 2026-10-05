@@ -148,8 +148,8 @@ labware:
   lid_resting_height_mm: 0.0
   lid_departure_height_mm: 0.0
   max_robot_handling_speed: fast
-  rows: 0
-  cols: 0
+  rows: 16
+  cols: 24
   well_depth_mm: 0.0
   offset_x_mm: 2.25
   offset_y_mm: 2.25
@@ -158,8 +158,12 @@ labware:
   well_volume_ul: 0.0
   well_diameter_mm: 0.0
   disposable_tip_capacity_ul: 10.0
-  tip_definition_id: ''
-  supported_tip_ids: []
+  # The ST10 rack also accepts 70 uL ST tips (scientist-confirmed).
+  # Rack naming/defaults do not select the consumable loaded by the scientist.
+  tip_definition_id: st_10ul
+  supported_tip_ids:
+  - st_10ul
+  - st_70ul
   model_3d: /labware-assets/lw-4914769d0af7/ST_Tip_Box.gltf
   can_mount: false
   can_be_mounted: false
@@ -309,8 +313,8 @@ labware:
   lid_resting_height_mm: 0.0
   lid_departure_height_mm: 0.0
   max_robot_handling_speed: fast
-  rows: 0
-  cols: 0
+  rows: 8
+  cols: 12
   well_depth_mm: 0.0
   offset_x_mm: 0.0
   offset_y_mm: 0.0
@@ -318,9 +322,10 @@ labware:
   spacing_y_mm: 9.0
   well_volume_ul: 0.0
   well_diameter_mm: 0.0
-  disposable_tip_capacity_ul: 10.0
-  tip_definition_id: ''
-  supported_tip_ids: []
+  disposable_tip_capacity_ul: 200.0
+  tip_definition_id: lt_200ul
+  supported_tip_ids:
+  - lt_200ul
   model_3d: null
   can_mount: false
   can_be_mounted: false

@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import re
 import sys
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -235,6 +236,11 @@ def import_labware_reg(
     for item in imported:
         idx = existing_by_name.get(item["name"])
         if idx is not None:
+            # Registry exports do not carry catalog tip IDs. Keep reviewed
+            # associations when refreshing the fields the export does supply.
+            for field in ("tip_definition_id", "supported_tip_ids"):
+                if existing[idx].get(field) and not item.get(field):
+                    item[field] = deepcopy(existing[idx][field])
             existing[idx] = item
             updated_count += 1
         else:

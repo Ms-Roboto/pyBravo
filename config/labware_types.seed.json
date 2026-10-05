@@ -413,6 +413,8 @@
     "requires_insert": "None"
   },
   "well_dimensions_mm": {
+    "rows": 16,
+    "cols": 24,
     "volume_ul": null,
     "depth_mm": null,
     "diameter_mm": null,
@@ -436,8 +438,8 @@
     "filename": "ST_Tip_Box.gltf",
     "format": "gltf"
   },
-  "tip_definition_id": "",
-  "supported_tip_ids": []
+  "tip_definition_id": "st_10ul",
+  "supported_tip_ids": ["st_10ul", "st_70ul"]
 },
 {
   "_id": {
@@ -515,7 +517,7 @@
   "vendor": "",
   "catalog_number": "",
   "description": "",
-  "base_class": "microplate",
+  "base_class": "tip_box",
   "wells": 96,
   "plate_dimensions_mm": {
     "length_mm": 127.76,
@@ -524,6 +526,8 @@
   },
   "plate_properties": {},
   "well_dimensions_mm": {
+    "rows": 8,
+    "cols": 12,
     "volume_ul": null,
     "depth_mm": null,
     "diameter_mm": null,
@@ -534,14 +538,14 @@
     "well_geometry": 1,
     "well_bottom_shape": 2,
     "tip_source": "agilent",
-    "disposable_tip_capacity_ul": 10,
+    "disposable_tip_capacity_ul": 200,
     "disposable_tip_length_mm": null
   },
   "pf400": {},
   "planar_motor": {},
   "labware_class_ids": [],
-  "tip_definition_id": "",
-  "supported_tip_ids": [],
+  "tip_definition_id": "lt_200ul",
+  "supported_tip_ids": ["lt_200ul"],
   "model_3d": null
 },
 {

@@ -1,11 +1,14 @@
 version: 1
 
-# Per-(head, tip box) Tips On / Tips Off geometry overrides.
+# Per-(head, tip box, optional tip) Tips On / Tips Off geometry overrides.
 #
 # Resolved at Tips On / Tips Off time by matching the active head_type and the
 # tip box labware. A row matches when its head_type matches AND either its
 # `tipbox` (labware name, case/whitespace-insensitive) or `tipbox_id`
-# (labware_type_id) matches. Rows are scanned top-to-bottom; the first match wins.
+# (labware_type_id) matches. A row with `tip_id` also requires the selected
+# tip definition; this keeps tip-specific press/eject settings from applying
+# to another tip type in the same physical box. A tip-specific match takes
+# precedence over a generic box row; file order breaks ties.
 #
 # Any field left unset on a matching row — or the absence of any matching row —
 # falls back to the profile's safety.* values (tips_off_z_offset /
@@ -14,6 +17,7 @@ version: 1
 # it did before (profile defaults).
 #
 # Fields (head_type + one of tipbox/tipbox_id are required; the rest optional):
+#   tip_id                selected tip definition this calibration applies to
 #   tips_off_z_offset     mm the head ejects ABOVE the seated press depth. Longer
 #                         tips (LT200) need a larger value (~25); short tips
 #                         (ST10) need less or they end up too far from the box.
@@ -39,6 +43,7 @@ offsets:
   - head_type: HT_96_D_200
     tipbox: 96 V11 LT200 Tip Box 06880.002
     tipbox_id: lw-b0704e550d2a
+    tip_id: lt_200ul
     tips_off_z_offset: 25.0
     tips_off_w_position: -9.0
     tips_on_jog_tolerance: 12.0
@@ -51,6 +56,7 @@ offsets:
   - head_type: HT_384_D_70
     tipbox: 384 V11 ST10 Tip Box 10734.102
     tipbox_id: lw-4914769d0af7
+    tip_id: st_10ul
     tips_off_z_offset: 14.0
     tips_off_w_position: -7.0
     tips_on_jog_tolerance: 5.0

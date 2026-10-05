@@ -1213,7 +1213,7 @@ class Bravo:
             tip_selection.to_dict()["anchor_col"] + 1,
         )
         tip_length_mm = self._tip_length_for_labware(labware)
-        tip_offsets = self._resolve_tip_offsets(labware)
+        tip_offsets = self._resolve_tip_offsets(labware, tip_id=self._tip_id_for_labware(labware))
         logger.info(
             "Tips On offsets for '%s': press tolerance=%.2f mm, z_offset=%.2f mm (%s)",
             labware.name,
@@ -1285,7 +1285,7 @@ class Bravo:
                 target_selection.to_dict()["anchor_row"] + 1,
                 target_selection.to_dict()["anchor_col"] + 1,
             )
-        tip_offsets = self._resolve_tip_offsets(labware)
+        tip_offsets = self._resolve_tip_offsets(labware, tip_id=self._tip_definition_id or self._tip_id_for_labware(labware))
         logger.info(
             "Tips Off offsets for '%s': z_offset=%.2f mm, w_position=%.2f (%s)",
             labware.name,
@@ -2314,6 +2314,10 @@ class Bravo:
     def _tip_length_for_labware(self, labware: Labware) -> float:
         tip_id = self._tip_id_for_labware(labware)
         length = get_tip_length_mm(self._profile.head.head_type, tip_id)
+        if length is None and str((labware.metadata or {}).get("tip_definition_id") or "").strip():
+            raise RuntimeError(
+                f"Tip length is not configured for {tip_id!r} on {self._profile.head.head_type.name}"
+            )
         if length is None:
             length = get_tip_length_mm(
                 self._profile.head.head_type,
@@ -2325,10 +2329,10 @@ class Bravo:
             )
         return float(length)
 
-    def _resolve_tip_offsets(self, labware: Labware) -> ResolvedTipOffsets:
-        """Resolve per-(head, tip box) Tips On/Off offsets for this labware.
+    def _resolve_tip_offsets(self, labware: Labware, *, tip_id: str | None = None) -> ResolvedTipOffsets:
+        """Resolve per-(head, tip box, tip) Tips On/Off offsets for this labware.
 
-        Matches the active head type and the tip box against
+        Matches the active head type, selected tip, and tip box against
         ``config/tip_offsets.yaml``; any unset field — or no matching row —
         falls back to the profile's ``safety.*`` defaults.
         """
@@ -2337,6 +2341,7 @@ class Bravo:
             self._profile.head.head_type,
             tipbox_name=getattr(labware, "name", "") or "",
             tipbox_id=getattr(labware, "definition_id", "") or getattr(labware, "id", "") or "",
+            tip_id=tip_id if tip_id is not None else (self._tip_definition_id or self._tip_id_for_labware(labware)),
             default_z_offset=float(safety.tips_off_z_offset),
             default_w_position=float(safety.tips_off_w_position),
         )
