@@ -380,7 +380,7 @@ async def _refine_with_llm(
             paragraphs_by_id.get(pid, "") for pid in c.paragraph_ids
         )
         try:
-            resp = _llm_structured(
+            resp = await _llm_structured(
                 client, cfg,
                 system=_LLM_ROLE,
                 user=_build_llm_user_prompt(c, body_preview),

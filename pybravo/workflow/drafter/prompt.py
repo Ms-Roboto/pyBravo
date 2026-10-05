@@ -212,6 +212,16 @@ _NODE_CATALOG: tuple[tuple[str, dict[str, Any]], ...] = (
         "required": (),
         "optional": (),
     }),
+    ("system/Manual", {
+        "desc": "Pause for the scientist to perform the specified manual or external-instrument operation and confirm completion. No generated Python is needed.",
+        "required": ("message",),
+        "optional": ("duration_s",),
+    }),
+    ("system/Wait", {
+        "desc": "Wait for a positive number of seconds. This does not control incubation temperature or external equipment.",
+        "required": ("duration_s",),
+        "optional": (),
+    }),
 )
 
 
@@ -383,8 +393,9 @@ into a valid pyBravo workflow JSON.
 4. Volumes are in microliters (uL), as numbers (int or float).
    0 < volume <= 200 for single-channel heads. Never emit mL.
 5. `labware_id` values MUST come from the Labware catalog section. If
-   the operator names a labware not in the catalog, choose the closest
-   match and include a brief note in `description`.
+   the operator names a labware not in the catalog, omit its deck entry
+   and describe the unresolved labware in `description`. Never substitute
+   a similar plate or invent an ID.
 6. Node `id` and link `id` values MUST be unique positive integers
    within the graph.
 7. Link tuples connect slot 0 of one node's outputs to slot 0 of the
@@ -392,8 +403,9 @@ into a valid pyBravo workflow JSON.
    slots use "string", "number", etc.)
 8. If the operator asks for something you cannot do (e.g. a non-
    existent node type, a location outside 1-9, an unsupported head
-   mode), produce the closest-feasible draft and note the deviation
-   in `description` — never invent new schema fields.
+   mode), preserve it as an explicitly described manual handoff or
+   unresolved requirement in `description`. Never silently replace it
+   with a different operation or invent new schema fields.
 9. Prefer the pre-authored Script snippets (see catalog below) over
    writing new Python. Snippets are vetted; novel code isn't.
 10. `pos` can be left at [0, 0] for all nodes — the designer's
@@ -403,7 +415,12 @@ into a valid pyBravo workflow JSON.
     in a tip lifecycle, and a `tips/TipsOff` after the last one. The
     only exception is when the operator EXPLICITLY says "skip tips"
     or "tips already on" — otherwise always include them. If the
-    operator doesn't name a tip-box location, default to `location: 1`.
+    operator doesn't name a tip-box location, leave `location` null and
+    explain the missing setup in `description`. Never assume slot 1.
+12. Missing numeric quantities, locations, liquid classes, or well
+    mappings MUST remain null and be described as unresolved in
+    `description`. A scientifically meaningful missing value is not a
+    default. Preserve manual steps and external instrument handoffs.
 
 ## Output format
 

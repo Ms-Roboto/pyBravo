@@ -669,6 +669,39 @@ body {
 /* ── Litegraph Canvas Overrides ── */
 .canvas-area canvas { position: absolute; inset: 0; }
 .litegraph .litemenu-entry { font-family: var(--sans); }
+
+/* Protocol chat owns a separate, non-executable review tab. */
+.protocol-chat-panel { width: 350px; min-width: 300px; max-width: 42vw; flex-shrink: 0; display: flex; flex-direction: column; background: var(--bg-panel); border-right: 1px solid var(--border); }
+.protocol-chat-panel[hidden], .protocol-chat-panel [hidden], .protocol-draft-banner[hidden] { display: none !important; }
+.protocol-chat-header { display:flex; align-items:center; gap:8px; padding:12px; border-bottom:1px solid var(--border); }
+.protocol-chat-header strong { font-size:13px; margin-right:auto; }
+.protocol-chat-intro { padding:12px 14px; font-size:12px; line-height:1.5; color:var(--text-dim); }
+.protocol-chat-messages { flex:1; overflow:auto; min-height:120px; padding:0 14px 14px; display:flex; flex-direction:column; gap:12px; }
+.protocol-chat-message { padding:10px 12px; border:1px solid var(--border); border-radius:7px; background:var(--bg-input); white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; line-height:1.55; }
+.protocol-chat-message[data-role="user"] { border-color:var(--btn-primary-border); background:var(--btn-primary-bg); }
+.protocol-chat-message strong { display:block; font-size:10px; color:var(--text-dim); margin-bottom:5px; text-transform:uppercase; letter-spacing:.04em; }
+.protocol-chat-questions { border-top:1px solid var(--border); padding:10px 14px; font-size:12px; max-height:160px; overflow:auto; }
+.protocol-chat-questions:empty { display:none; }
+.protocol-chat-questions ul { padding-left:17px; line-height:1.5; margin-top:6px; }
+.protocol-chat-form { border-top:1px solid var(--border); padding:12px; display:grid; gap:9px; }
+.protocol-chat-form label { font-size:11px; color:var(--text-dim); }
+.protocol-chat-form textarea { width:100%; resize:vertical; min-height:95px; max-height:220px; background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:10px; font:12px/1.5 var(--sans); }
+.protocol-chat-form textarea:focus { outline:2px solid var(--accent); outline-offset:2px; }
+.protocol-chat-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.protocol-chat-actions a { color:var(--accent); font-size:11px; }
+.protocol-chat-status { font-size:11px; line-height:1.45; color:var(--text-dim); white-space:pre-wrap; }
+.protocol-chat-status.error { color:var(--red); }
+.protocol-draft-banner { position:absolute; top:10px; left:12px; right:12px; z-index:5; border:1px solid var(--btn-primary-border); border-radius:5px; padding:10px 12px; background:var(--bg-panel); font-size:11px; line-height:1.5; color:var(--text); }
+.protocol-draft-banner strong { color:var(--accent); margin-right:8px; }
+.protocol-draft-banner a { color:var(--accent); white-space:nowrap; }
+body.protocol-preview-active .left-panel { display:none; }
+body.protocol-preview-active .toolbar-btn:disabled { opacity:.4; cursor:not-allowed; }
+body.protocol-preview-active #viewport-float { display:none; }
+.protocol-review-property { margin-bottom:12px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; line-height:1.5; }
+.protocol-review-property strong { display:block; color:var(--text-dim); margin-bottom:4px; }
+@media(max-width:1100px) { body.protocol-chat-open .left-panel { display:none; } .protocol-chat-panel { width:320px; } }
+@media(max-width:760px) { .protocol-chat-panel { position:absolute; top:0; bottom:0; left:0; z-index:30; width:min(350px,90vw); max-width:90vw; box-shadow:8px 0 24px #0005; } .main { position:relative; } }
+
 </style>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/css/litegraph.css">
 <script>
@@ -695,6 +728,7 @@ body {
     <button class="toolbar-btn" id="btn-load">Load</button>
     <button class="toolbar-btn" id="btn-library" title="Edit the workflow's Library — Python helpers injected into every Script node">Library&hellip;</button>
     <button class="toolbar-btn" id="btn-arrange" title="Auto-arrange nodes in the active workflow">Arrange</button>
+    <button class="toolbar-btn primary" id="btn-protocol-chat" aria-expanded="false" aria-controls="protocol-chat-panel">Protocol chat</button>
     <button class="toolbar-btn primary" id="btn-draft" title="Draft a workflow from a natural-language description using an LLM">&#x2728; Draft&hellip;</button>
     <button class="toolbar-btn" id="btn-import">Import</button>
     <button class="toolbar-btn" id="btn-export">Export</button>
@@ -703,6 +737,7 @@ body {
     <button class="toolbar-btn" id="btn-execute">Execute</button>
     <div class="toolbar-spacer"></div>
     <button class="toolbar-btn" id="btn-theme-toggle" title="Toggle light and dark mode">Theme: Dark</button>
+    <a href="/protocol-assistant" class="toolbar-nav">Protocol Assistant</a>
     <a href="/drafter-dashboard" class="toolbar-nav" title="Drafter telemetry — drafts, edits, citation retention">&#x1F4CA; Drafter</a>
     <a href="/" class="toolbar-nav">Control Panel</a>
     <button class="toolbar-btn" id="btn-quit" style="background: #5a1515; color: #ffb4b4; border-color: #803030;" title="Kill the backend server">Quit</button>
@@ -715,6 +750,20 @@ body {
 
 <!-- Main Layout -->
 <div class="main">
+
+    <aside class="protocol-chat-panel" id="protocol-chat-panel" aria-label="Protocol conversation" hidden>
+        <div class="protocol-chat-header"><strong>Build a protocol</strong><button class="toolbar-btn" id="protocol-chat-new">New chat</button><button class="toolbar-btn" id="protocol-chat-close" aria-label="Close protocol chat">×</button></div>
+        <p class="protocol-chat-intro">Describe your procedure, then answer questions or request changes. Each reply updates a separate draft on the canvas.</p>
+        <div class="protocol-chat-messages" id="protocol-chat-messages" role="log" aria-label="Conversation" aria-live="polite"></div>
+        <div class="protocol-chat-questions" id="protocol-chat-questions"></div>
+        <form class="protocol-chat-form" id="protocol-chat-form">
+            <label for="protocol-chat-message">Procedure or reply</label>
+            <textarea id="protocol-chat-message" placeholder="Transfer buffer to a plate, mix, then incubate… Include known quantities and equipment." maxlength="20000" required></textarea>
+            <div class="protocol-chat-actions"><button type="submit" class="toolbar-btn primary" id="protocol-chat-send">Send</button><button type="button" class="toolbar-btn" id="protocol-chat-reload" hidden>Reload conversation</button><a id="protocol-chat-review" hidden>Review setup &amp; approve</a></div>
+            <div class="protocol-chat-status" id="protocol-chat-status" role="status" aria-live="polite">Drafts require setup, validation, strict simulation, and scientist approval.</div>
+        </form>
+    </aside>
+
     <!-- Left Panel -->
     <div class="left-panel">
         <!-- Tasks Section -->
@@ -819,6 +868,7 @@ body {
 
     <!-- Center: Canvas Area -->
     <div class="canvas-area" id="canvas-area">
+        <div class="protocol-draft-banner" id="protocol-draft-banner" hidden><strong>Non-executable protocol draft</strong><span id="protocol-draft-summary">Continue the conversation to refine these steps.</span> <a id="protocol-draft-review">Review setup, simulate &amp; approve →</a></div>
         <div class="canvas-placeholder" id="canvas-placeholder">
             <span>Drag tasks here to build a workflow</span>
             <span class="hint">or right-click to add nodes</span>
@@ -2821,6 +2871,37 @@ function getDeckLocationOptions() {
 // ── Register Node Types ─────────────────────────────────────────────
 
 function registerNodeTypes() {
+    // Review nodes display the scientist's plan; they never name executable tasks.
+    function ProtocolStepNode() {
+        this.addInput('review', LiteGraph.ACTION);
+        this.addOutput('review', LiteGraph.ACTION);
+        this.title = 'Protocol step';
+        this.size = [340, 160];
+        this.color = '#44446b';
+        this.bgcolor = '#222238';
+        this.properties = {};
+    }
+    ProtocolStepNode.title = 'Protocol step (review only)';
+    ProtocolStepNode.prototype.onDrawForeground = function(ctx) {
+        if (this.flags.collapsed) return;
+        ctx.save();
+        ctx.beginPath(); ctx.rect(10, 28, this.size[0] - 20, this.size[1] - 32); ctx.clip();
+        ctx.font = '12px sans-serif'; ctx.fillStyle = '#e0e0e8';
+        const words = String(this.properties.summary || this.properties.description || this.properties.kind || '').split(/\s+/);
+        let line = '', y = 43;
+        for (const word of words) {
+            const next = line ? line + ' ' + word : word;
+            if (ctx.measureText(next).width > this.size[0] - 26 && line) { ctx.fillText(line, 12, y); y += 17; line = word; if (y > this.size[1] - 48) break; }
+            else line = next;
+        }
+        if (line && y <= this.size[1] - 35) ctx.fillText(line, 12, y);
+        const missing = this.properties.missing_fields || [];
+        ctx.font = '10px sans-serif'; ctx.fillStyle = missing.length ? '#f4c276' : '#aaaaba';
+        ctx.fillText(missing.length ? 'Needs review: ' + missing.join(', ') : 'Review-only step · no hardware commands', 12, this.size[1] - 16);
+        ctx.restore();
+    };
+    LiteGraph.registerNodeType('review/ProtocolStep', ProtocolStepNode);
+
     // Start Node
     function StartNode() {
         this.addOutput('flow', LiteGraph.ACTION);
@@ -3376,6 +3457,8 @@ function registerNodeTypes() {
     makeTaskNode('Initialize', 'system', 'system', {});
     makeTaskNode('Home', 'system', 'system', { axes: 'X,Y,Z,W,G,Zg' });
     makeTaskNode('Dock Gripper', 'system', 'system', {});
+    makeTaskNode('Manual', 'system', 'system', { message: '' });
+    makeTaskNode('Wait', 'system', 'system', { duration_s: 0 });
 }
 
 // Map from task chip data-type to Litegraph node type
@@ -3451,6 +3534,7 @@ function snippetById(id) {
 function setupTaskChipClicks() {
     document.querySelectorAll('.task-chip').forEach(chip => {
         chip.addEventListener('click', () => {
+            if (isProtocolDraftTab()) return;
             const chipType = chip.getAttribute('data-type');
             const nodeType = CHIP_TO_NODE_TYPE[chipType];
             if (!nodeType || !designerState.graph) return;
@@ -4161,6 +4245,7 @@ function installFrameKeyboardShortcuts() {
     if (__frameShortcutsInstalled) return;
     __frameShortcutsInstalled = true;
     document.addEventListener('keydown', (e) => {
+        if (isProtocolDraftTab()) return;
         // Ignore when typing in a text input / textarea / contentEditable.
         const tgt = e.target;
         if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
@@ -4544,6 +4629,7 @@ function renderPropertiesPanel(node) {
     title.style.cssText = 'font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--text);';
     title.textContent = node.title;
     body.appendChild(title);
+    if (node.type === 'review/ProtocolStep') { renderProtocolReviewProperties(body, node); return; }
 
     // Tips Off: surface the inherited head_mode (and offer optional anchor
     // override) BEFORE the property loop so the operator sees the inherit
@@ -5089,6 +5175,7 @@ function switchToTab(idx) {
     for (let i = 1; i <= 9; i++) updateDeckCell(i);
     syncDeckTo3D();
     renderTabStrip();
+    if (t.protocolChatEnvelope) adoptProtocolChat(t.protocolChatEnvelope);
 }
 
 function newBlankTab() {
@@ -5153,6 +5240,7 @@ function renderTabStrip() {
     const newBtn = document.getElementById('btn-new-tab');
     // Remove existing tabs but keep the + button.
     strip.querySelectorAll('.wf-tab').forEach(el => el.remove());
+    updateProtocolDraftControls();
     openTabs.forEach((t, i) => {
         const el = document.createElement('div');
         el.className = 'wf-tab' + (i === activeTabIdx ? ' active' : '');
@@ -5201,7 +5289,23 @@ function serializeWorkflow() {
     if (tab && tab.drafterSessionId) {
         out.drafter_session_id = tab.drafterSessionId;
     }
+    // Reviewed protocol identity and run-sheet metadata stay attached across
+    // tabs, saves, and exports; the server verifies executable content.
+    if (tab && tab.protocolMetadata) Object.assign(out, tab.protocolMetadata);
     return out;
+}
+
+function configureWorkflowGraph(graph, data) {
+    if (!data.graph || !graph) return;
+    graph.configure(data.graph);
+    if (!data.protocol_session_id) return;
+    // LiteGraph merges constructor defaults into loaded properties. A compiled
+    // protocol supplies its exact execution parameters, so preserve those
+    // rather than silently adding unrelated defaults during a view/save cycle.
+    for (const original of data.graph.nodes || []) {
+        const node = graph.getNodeById(original.id);
+        if (node) node.properties = JSON.parse(JSON.stringify(original.properties || {}));
+    }
 }
 
 // Open `data` as a new tab — or if a tab with that id is already open, just
@@ -5213,6 +5317,10 @@ function deserializeWorkflow(data) {
     const libSrc = (data && typeof data.library === 'string') ? data.library : '';
     const sessionId = (data && typeof data.drafter_session_id === 'string') ? data.drafter_session_id : '';
     const desc = (data && typeof data.description === 'string') ? data.description : '';
+    const protocolMetadata = {};
+    for (const key of ['protocol_session_id', 'protocol_revision', 'protocol', 'protocol_chat_draft', 'protocol_chat_session_id']) {
+        if (data && data[key] !== undefined) protocolMetadata[key] = JSON.parse(JSON.stringify(data[key]));
+    }
     if (wfId) {
         const existing = tabIndexForId(wfId);
         if (existing >= 0) {
@@ -5223,10 +5331,11 @@ function deserializeWorkflow(data) {
             tab.description = desc;
             tab.deckConfig = data.deck || {};
             tab.library = libSrc;
+            tab.protocolMetadata = protocolMetadata;
             if (sessionId) tab.drafterSessionId = sessionId;
             designerState.deckConfig = tab.deckConfig;
             currentWorkflowName = tab.name;
-            if (data.graph && tab.graph) tab.graph.configure(data.graph);
+            configureWorkflowGraph(tab.graph, data);
             tab.dirty = false;
             for (let i = 1; i <= 9; i++) updateDeckCell(i);
             syncDeckTo3D();
@@ -5245,12 +5354,13 @@ function deserializeWorkflow(data) {
         cur.description = desc;
         cur.deckConfig = data.deck || {};
         cur.library = libSrc;
+        cur.protocolMetadata = protocolMetadata;
         if (sessionId) cur.drafterSessionId = sessionId;
         cur.dirty = false;
         designerState.deckConfig = cur.deckConfig;
         currentWorkflowId = cur.id;
         currentWorkflowName = cur.name;
-        if (data.graph && cur.graph) cur.graph.configure(data.graph);
+        configureWorkflowGraph(cur.graph, data);
         for (let i = 1; i <= 9; i++) updateDeckCell(i);
         syncDeckTo3D();
         renderTabStrip();
@@ -5260,7 +5370,7 @@ function deserializeWorkflow(data) {
     const graph = new LGraph();
     attachDirtyHooks(graph);
     const deckConfig = data.deck || {};
-    if (data.graph) graph.configure(data.graph);
+    configureWorkflowGraph(graph, data);
     openTabs.push({
         id: wfId,
         name: data.name || 'Untitled Workflow',
@@ -5268,6 +5378,7 @@ function deserializeWorkflow(data) {
         graph,
         deckConfig,
         library: libSrc,
+        protocolMetadata,
         drafterSessionId: sessionId || undefined,
         dirty: false,
     });
@@ -5285,6 +5396,7 @@ const workflowNameInput = document.getElementById('workflow-name-input');
 let selectedWorkflowItem = null; // { id, name }
 
 function openWorkflowModal(mode) {
+    if (mode === 'save' && isProtocolDraftTab()) return;
     document.getElementById('workflow-modal-title').textContent = mode === 'save' ? 'Save Workflow' : 'Workflows';
     workflowNameInput.value = currentWorkflowName || 'Untitled Workflow';
     workflowNameInput.style.display = mode === 'save' ? '' : 'none';
@@ -6542,6 +6654,7 @@ document.getElementById('btn-execute').addEventListener('click', () => {
 // ── Simulation Controls ─────────────────────────────────────────────
 async function runWorkflow() {
     const progress = document.getElementById('playback-progress');
+    if (isProtocolDraftTab()) { progress.textContent = 'Review and approve this protocol in Protocol Assistant before execution.'; return; }
 
     // Validate first
     const errors = validateWorkflow();
@@ -7330,6 +7443,9 @@ function showUserPromptModal(data) {
     if (!overlay || !msgEl || !inputEl) return;
     msgEl.textContent = data.message || 'Please enter a value:';
     inputEl.value = data.default || '';
+    const ignoreBtn = document.getElementById('user-prompt-ignore');
+    if (ignoreBtn) ignoreBtn.hidden = Boolean(data.required_confirmation);
+    inputEl.setCustomValidity('');
     for (const id of ['user-prompt-ok', 'user-prompt-ignore', 'user-prompt-cancel']) {
         const btn = document.getElementById(id);
         if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
@@ -7350,6 +7466,16 @@ async function submitUserPrompt(action) {
     if (!_userPromptData) return;
     const requestId = _userPromptData.request_id;
     const inputEl = document.getElementById('user-prompt-input');
+    if (_userPromptData.required_confirmation && action !== 'cancel') {
+        if (action !== 'ok' || inputEl?.value.trim().toLowerCase() !== 'completed') {
+            if (inputEl) {
+                inputEl.setCustomValidity('Type completed after carrying out the manual instruction.');
+                inputEl.reportValidity();
+            }
+            return;
+        }
+        inputEl.setCustomValidity('');
+    }
     let value = '';
     let cancelled = false;
     if (action === 'ok') {
@@ -7611,11 +7737,222 @@ document.getElementById('task-prompt-abort')?.addEventListener('click', () => {
     submitTaskPromptAction('/api/abort', 'Aborting the workflow...');
 });
 
+// ── Protocol conversation and review-only preview ───────────────────
+const protocolChat = { envelope: null, pending: false, pendingMessage: '', sessionId: null };
+const PROTOCOL_CHAT_STORAGE = 'pybravo-designer-protocol-chat';
+function isProtocolDraftTab(tab = getActiveTab()) {
+    return Boolean(tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_draft);
+}
+function protocolChatStatus(message, error = false) {
+    const status = document.getElementById('protocol-chat-status');
+    status.textContent = message;
+    status.classList.toggle('error', error);
+}
+function setProtocolChatOpen(open) {
+    document.getElementById('protocol-chat-panel').hidden = !open;
+    document.getElementById('btn-protocol-chat').setAttribute('aria-expanded', String(open));
+    document.body.classList.toggle('protocol-chat-open', open);
+    requestAnimationFrame(() => designerState.graphCanvas?.resize());
+}
+function updateProtocolDraftControls() {
+    const draft = isProtocolDraftTab();
+    document.body.classList.toggle('protocol-preview-active', draft);
+    document.getElementById('protocol-draft-banner').hidden = !draft;
+    for (const id of ['btn-save', 'btn-save-as', 'btn-library', 'btn-draft', 'btn-import', 'btn-export', 'btn-simulate', 'btn-execute']) {
+        const button = document.getElementById(id);
+        if (draft) {
+            if (!('protocolPreviousDisabled' in button.dataset)) button.dataset.protocolPreviousDisabled = String(button.disabled);
+            button.disabled = true;
+        } else if ('protocolPreviousDisabled' in button.dataset) {
+            button.disabled = button.dataset.protocolPreviousDisabled === 'true';
+            delete button.dataset.protocolPreviousDisabled;
+        }
+    }
+    const canvas = designerState.graphCanvas;
+    if (canvas) { canvas.read_only = draft; canvas.allow_dragnodes = !draft; canvas.allow_reconnect_links = !draft; }
+    const tab = getActiveTab();
+    const id = tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_session_id;
+    if (id) document.getElementById('protocol-draft-review').href = '/protocol-assistant?session=' + encodeURIComponent(id);
+    if (draft) document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.`;
+}
+function renderProtocolReviewProperties(body, node) {
+    const fields = [
+        ['Review-only draft', 'Continue the conversation to change this step. Configure labware and approve the protocol in Protocol Assistant.'],
+        ['Step', node.properties.summary || node.properties.description || node.properties.kind],
+        ['Parameters', JSON.stringify(node.properties.parameters || {}, null, 2)],
+        ['Missing details', (node.properties.missing_fields || []).join(', ') || 'None listed'],
+        ['Source references', (node.properties.citations || []).map(citation => `${citation.paragraph_id}${citation.page ? ' · Page ' + citation.page : ''}\n${citation.excerpt || ''}`).join('\n\n') || 'No source citations'],
+    ];
+    for (const [label, text] of fields) {
+        const block = document.createElement('div'); block.className = 'protocol-review-property';
+        const title = document.createElement('strong'); title.textContent = label; block.appendChild(title);
+        block.appendChild(document.createTextNode(String(text || ''))); body.appendChild(block);
+    }
+}
+function renderProtocolConversation() {
+    const container = document.getElementById('protocol-chat-messages');
+    container.replaceChildren();
+    const envelope = protocolChat.envelope;
+    const messages = [...(envelope?.session?.chat_messages || [])];
+    if (!messages.length && envelope?.reply) messages.push({ role: 'assistant', content: envelope.reply });
+    if (protocolChat.pendingMessage) messages.push({ role: 'user', content: protocolChat.pendingMessage });
+    if (protocolChat.pending) messages.push({ role: 'assistant', content: 'Interpreting your message with the local model…' });
+    for (const message of messages) {
+        const block = document.createElement('div'); block.className = 'protocol-chat-message';
+        block.dataset.role = message.role === 'user' ? 'user' : 'assistant';
+        const name = document.createElement('strong'); name.textContent = message.role === 'user' ? 'You' : 'Protocol assistant';
+        block.append(name, document.createTextNode(String(message.content || ''))); container.appendChild(block);
+    }
+    if (!messages.length) {
+        const hint = document.createElement('div'); hint.className = 'protocol-chat-intro';
+        hint.textContent = 'Start with a written procedure. You can add volumes, resolve missing details, and ask for changes in later messages.'; container.appendChild(hint);
+    }
+    container.scrollTop = container.scrollHeight;
+    const questions = envelope?.preview?.questions || envelope?.preview?.protocol_questions || envelope?.session?.plan?.questions || [];
+    const questionBox = document.getElementById('protocol-chat-questions'); questionBox.replaceChildren();
+    if (questions.length) {
+        const title = document.createElement('strong'); title.textContent = 'Details to resolve';
+        const items = document.createElement('ul');
+        for (const question of questions) { const item = document.createElement('li'); item.textContent = question.prompt || question.message || String(question); items.appendChild(item); }
+        questionBox.append(title, items);
+    }
+    document.getElementById('protocol-chat-message').disabled = protocolChat.pending;
+    document.getElementById('protocol-chat-send').disabled = protocolChat.pending;
+    document.getElementById('protocol-chat-new').disabled = protocolChat.pending;
+    document.getElementById('protocol-chat-reload').disabled = protocolChat.pending;
+    const link = document.getElementById('protocol-chat-review'); link.hidden = !envelope?.session?.id;
+    if (envelope?.session?.id) link.href = '/protocol-assistant?session=' + encodeURIComponent(envelope.session.id);
+}
+function adoptProtocolChat(envelope, remember = true) {
+    protocolChat.envelope = envelope;
+    protocolChat.sessionId = envelope.session.id;
+    if (remember) { try { localStorage.setItem(PROTOCOL_CHAT_STORAGE, envelope.session.id); } catch (_) {} }
+    renderProtocolConversation();
+}
+function displayProtocolPreview(envelope, {activate = true} = {}) {
+    const preview = envelope.preview;
+    if (!preview?.protocol_chat_draft || !preview.graph || !envelope.session?.id) throw new Error('The server did not return a reviewable protocol draft.');
+    const allowed = new Set(['flow/Start', 'flow/End', 'review/ProtocolStep']);
+    if ((preview.graph.nodes || []).some(node => !allowed.has(node.type))) throw new Error('The protocol preview contained an executable node and was not displayed.');
+    let index = openTabs.findIndex(tab => tab.protocolChatSessionId === envelope.session.id);
+    let tab = index >= 0 ? openTabs[index] : null;
+    if (!tab) {
+        tab = { id: null, name: '', graph: new LGraph(), deckConfig: {}, library: '', dirty: false, protocolChatSessionId: envelope.session.id };
+        openTabs.push(tab); index = openTabs.length - 1;
+    }
+    tab.graph.configure(preview.graph);
+    tab.name = 'Draft · ' + (preview.name || envelope.session.name || 'Protocol conversation');
+    tab.description = preview.description || '';
+    tab.protocolMetadata = {protocol_chat_draft: true, protocol_chat_session_id: envelope.session.id, protocol_revision: envelope.session.revision};
+    tab.protocolChatEnvelope = envelope;
+    tab.dirty = false;
+    if (activate) {
+        if (activeTabIdx === index) {
+            designerState.graph = tab.graph; currentWorkflowName = tab.name;
+            designerState.graphCanvas?.setGraph(tab.graph);
+        } else switchToTab(index);
+        document.getElementById('protocol-draft-summary').textContent = `Revision ${envelope.session.revision} · ${(preview.graph.nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.`;
+        renderTabStrip();
+        requestAnimationFrame(() => {
+            const canvas = designerState.graphCanvas;
+            if (!canvas || !isProtocolDraftTab()) return;
+            canvas.resize();
+            const nodes = tab.graph._nodes || [];
+            if (nodes.length) {
+                const minX = Math.min(...nodes.map(node => node.pos[0]));
+                const minY = Math.min(...nodes.map(node => node.pos[1]));
+                const width = Math.max(...nodes.map(node => node.pos[0] + node.size[0])) - minX;
+                const height = Math.max(...nodes.map(node => node.pos[1] + node.size[1])) - minY;
+                canvas.ds.scale = Math.min(1, Math.max(.25, Math.min((canvas.canvas.width - 50) / Math.max(width, 1), (canvas.canvas.height - 120) / Math.max(height, 1))));
+                canvas.ds.offset = [25 / canvas.ds.scale - minX, 85 / canvas.ds.scale - minY];
+                canvas.setDirty(true, true);
+            }
+        });
+    } else renderTabStrip();
+}
+async function protocolChatRequest(path, payload) {
+    const response = await fetch(API_BASE + '/api/protocols' + path, {method: payload ? 'POST' : 'GET', headers: {'Content-Type':'application/json'}, ...(payload ? {body: JSON.stringify(payload)} : {})});
+    let data;
+    try { data = await response.json(); } catch (_) { throw new Error('The server returned an unreadable response. Your message is still available to retry.'); }
+    if (!response.ok) {
+        const detail = data.detail || data.error || 'Protocol conversation failed.';
+        const error = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+        error.status = response.status; throw error;
+    }
+    return data;
+}
+async function resumeProtocolChat({activate = true} = {}) {
+    if (protocolChat.pending) return;
+    let id = protocolChat.sessionId;
+    if (!id) { try { id = localStorage.getItem(PROTOCOL_CHAT_STORAGE); } catch (_) {} }
+    if (!id) return;
+    protocolChat.sessionId = id;
+    protocolChat.pending = true; renderProtocolConversation();
+    try {
+        const envelope = await protocolChatRequest('/' + encodeURIComponent(id) + '/chat-preview');
+        adoptProtocolChat(envelope);
+        displayProtocolPreview(envelope, {activate});
+        if (activate) setProtocolChatOpen(true);
+        document.getElementById('protocol-chat-reload').hidden = true;
+        protocolChatStatus('Conversation restored. Continue refining the draft or review its setup.');
+    } catch (error) {
+        document.getElementById('protocol-chat-reload').hidden = false;
+        protocolChatStatus('Could not restore the previous conversation: ' + error.message, true);
+    } finally {
+        protocolChat.pending = false; renderProtocolConversation();
+    }
+}
+document.getElementById('btn-protocol-chat').addEventListener('click', () => {
+    const open = document.getElementById('protocol-chat-panel').hidden;
+    setProtocolChatOpen(open); renderProtocolConversation();
+    if (open) document.getElementById('protocol-chat-message').focus();
+});
+document.getElementById('protocol-chat-close').addEventListener('click', () => setProtocolChatOpen(false));
+document.getElementById('protocol-chat-new').addEventListener('click', () => {
+    protocolChat.envelope = null; protocolChat.sessionId = null; protocolChat.pendingMessage = '';
+    try { localStorage.removeItem(PROTOCOL_CHAT_STORAGE); } catch (_) {}
+    document.getElementById('protocol-chat-message').value = '';
+    document.getElementById('protocol-chat-reload').hidden = true;
+    protocolChatStatus('Describe a new procedure. Its draft will open in a separate tab.');
+    renderProtocolConversation(); document.getElementById('protocol-chat-message').focus();
+});
+document.getElementById('protocol-chat-reload').addEventListener('click', () => resumeProtocolChat());
+document.getElementById('protocol-chat-message').addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); document.getElementById('protocol-chat-form').requestSubmit(); }
+});
+document.getElementById('protocol-chat-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const input = document.getElementById('protocol-chat-message');
+    const message = input.value.trim();
+    if (!message || protocolChat.pending) return;
+    if (protocolChat.sessionId && !protocolChat.envelope) { protocolChatStatus('Reload this conversation before sending, or choose New chat.', true); return; }
+    const payload = {message};
+    if (protocolChat.envelope) { payload.session_id = protocolChat.envelope.session.id; payload.revision = protocolChat.envelope.session.revision; }
+    protocolChat.pending = true; protocolChat.pendingMessage = message;
+    protocolChatStatus('The local model is reviewing your procedure…'); renderProtocolConversation();
+    try {
+        const envelope = await protocolChatRequest('/chat', payload);
+        // Validate the preview before committing the UI to a new conversation.
+        displayProtocolPreview(envelope);
+        adoptProtocolChat(envelope);
+        input.value = '';
+        document.getElementById('protocol-chat-reload').hidden = true;
+        protocolChatStatus(`Draft revision ${envelope.session.revision} saved. Review the questions or continue refining it.`);
+    } catch (error) {
+        protocolChatStatus(error.message + '\nYour message is preserved. Resolve the issue and send it again.', true);
+        if (error.status === 409) document.getElementById('protocol-chat-reload').hidden = false;
+    } finally {
+        protocolChat.pending = false; protocolChat.pendingMessage = ''; renderProtocolConversation(); input.focus();
+    }
+});
+
 // Auto-save to localStorage
 let autoSaveTimer = null;
 function scheduleAutoSave() {
+    if (isProtocolDraftTab()) return;
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
+        if (isProtocolDraftTab()) return;
         try {
             const workflow = serializeWorkflow();
             localStorage.setItem('pybravo-designer-draft', JSON.stringify(workflow));
@@ -7661,8 +7998,14 @@ async function init() {
     } catch (e) {
         console.error('Litegraph init failed:', e);
     }
-    // Restore draft if available
-    restoreDraft();
+    // Protocol Assistant exports open the exact reviewed workflow.
+    const requestedWorkflow = new URLSearchParams(window.location.search).get('workflow');
+    if (requestedWorkflow) {
+        const workflow = await apiCall(`/api/workflows/${encodeURIComponent(requestedWorkflow)}`);
+        if (workflow) deserializeWorkflow(workflow);
+    } else {
+        restoreDraft();
+    }
     // Hook workflow WebSocket events
     hookWorkflowEvents();
     // Wire the Variables panel header to collapse/expand its body.
@@ -7680,6 +8023,7 @@ async function init() {
     // Start auto-save loop
     setInterval(scheduleAutoSave, 30000);
     console.log('Designer initialized');
+    await resumeProtocolChat({activate: !requestedWorkflow});
 }
 
 init();

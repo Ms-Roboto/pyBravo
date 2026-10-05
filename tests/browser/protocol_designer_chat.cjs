@@ -1,0 +1,101 @@
+/** Designer chat UI test. Requires an isolated simulation server and Playwright.
+ * PYBRAVO_BROWSER_TEST_URL=http://127.0.0.1:8771 node tests/browser/protocol_designer_chat.cjs
+ * Chat responses are mocked; existing Designer APIs and LiteGraph are real.
+ * Tests cannot invoke a physical workflow or the LLM.
+ */
+const assert = require('node:assert/strict');
+const { chromium } = require('playwright');
+const base = process.env.PYBRAVO_BROWSER_TEST_URL;
+if (!base) throw new Error('Set PYBRAVO_BROWSER_TEST_URL to an isolated simulation server.');
+async function api(path, body) {
+    const response = await fetch(base + path, {method: body ? 'POST' : 'GET', headers:{'Content-Type':'application/json'}, ...(body ? {body:JSON.stringify(body)} : {})});
+    const value = await response.json(); if (!response.ok) throw new Error(JSON.stringify(value)); return value;
+}
+function envelope(revision) {
+    const messages=[{role:'user',content:'Wait before inspecting the plate.'},{role:'assistant',content:'How many seconds should the wait last?'}];
+    if(revision>1)messages.push({role:'user',content:`Wait ${revision} seconds.`},{role:'assistant',content:`The wait is now ${revision} seconds.`});
+    const questions=revision===1?[{id:'duration',path:'/steps/0/duration_s',prompt:'How many seconds should the wait last?'}]:[];
+    const properties={step_id:'wait',kind:'wait',summary:revision===1?'Wait an unspecified duration.':`Wait ${revision} seconds.`,parameters:revision===1?{}:{duration_s:revision},missing_fields:revision===1?['duration_s']:[],citations:[],questions};
+    const nodes=[{id:1,type:'flow/Start',title:'Protocol draft',properties:{},pos:[80,80],size:[180,70],inputs:[],outputs:[{name:'flow',type:-1,links:[1]}]},{id:2,type:'review/ProtocolStep',title:'1. Wait',properties,pos:[80,210],size:[420,170],inputs:[{name:'flow',type:-1,link:1}],outputs:[{name:'flow',type:-1,links:[2]}]},{id:3,type:'flow/End',title:'End of draft',properties:{},pos:[80,440],size:[180,70],inputs:[{name:'flow',type:-1,link:2}],outputs:[]}];
+    const preview={name:'Incubation chat',description:'',deck:{},protocol_chat_draft:true,protocol_chat_session_id:'chat1',protocol_revision:revision,protocol_questions:questions,questions,graph:{nodes,links:[[1,1,0,2,0,-1],[2,2,0,3,0,-1]],last_node_id:3,last_link_id:2,version:.4}};
+    return {session:{id:'chat1',revision,name:preview.name,chat_messages:messages,plan:{questions}},reply:messages.at(-1).content,preview};
+}
+(async()=>{
+    assert.equal((await api('/api/protocols/context')).controller_type,'simulation');
+    const existing=await api('/api/workflows',{name:'Existing scientist workflow',deck:{},graph:{nodes:[{id:1,type:'flow/Start',properties:{},pos:[120,200],inputs:[],outputs:[{name:'flow',type:-1,links:[1]}]},{id:2,type:'flow/End',properties:{},pos:[520,200],inputs:[{name:'flow',type:-1,link:1}],outputs:[]}],links:[[1,1,0,2,0,-1]],last_node_id:2,last_link_id:1}});
+    const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});
+    const page=await browser.newPage({viewport:{width:1600,height:1000},ignoreHTTPSErrors:true});
+    const errors=[];page.on('pageerror',error=>errors.push(error.message));
+    let revision=1, requests=[], fail=null;
+    await page.route(base+'/api/protocols/chat',async route=>{
+        const body=route.request().postDataJSON();requests.push(body);
+        await new Promise(resolve=>setTimeout(resolve,250));
+        if(fail)return route.fulfill({status:fail,json:{detail:fail===409?'Protocol changed in another request.':'Local model temporarily unavailable.'}});
+        if(requests.length===1)assert.deepEqual(Object.keys(body),['message']);
+        else {assert.equal(body.session_id,'chat1');assert.equal(body.revision,revision);revision+=1;}
+        return route.fulfill({json:envelope(revision)});
+    });
+    await page.route(base+'/api/protocols/chat1/chat-preview',route=>route.fulfill({json:envelope(revision)}));
+    try {
+        await page.goto(base+'/designer?workflow='+existing.id);
+        await page.waitForFunction(()=>document.querySelector('.wf-tab-name')?.textContent==='Existing scientist workflow');
+        const original=await page.evaluate(()=>window.designerState.graph.serialize());
+        await page.locator('#btn-protocol-chat').click();
+        await page.locator('#protocol-chat-message').fill('Wait before inspecting the plate.');
+        await page.locator('#protocol-chat-send').click();
+        assert.equal(await page.locator('#protocol-chat-message').isDisabled(),true);
+        await page.locator('#protocol-draft-banner').waitFor({state:'visible'});
+        await page.waitForFunction(()=>!document.querySelector('#protocol-chat-message').disabled);
+        assert.equal(await page.locator('.wf-tab').count(),2,'Chat must preserve the existing workflow tab');
+        assert.equal(await page.locator('#btn-simulate').isDisabled(),true);
+        assert.equal(await page.locator('#btn-execute').isDisabled(),true);
+        assert.equal(await page.locator('#btn-save').isDisabled(),true);
+        assert.equal(await page.locator('#protocol-chat-reload').isVisible(),false);
+        assert.match(await page.locator('#protocol-chat-questions').innerText(),/How many seconds/);
+        assert.equal(await page.locator('#protocol-chat-review').getAttribute('href'),'/protocol-assistant?session=chat1');
+        assert.equal(await page.evaluate(()=>window.designerState.graph._nodes.filter(n=>n.type==='review/ProtocolStep').length),1);
+        assert.equal(await page.evaluate(()=>window.designerState.graphCanvas.read_only),true);
+        await page.locator('#protocol-chat-message').fill('Wait 2 seconds.');
+        await page.locator('#protocol-chat-send').click();
+        await page.waitForFunction(()=>document.querySelector('#protocol-chat-status').textContent.includes('revision 2'));
+        assert.equal(await page.locator('.wf-tab').count(),2,'Followup must update its draft tab');
+        assert.equal(await page.evaluate(()=>window.designerState.graph._nodes.find(n=>n.type==='review/ProtocolStep').properties.parameters.duration_s),2);
+        await page.locator('.wf-tab-name').filter({hasText:'Existing scientist workflow'}).click();
+        assert.equal(await page.locator('#btn-simulate').isDisabled(),false);
+        assert.equal(await page.evaluate(()=>window.designerState.graphCanvas.read_only),false);
+        const preserved=await page.evaluate(()=>window.designerState.graph.serialize());
+        assert.deepEqual(preserved.nodes,original.nodes,'Existing graph must remain untouched');
+        assert.deepEqual(preserved.links,original.links);
+        await page.locator('.wf-tab-name').filter({hasText:'Draft · Incubation chat'}).click();
+        fail=422;
+        await page.locator('#protocol-chat-message').fill('Add another wait.');
+        await page.locator('#protocol-chat-send').click();
+        await page.waitForFunction(()=>document.querySelector('#protocol-chat-status').classList.contains('error'));
+        assert.equal(await page.locator('#protocol-chat-message').inputValue(),'Add another wait.');
+        assert.equal(await page.evaluate(()=>window.designerState.graph._nodes.find(n=>n.type==='review/ProtocolStep').properties.parameters.duration_s),2);
+        fail=409;
+        await page.locator('#protocol-chat-send').click();
+        await page.locator('#protocol-chat-reload').waitFor({state:'visible'});
+        revision=3;
+        await page.locator('#protocol-chat-reload').click();
+        await page.waitForFunction(()=>document.querySelector('#protocol-chat-status').textContent.includes('restored'));
+        assert.equal(await page.locator('#protocol-chat-message').inputValue(),'Add another wait.');
+        assert.equal(await page.evaluate(()=>window.designerState.graph._nodes.find(n=>n.type==='review/ProtocolStep').properties.parameters.duration_s),3);
+        fail=null;
+        await page.locator('#protocol-chat-send').click();
+        await page.waitForFunction(()=>document.querySelector('#protocol-chat-status').textContent.includes('revision 4'));
+        assert.equal(await page.locator('#protocol-chat-reload').isVisible(),false);
+        await page.screenshot({path:'/tmp/protocol-designer-chat.png'});
+        await page.reload();
+        await page.waitForFunction(()=>document.querySelectorAll('.wf-tab').length===2);
+        assert.equal(await page.locator('.wf-tab.active .wf-tab-name').innerText(),'Existing scientist workflow','Saved chat must not replace an explicitly requested workflow on reload');
+        await page.locator('#btn-protocol-chat').click();
+        await page.locator('.wf-tab-name').filter({hasText:'Draft · Incubation chat'}).click();
+        assert.equal(await page.evaluate(()=>window.designerState.graph._nodes.find(n=>n.type==='review/ProtocolStep').properties.parameters.duration_s),4);
+        await page.locator('#protocol-chat-new').click();
+        assert.equal(await page.locator('#protocol-chat-messages .protocol-chat-message').count(),0);
+        assert.equal(await page.locator('.wf-tab').count(),2,'New chat retains previous drafts');
+        assert.deepEqual(errors,[]);
+        console.log('Designer chat first turn/followup/error/conflict/resume/tab-preservation tests passed.');
+    } finally {await browser.close();}
+})().catch(error=>{console.error(error);process.exitCode=1;});

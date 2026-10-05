@@ -1,0 +1,103 @@
+/** Browser contract check. Run with Playwright installed:
+ * NODE_PATH=/path/to/node_modules node tests/browser/protocol_assistant.cjs
+ * Uses isolated Chromium and mocked HTTP; it cannot connect to hardware.
+ */
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { chromium } = require('playwright');
+const html = fs.readFileSync(path.join(__dirname, '../../frontend/protocol_assistant.html'), 'utf8');
+const fresh = value => JSON.parse(JSON.stringify(value));
+const setup = {name:'Water qualification',head_mode:{subset_type:'single_barrel',subset_config:'back_left',row_count:null,column_count:null},tip_strategy:'fresh_each_step',tip_rack_ids:['tips'],tip_disposal_id:'tips',liquid_class:'water',distance_from_bottom_mm:1,tip_reuse_reason:null};
+const plan = {schema_version:'1',name:'Water transfer',description:'',materials:[{id:'source',name:'Water reservoir',role:'liquid',labware_id:'reservoir',deck_slot:1,initial_volume_ul:500,dead_volume_ul:20,well_volumes_ul:{}},{id:'target',name:'Destination plate',role:'liquid',labware_id:'plate',deck_slot:2,initial_volume_ul:0,dead_volume_ul:0,well_volumes_ul:{}},{id:'tips',name:'Tips',role:'tips',labware_id:'tiprack',deck_slot:3,tip_definition_id:'tip250',available_tips:['A1']}],steps:[{id:'transfer',kind:'transfer',description:'Transfer water',source:'source',destination:'target',source_anchor:'A1',destination_anchor:'A1',volume_ul:null,source_paragraph_ids:['p1'],source_values:[]},{id:'manual',kind:'manual',description:'Inspect the plate',message:'Inspect the plate and return it to position 2.',source_paragraph_ids:['p2'],source_values:[]}],decisions:[],questions:[{id:'volume',path:'/steps/0/volume_ul',prompt:'What transfer volume should be used?'}]};
+let session, savedSetup, library = [], requests = [];
+function makeSession(id='session1'){return {id,revision:1,name:'Water transfer',source:{source_id:'source1',name:'Water transfer',metadata:{original_pdf:true},paragraphs:[{id:'p1',text:'Transfer water into the destination plate.'},{id:'p2',text:'Inspect the plate and return it to position 2.',page:2}]},selected_paragraph_ids:['p1','p2'],plan:null,setup:{},issues:[],validation:null,simulation:null,approval:null,history:[]};}
+async function run(){
+    const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});
+    const page=await browser.newPage({viewport:{width:1440,height:1050}});
+    const errors=[];page.on('pageerror',error=>errors.push(error.message));
+    await page.route('http://protocol-assistant.test/**',async route=>{
+        const req=route.request(),url=new URL(req.url()),endpoint=url.pathname.replace('/api/protocols','');
+        if(url.pathname==='/protocol-assistant')return route.fulfill({contentType:'text/html',body:html});
+        let body=req.postData()?JSON.parse(req.postData()):null;
+        requests.push({method:req.method(),endpoint,body});
+        let result;
+        if(endpoint==='/context')result={profile_name:'Test Bravo',head_type:'ST',labware:[{id:'reservoir',name:'Reservoir'},{id:'plate',name:'96-well plate'},{id:'tiprack',name:'Tip rack'}],tip_definitions:[{id:'tip250',name:'250 µL tips'}],liquid_classes:[{id:'water',name:'Water'}]};
+        else if(endpoint==='/setups'&&req.method()==='GET')result={items:[{id:'setup1',name:'Water qualification',setup,materials:plan.materials}]};
+        else if(endpoint==='/setups'){savedSetup=body;result={id:'saved',...body};}
+        else if(endpoint==='/library')result={items:library};
+        else if(endpoint==='/from-text'){session=makeSession();result=session;}
+        else if(endpoint==='/library/library1/reuse'){session={...makeSession('reused'),setup:fresh(setup),plan:fresh(plan)};result=session;}
+        else if(endpoint==='/'+session?.id&&req.method()==='PATCH'){
+            assert.equal(body.revision,session.revision);
+            assert.notEqual(body.plan,null,'Pre-extraction PATCH must omit null plan');
+            session={...session,...body,revision:session.revision+1,validation:null,simulation:null,approval:null};result=session;
+        }else if(endpoint.endsWith('/extract')){
+            assert.deepEqual(Object.keys(body).sort(),['instructions','revision','selected_paragraph_ids']);
+            session={...session,revision:session.revision+1,plan:fresh(plan),setup:fresh(setup)};result=session;
+        }else if(endpoint.endsWith('/validate')){session.validation={ok:true,issues:[],questions:[],summary:{channels:1,tips_required:1,compiled_operations:5,manual_checkpoints:1,reagent_consumption_ul:{source:20}}};result=session;}
+        else if(endpoint.endsWith('/simulate')){session.simulation={status:'running',run_id:'simulation1'};result=session;}
+        else if(endpoint.endsWith('/approve')){assert.equal(body.reviewed,true);assert.equal(body.deck_confirmed,true);assert.equal(body.qualification,'qualification_run');session.approval={...body,approved_at:'2026-10-05'};result=session;}
+        else if(endpoint.endsWith('/publish')){library=[{id:'library1',name:body.name,approval:session.approval,plan:session.plan}];result=library[0];}
+        else if(endpoint==='/'+session?.id){if(session.simulation?.status==='running')session.simulation={status:'passed',run_id:'simulation1',events:[{type:'workflow:complete',status:'ok'}]};result=session;}
+        else throw new Error('Unhandled mock endpoint '+endpoint);
+        await route.fulfill({json:fresh(result)});
+    });
+    try{
+        await page.goto('http://protocol-assistant.test/protocol-assistant');
+        await page.locator('#protocol-name').fill('Water transfer');
+        await page.locator('#protocol-text').fill('Transfer water into the destination plate.\nInspect the plate.');
+        await page.locator('#from-text').click();
+        await page.locator('#source-panel').waitFor({state:'visible'});
+        assert.equal(await page.locator('#original-pdf').getAttribute('href'),'/api/protocols/session1/source-pdf');
+        assert.equal(await page.locator('#original-pdf').isVisible(),true);
+        await page.locator('#select-none').click();
+        await page.locator('#select-all').click();
+        await page.locator('#source-reviewed').check();
+        await page.locator('#save').click();
+        await page.waitForFunction(()=>document.querySelector('#save').disabled);
+        assert.equal(session.plan,null);
+        await page.locator('#tab-plan').click();
+        await page.locator('#setup-picker').selectOption('setup1');
+        await page.locator('#apply-setup').click();
+        assert.equal(await page.locator('[data-path="/materials/2/tip_definition_id"]').inputValue(),'tip250');
+        await page.locator('#extract').click();
+        await page.locator('[data-path="/steps/0/volume_ul"]').waitFor({state:'visible'});
+        await page.waitForFunction(()=>!document.querySelector('[data-path="/steps/0/volume_ul"]').disabled);
+        assert.equal(await page.locator('#questions .question').count(),1);
+        await page.locator('#correction-reason').fill('Scientist confirmed 20 µL for this water qualification.');
+        await page.locator('[data-path="/steps/0/volume_ul"]').fill('20');
+        await page.locator('[data-path="/steps/0/volume_ul"]').blur();
+        await page.locator('#tab-review').click();
+        assert.equal(await page.locator('#approve').isDisabled(),true);
+        await page.locator('#validate').click();
+        await page.waitForFunction(()=>document.querySelector('#validation-status').textContent==='Passed');
+        assert.equal(session.plan.decisions.at(-1).path,'/steps/0/volume_ul');
+        assert.equal(session.plan.decisions.at(-1).value,20);
+        await page.locator('#simulate').click();
+        await page.waitForFunction(()=>document.querySelector('#simulation-status').textContent==='Passed');
+        await page.locator('#scientist').fill('Test Scientist');
+        await page.locator('#approval-notes').fill('Supervised water run before samples.');
+        await page.locator('#plan-reviewed').check();
+        await page.locator('#deck-confirmed').check();
+        await page.locator('#approve').click();
+        await page.waitForFunction(()=>document.querySelector('#approval-status').textContent==='Approved');
+        assert.equal(await page.locator('#export').isDisabled(),false);
+        await page.locator('#publish-name').fill('Water transfer baseline');
+        await page.locator('#publish').click();
+        await page.locator('#tab-library').click();
+        await page.getByRole('button',{name:'Reuse as new draft'}).click();
+        await page.waitForFunction(()=>document.querySelector('#save-status').textContent.includes('reused'));
+        assert.equal(session.approval,null,'Reusing approved protocol must start a draft');
+        assert.equal(await page.locator('#plan-reviewed').isChecked(),false,'Review acknowledgment belongs to the exact session/revision');
+        assert.equal(await page.locator('#deck-confirmed').isChecked(),false);
+        await page.locator('#setup-name').fill('Working deck');
+        await page.locator('#save-setup').click();
+        await page.waitForFunction(()=>document.querySelector('#notice').textContent.includes('Reusable setup saved'));
+        assert.equal(savedSetup.materials.length,3);
+        await page.screenshot({path:'/tmp/protocol-assistant-browser.png',fullPage:true});
+        assert.deepEqual(errors,[],'UI must not throw browser errors');
+        console.log(`Protocol Assistant browser flow passed (${requests.length} mocked API requests).`);
+    }finally{await browser.close();}
+}
+run().catch(error=>{console.error(error);process.exitCode=1;});

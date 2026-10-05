@@ -109,28 +109,35 @@ separately installed camera SDK.
 | `PYBRAVO_VISION_SDK_ROOT` | Camera SDK location, exported to the vision service launcher from the profile's `vision.sdk_root`. | `external/pyorbbecsdk` |
 | `PYBRAVO_VISION_STATIC_IMAGE` | Path to a still image the vision service should serve instead of opening a camera. Useful for development without hardware. | unset (live camera, falling back to the saved reference image) |
 
-### LLM protocol drafter
+### Protocol Assistant and LLM workflow drafter
 
-Optional. The drafter turns a written protocol into a workflow draft via
+Optional. [Protocol Assistant](protocol-assistant.md) uses the local compatible
+endpoint below to extract a reviewable plan before validation and approval.
+The legacy drafter turns a written protocol into a workflow draft via
 `POST /api/workflow/draft`. It needs the `llm` optional dependency group
-(`pip install -e '.[llm]'`, or `PYBRAVO_EXTRAS=llm` with the launcher) and at
-least one provider API key. Without a key, the endpoint returns an error
+(`pip install -e '.[llm]'`, or `PYBRAVO_EXTRAS=llm` with the launcher) and a
+local endpoint or a provider API key. Without a configured provider, the legacy endpoint returns an error
 explaining what to set; nothing else in the system is affected.
 
 | Variable | Purpose | Default |
 |---|---|---|
+| `PYBRAVO_DRAFTER_BASE_URL` | Local compatible API URL. Protocol Assistant uses this endpoint with no cloud fallback; also selects local mode for the legacy drafter unless a cloud provider is explicitly selected. | `http://sparky.local:8000/v1` for Protocol Assistant |
+| `PYBRAVO_DRAFTER_TIMEOUT` | Per-request local-model timeout in seconds (1–300). | `120` |
+| `PYBRAVO_DRAFTER_HTTP_RETRIES` | Local-model retries for transient HTTP/transport failures (0–2). | `1` |
+| `PYBRAVO_DRAFTER_ENABLE_THINKING` | Pass the local server's thinking template option. | `false` |
+| `PYBRAVO_PROTOCOL_STORE` | Reviewed sessions, original PDFs, approvals, library and setups. | `~/.pybravo/protocols` |
 | `ANTHROPIC_API_KEY` | Anthropic API key. Preferred when both keys are present. | unset |
 | `OPENAI_API_KEY` | OpenAI API key. | unset |
-| `PYBRAVO_DRAFTER_PROVIDER` | Force a provider — `anthropic` or `openai` — when both keys are set. Ignored if the named provider has no key. | automatic |
-| `PYBRAVO_DRAFTER_MODEL` | Override the model id. | `claude-sonnet-4-6` (Anthropic) or `gpt-4o` (OpenAI) |
-| `PYBRAVO_DRAFTER_MAX_TOKENS` | Maximum response tokens. | `4096` |
-| `PYBRAVO_DRAFTER_TEMPERATURE` | Sampling temperature. | `0.1` |
-| `PYBRAVO_DRAFTER_REPAIR_ATTEMPTS` | How many times to retry when a draft fails validation. | `2` |
+| `PYBRAVO_DRAFTER_PROVIDER` | Legacy drafter provider: `local`, `anthropic`, or `openai`. An explicitly selected cloud provider without its key errors. Protocol Assistant always uses its local compatible endpoint. | automatic for legacy drafter |
+| `PYBRAVO_DRAFTER_MODEL` | Override the served model alias. | `qwen` (local), `claude-sonnet-4-6` (Anthropic), `gpt-4o` (OpenAI) |
+| `PYBRAVO_DRAFTER_MAX_TOKENS` | Maximum response tokens. | `12000` for Protocol Assistant; `4096` for legacy drafter |
+| `PYBRAVO_DRAFTER_TEMPERATURE` | Sampling temperature. Protocol Assistant accepts 0–2. | `0` for Protocol Assistant; `0.1` for legacy drafter |
+| `PYBRAVO_DRAFTER_REPAIR_ATTEMPTS` | How many times to retry when a draft fails validation. Protocol Assistant accepts 0–2. | `2` |
 | `PYBRAVO_DRAFTER_MONGO_URI` | MongoDB for drafter persistence. Falls back to the labware URI so one database can serve both. | value of `PYBRAVO_LABWARE_MONGO_URI`, else unset |
 | `PYBRAVO_DRAFTER_MONGO_DB` | Database name for drafter collections. | `pybravo_drafter` |
 | `PYBRAVO_DRAFTER_PDF_DIR` | Directory for stored source PDFs. | `~/.pybravo/papers` |
 | `PYBRAVO_DRAFTER_LOCAL_STORE` | Directory for the JSONL fallback store used when MongoDB is not configured. | `~/.pybravo/drafter_data` |
-| `PYBRAVO_DOCLING_URL` | Base URL of a `docling-serve` instance used to parse PDFs for `POST /api/workflow/draft_from_pdf`. Without it that endpoint reports the feature as unconfigured. | unset |
+| `PYBRAVO_DOCLING_URL` | Base URL of a `docling-serve` instance for legacy PDF drafting and optional Protocol Assistant OCR/parsing. Protocol Assistant uses local selectable-text extraction when this is unset or the service fails; legacy PDF drafting requires it. | unset |
 | `PYBRAVO_DOCLING_TIMEOUT` | PDF parse timeout, in seconds. | `300` |
 
 API keys are secrets. Keep them in `.env` (which is gitignored) or in the
@@ -281,6 +288,14 @@ Notes:
 ### Enabling the LLM drafter
 
 Optional, and entirely separable from instrument control.
+
+For Protocol Assistant, install `.[llm]` and open `/protocol-assistant`. It uses
+`http://sparky.local:8000/v1` with model `qwen` by default and does not require a
+cloud API key. To use this endpoint for the legacy drafter as well, set
+`PYBRAVO_DRAFTER_PROVIDER=local`. Selectable-text PDF ingestion works locally;
+set `PYBRAVO_DOCLING_URL` for OCR or richer document parsing.
+
+The following setup configures a cloud provider for the legacy drafter:
 
 1. Install the extra dependencies:
 

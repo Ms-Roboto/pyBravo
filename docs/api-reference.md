@@ -91,6 +91,7 @@ the enclosure is safe, and nobody's hands are inside the working envelope.
 - [Profiles](#profiles)
 - [Device Discovery](#device-discovery)
 - [Workflows](#workflows)
+- [Protocol Assistant](#protocol-assistant)
 - [Workflow Drafting (LLM)](#workflow-drafting-llm)
 - [HTML pages and static mounts](#html-pages-and-static-mounts)
 - [WebSocket: `/ws/state`](#websocket-wsstate)
@@ -1364,7 +1365,8 @@ Execution is asynchronous: the endpoint returns as soon as the run starts, and p
 
 Response: `{"status": "started", "workflow_id": "<id>", "mode": "simulate"}`
 
-Errors: `404` unknown workflow; `400` with a structured detail when pre-flight validation finds
+Errors: `404` unknown workflow; `409` while another designer workflow is starting, running or stopping;
+`400` with a structured detail when pre-flight validation finds
 unresolvable liquid-class or pipette-technique references:
 
 ```json
@@ -1386,6 +1388,10 @@ Response: `{"status": "started", "workflow_id": "<id>", "mode": "execute"}`
 Errors: `404` unknown workflow; `409` when no Bravo exists, the Bravo is not connected, the profile
 is configured for the `simulation` controller, or initialization fails; `400` with the same
 validation-detail shape as `/simulate`.
+Starting another designer workflow while one is initializing, running or stopping also returns
+`409`. A Protocol Assistant release requires current approval, unchanged executable content and
+machine configuration, and an empty pipetting head. These checks run before initialization and
+again afterward; an instrument switch during initialization rejects the launch.
 
 ### POST `/api/workflows/stop`
 
@@ -1394,7 +1400,10 @@ Aborts the running simulation or execution. No request body.
 ⚠️ Aborting mid-execution leaves the robot wherever the current step stopped — inspect the deck
 before resuming.
 
-Response: `{"status": "stopped"}`, or `{"status": "no_workflow_running"}` when nothing is active.
+Response: `{"status": "stopping"}` after requesting abort. The workflow keeps exclusive ownership
+until it actually finishes. During initialization the response is `{"status": "initializing"}`;
+this does not cancel initialization. When nothing is active, the response is
+`{"status": "no_workflow_running"}`.
 
 ### POST `/api/script_action`
 
@@ -1447,11 +1456,59 @@ Response: `{"workflow": {...}}`. Errors: `400` when the file cannot be parsed.
 
 ---
 
+## Protocol Assistant
+
+The reviewed protocol API uses local-model extraction followed by deterministic validation,
+strict simulation, scientist approval and release to the designer. These routes do not move
+physical hardware. Physical execution uses the existing workflow execute endpoint above.
+See [Protocol Assistant](protocol-assistant.md) for the scientist workflow and current limits.
+
+| Method | Route | Request and result |
+|---|---|---|
+| `GET` | `/api/protocols/context` | Active profile, head, calibration and catalogs with configuration fingerprints |
+| `GET` | `/api/protocols` | Session summaries in `items` |
+| `POST` | `/api/protocols/chat` | `{message, session_id?, revision?}` proposes a cited plan from a conversation turn and returns `{session, reply, preview}`; follow-ups require the current revision |
+| `POST` | `/api/protocols/from-text` | `{text, name?}` creates a session; maximum 200,000 characters |
+| `POST` | `/api/protocols/ingest` | Multipart PDF `file` creates a session and retains the original; parser limit 20 MiB and 300 pages |
+| `GET` | `/api/protocols/{id}` | Session, revision, plan, questions, validation, simulation and approval |
+| `GET` | `/api/protocols/{id}/chat-preview` | Resume a conversation with its transcript and non-executable draft graph |
+| `GET` | `/api/protocols/{id}/source-pdf` | Original PDF as `application/pdf`; `404` for a text-only session |
+| `PATCH` | `/api/protocols/{id}` | `{revision, plan?, setup?, selected_paragraph_ids?}` updates the expected revision and clears prior validation, simulation and approval |
+| `POST` | `/api/protocols/{id}/extract` | Optional `{revision, selected_paragraph_ids, instructions}` extracts a structured plan with bounded repair and records model metadata |
+| `POST` | `/api/protocols/{id}/validate` | No body; returns the updated session with blocking issues, questions and run sheet |
+| `POST` | `/api/protocols/{id}/simulate` | No body; starts strict simulation and returns a session with `simulation.status: "running"`; poll `GET /api/protocols/{id}` |
+| `POST` | `/api/protocols/{id}/approve` | Requires `scientist`, `qualification`, `reviewed: true`, `deck_confirmed: true`; optional `notes` and expected `revision` |
+| `POST` | `/api/protocols/{id}/export-workflow` | No body; requires approval and returns `workflow_id`, `name`, and designer `url` |
+| `POST` | `/api/protocols/{id}/publish` | `{name}` publishes an approved library entry |
+| `GET` | `/api/protocols/library` | Approved entries in `items` |
+| `POST` | `/api/protocols/library/{id}/reuse` | No body; creates an unapproved session from the entry |
+| `GET` | `/api/protocols/setups` | Saved experiment setups in `items` |
+| `POST` | `/api/protocols/setups` | `{name, setup, materials?}` saves a reusable setup with its configuration fingerprint |
+
+Approval qualification is `qualification_run` for a supervised qualification run or
+`previously_qualified`; the latter requires a reference in `notes`. Approval requires a successful
+strict simulation for the current source, selected passages, plan, setup and machine configuration.
+Strict simulation runs the task logic on a separate simulator, skips elapsed waits, records manual
+checkpoints and times out after 180 seconds. Its terminal status is `passed` or `failed`. A server
+restart marks an interrupted simulation failed when its session is retrieved.
+
+Designer chat turns are stored only after the local model returns a source-grounded plan. The
+returned preview uses review nodes to show the protocol DAG and cannot be simulated or executed;
+the scientist completes review and approval through Protocol Assistant before exporting a runnable
+workflow. Each user turn becomes a cited source paragraph, while stale revisions return `409`.
+
+`409` indicates stale revisions, unresolved checks, an active simulation or missing/stale approval.
+`422` indicates invalid input or unrepaired extraction errors. Missing sessions and source PDFs
+return `404`; uploads above the HTTP intake limit return `413`. Request models and nested plan/setup
+schemas are available at `/docs`. Session, library, setup, release and original-PDF records are
+stored locally under `PYBRAVO_PROTOCOL_STORE`.
+
 ## Workflow Drafting (LLM)
 
-These endpoints generate draft workflows from natural language or from scientific-paper PDFs. They
-depend on optional services: an LLM provider (credentials via environment/`.env`) and a
-document-parsing service configured through `PYBRAVO_DOCLING_URL`.
+These legacy endpoints generate draft workflows from natural language or from scientific-paper
+PDFs. They support a local compatible endpoint (`PYBRAVO_DRAFTER_PROVIDER=local` or
+`PYBRAVO_DRAFTER_BASE_URL`) or a cloud provider configured with credentials in environment/`.env`.
+PDF routes also require a document-parsing service configured through `PYBRAVO_DOCLING_URL`.
 
 Shared error mapping:
 
@@ -1649,8 +1706,8 @@ Errors: `404` when the PDF is not cached.
 
 ## HTML pages and static mounts
 
-These routes serve the browser UI. All are `GET`, return `text/html`, and are excluded from the
-OpenAPI schema (`include_in_schema=False`).
+These routes serve the browser UI. All are `GET` and return `text/html`. Except for
+`/protocol-assistant`, they are excluded from the OpenAPI schema (`include_in_schema=False`).
 
 | Path | Serves |
 |---|---|
@@ -1659,11 +1716,13 @@ OpenAPI schema (`include_in_schema=False`).
 | `/tip-editor` | `frontend/tip_editor.html` |
 | `/workflow` | `frontend/workflow_editor.html` |
 | `/designer` | `frontend/designer.html`, served with `no-store` cache headers |
+| `/protocol-assistant` | `frontend/protocol_assistant.html`; included in OpenAPI |
 | `/drafter-dashboard` | `frontend/drafter_dashboard.html` |
 | `/vision-calibration` | `frontend/vision_calibration.html` |
 | `/` | `index.html` from the configured static directory — registered only when `run_server(static_dir=…)` is given |
 
-Each file-backed page returns `404` when the source file is missing.
+The existing file-backed page handlers return `404` when the source file is missing;
+the Protocol Assistant page requires its HTML file to be present in the installation.
 
 ### Static mounts
 

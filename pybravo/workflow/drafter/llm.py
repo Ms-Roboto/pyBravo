@@ -5,7 +5,9 @@ schema, prompt, and validator modules can load (and be tested) without
 the LLM packages installed. The server endpoint returns a clean 501
 with an install hint if the deps are missing.
 
-Provider choice is driven by env vars, in priority order:
+Set ``PYBRAVO_DRAFTER_PROVIDER=local`` or ``PYBRAVO_DRAFTER_BASE_URL``
+to use an OpenAI-compatible local endpoint. Local mode never falls back to
+a cloud provider. Existing cloud configuration remains available:
 
 1. ``ANTHROPIC_API_KEY`` — use Claude 3.5 Sonnet.
 2. ``OPENAI_API_KEY`` — use GPT-4o.
@@ -17,8 +19,9 @@ or "openai") for A/B testing.
 
 from __future__ import annotations
 
+import asyncio
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import structlog
@@ -63,7 +66,7 @@ class NoLLMCredentialsError(LLMDrafterError):
 class DrafterConfig:
     """Resolved provider + model + retry config for one draft call."""
 
-    provider: str  # "anthropic" | "openai"
+    provider: str  # "local" | "anthropic" | "openai"
     model: str
     max_tokens: int = 4096
     temperature: float = 0.1
@@ -74,7 +77,8 @@ def _resolve_config() -> DrafterConfig:
     """Pick the provider/model based on env vars.
 
     Environment knobs:
-        PYBRAVO_DRAFTER_PROVIDER — "anthropic" | "openai"
+        PYBRAVO_DRAFTER_PROVIDER — "local" | "anthropic" | "openai"
+        PYBRAVO_DRAFTER_BASE_URL — local OpenAI-compatible endpoint
         PYBRAVO_DRAFTER_MODEL    — override the default model id
         PYBRAVO_DRAFTER_MAX_TOKENS / _TEMPERATURE / _REPAIR_ATTEMPTS
     """
@@ -82,10 +86,16 @@ def _resolve_config() -> DrafterConfig:
     anthropic_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
     openai_key = bool(os.environ.get("OPENAI_API_KEY"))
 
-    if forced == "anthropic" and anthropic_key:
+    if forced and forced not in {"local", "anthropic", "openai"}:
+        raise LLMDrafterError(f"Unknown drafter provider: {forced!r}")
+    if forced == "local" or (not forced and os.environ.get("PYBRAVO_DRAFTER_BASE_URL", "").strip()):
+        provider = "local"
+    elif forced == "anthropic" and anthropic_key:
         provider = "anthropic"
     elif forced == "openai" and openai_key:
         provider = "openai"
+    elif forced:
+        raise NoLLMCredentialsError(f"The explicitly selected {forced} provider has no API credentials.")
     elif anthropic_key:
         provider = "anthropic"
     elif openai_key:
@@ -98,6 +108,7 @@ def _resolve_config() -> DrafterConfig:
         )
 
     default_model = {
+        "local": "qwen",
         "anthropic": "claude-sonnet-4-6",
         "openai": "gpt-4o",
     }[provider]
@@ -141,6 +152,10 @@ def _load_instructor():
 
 
 def _build_client(provider: str):
+    if provider == "local":
+        # The async local adapter creates and closes its HTTP client per call.
+        # No cloud SDK, Instructor or API key is needed in this mode.
+        return None
     instructor = _load_instructor()
     if provider == "anthropic":
         try:
@@ -229,25 +244,10 @@ async def draft_workflow(
             of_max=cfg.max_repair_attempts + 1,
         )
         try:
-            if cfg.provider == "anthropic":
-                # Anthropic's SDK requires system as a top-level param.
-                wf = client.messages.create(
-                    model=cfg.model,
-                    max_tokens=cfg.max_tokens,
-                    temperature=cfg.temperature,
-                    system=system_prompt,
-                    messages=messages,
-                    response_model=DraftedWorkflow,
-                )
-            else:
-                # OpenAI: system goes in the messages array.
-                wf = client.chat.completions.create(
-                    model=cfg.model,
-                    max_tokens=cfg.max_tokens,
-                    temperature=cfg.temperature,
-                    messages=[{"role": "system", "content": system_prompt}, *messages],
-                    response_model=DraftedWorkflow,
-                )
+            wf = await _llm_messages(
+                client, cfg, system=system_prompt, messages=messages,
+                response_model=DraftedWorkflow,
+            )
         except Exception as exc:
             # Instructor wraps schema-violation retries internally; what
             # bubbles up here is typically network / auth / context-
@@ -310,7 +310,7 @@ async def draft_workflow(
 # ══════════════════════════════════════════════════════════════════════
 
 
-def _llm_structured(
+async def _llm_structured(
     client: Any,
     cfg: DrafterConfig,
     *,
@@ -325,25 +325,48 @@ def _llm_structured(
     pipeline can reuse the same client plumbing without dragging in
     the repair-loop. Returns the parsed Pydantic instance.
     """
+    return await _llm_messages(
+        client, cfg, system=system, messages=[{"role": "user", "content": user}],
+        response_model=response_model, max_tokens=max_tokens,
+    )
+
+
+async def _llm_messages(
+    client: Any, cfg: DrafterConfig, *, system: str,
+    messages: list[dict[str, str]], response_model: Any,
+    max_tokens: int | None = None,
+) -> Any:
     mt = max_tokens or cfg.max_tokens
+    if cfg.provider == "local":
+        from pybravo.workflow.protocols.llm import LocalLLMConfig, structured_json
+
+        local_config = replace(
+            LocalLLMConfig.from_env(), model=cfg.model, max_tokens=mt,
+            temperature=cfg.temperature,
+        )
+        response = await structured_json(
+            [{"role": "system", "content": system}, *messages],
+            response_model.model_json_schema(), config=local_config,
+            schema_name=response_model.__name__,
+        )
+        return response_model.model_validate(response.payload)
     if cfg.provider == "anthropic":
-        return client.messages.create(
+        return await asyncio.to_thread(
+            client.messages.create,
             model=cfg.model,
             max_tokens=mt,
             temperature=cfg.temperature,
             system=system,
-            messages=[{"role": "user", "content": user}],
+            messages=messages,
             response_model=response_model,
         )
     else:
-        return client.chat.completions.create(
+        return await asyncio.to_thread(
+            client.chat.completions.create,
             model=cfg.model,
             max_tokens=mt,
             temperature=cfg.temperature,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=[{"role": "system", "content": system}, *messages],
             response_model=response_model,
         )
 
@@ -407,7 +430,7 @@ async def extract_facts(
         total_chars=sum(len(p["text"]) for p in passages),
     )
     try:
-        facts = _llm_structured(
+        facts = await _llm_structured(
             client, cfg,
             system=PASS1_SYSTEM_PROMPT,
             user=user_prompt,
@@ -520,19 +543,10 @@ async def draft_workflow_from_facts(
             fact_count=len(facts.facts),
         )
         try:
-            if cfg.provider == "anthropic":
-                wf = client.messages.create(
-                    model=cfg.model, max_tokens=cfg.max_tokens,
-                    temperature=cfg.temperature, system=system_prompt,
-                    messages=messages, response_model=DraftedWorkflow,
-                )
-            else:
-                wf = client.chat.completions.create(
-                    model=cfg.model, max_tokens=cfg.max_tokens,
-                    temperature=cfg.temperature,
-                    messages=[{"role": "system", "content": system_prompt}, *messages],
-                    response_model=DraftedWorkflow,
-                )
+            wf = await _llm_messages(
+                client, cfg, system=system_prompt, messages=messages,
+                response_model=DraftedWorkflow,
+            )
         except Exception as exc:
             raise LLMDrafterError(f"Pass 2 (workflow from facts) failed: {exc}") from exc
 
@@ -586,9 +600,10 @@ source_citation.
 
 Do not fabricate new facts. If the facts list doesn't contain enough
 information to specify a parameter (e.g. the paper said "a small
-volume" and Pass 1 left volume_ul null), pick the closest-reasonable
-value AND record the fact_id of the source fact so the operator can
-audit.
+volume" and Pass 1 left volume_ul null), leave it null and explain the
+unresolved parameter in the workflow description. Never infer a number.
+Preserve unsupported/manual work as an operator handoff or clearly describe
+the missing operation; never silently omit it to make the draft runnable.
 """
 
 

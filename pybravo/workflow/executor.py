@@ -322,6 +322,26 @@ def _build_task_params(node_type: str, properties: dict[str, Any]) -> dict[str, 
         params["volume"] = float(properties.get("volume", 0))
         if properties.get("liquid_class"):
             params["liquid_class"] = properties["liquid_class"]
+        if properties.get("pipette_technique"):
+            params["pipette_technique"] = properties["pipette_technique"]
+        if properties.get("distance_from_bottom") is not None:
+            distance = float(properties["distance_from_bottom"])
+            if node_type == "liquid/Mix":
+                params.update(aspirate_distance=distance, dispense_distance=distance)
+            else:
+                params["distance_from_bottom"] = distance
+        aliases = {
+            "liquid/Aspirate": {"pre_aspirate_volume": "pre_aspirate", "post_aspirate_volume": "post_aspirate",
+                                "dynamic_tip_extension": "dynamic_tip_extension"},
+            "liquid/Dispense": {"blowout_volume": "blowout", "dynamic_tip_retraction": "dynamic_tip_retraction"},
+            "liquid/Mix": {"pre_aspirate_volume": "pre_aspirate", "blowout_volume": "blowout",
+                           "dynamic_tip_extension": "dynamic_tip_extension"},
+        }
+        for property_name, argument_name in aliases[node_type].items():
+            if properties.get(property_name) is not None:
+                params[argument_name] = float(properties[property_name])
+        if node_type == "liquid/Dispense" and properties.get("empty_tips") is not None:
+            params["empty_tips"] = bool(properties["empty_tips"])
         if properties.get("tip_touch") is not None:
             params["tip_touch"] = bool(properties["tip_touch"])
         if node_type == "liquid/Dispense" and properties.get("blowout"):
@@ -400,6 +420,8 @@ class WorkflowExecutor:
         runtime_state: dict[str, Any] | None = None,
         preview_animation: bool = True,
         library_src: str = "",
+        strict_validation: bool = False,
+        reviewed_protocol: bool = False,
     ) -> None:
         self.bravo = bravo
         self._deck_config = deck_config or {}
@@ -412,6 +434,8 @@ class WorkflowExecutor:
         self._library_ns: dict[str, Any] = {}
         self._runtime_state = copy.deepcopy(runtime_state or {})
         self._preview_animation = preview_animation
+        self._strict_validation = strict_validation
+        self._reviewed_protocol = reviewed_protocol
         self._nodes = {n["id"]: n for n in graph_data.get("nodes", [])}
         self._links = {}
         for link in graph_data.get("links", []):
@@ -559,6 +583,8 @@ class WorkflowExecutor:
                 head_mode_payload.get("column_count"),
             )
         except Exception:
+            if self._strict_validation or self._reviewed_protocol:
+                raise
             pass
 
     def _apply_runtime_snapshot(self) -> None:
@@ -714,6 +740,8 @@ class WorkflowExecutor:
                             tipbox_fill_state=item.get("tipbox_fill_state"),
                         )
                     except (ValueError, Exception) as exc:
+                        if self._strict_validation or self._reviewed_protocol:
+                            raise RuntimeError(f"Unknown or invalid labware at slot {loc}: {exc}") from exc
                         logger.warning(
                             "Could not set labware at location %d: %s (continuing anyway)",
                             loc, exc,
@@ -752,6 +780,8 @@ class WorkflowExecutor:
                             labware_id, loc, exc,
                         )
                     if pushed is None:
+                        if self._strict_validation or self._reviewed_protocol:
+                            raise RuntimeError(f"Unknown stacked labware {labware_id} at slot {loc}")
                         try:
                             pushed = Labware(
                                 id=labware_id,
@@ -771,6 +801,8 @@ class WorkflowExecutor:
                     try:
                         self.bravo._deck.add(loc, pushed)
                     except Exception as exc:
+                        if self._strict_validation or self._reviewed_protocol:
+                            raise
                         logger.warning(
                             "Could not push stack entry #%d at location %d: %s",
                             idx + 1, loc, exc,
@@ -795,6 +827,9 @@ class WorkflowExecutor:
             return
         base_class = str(getattr(labware, "labware_type", "") or "").lower()
         metadata = labware.metadata or {}
+        if top_item.get("tip_definition_id"):
+            metadata["tip_definition_id"] = top_item["tip_definition_id"]
+            labware.metadata = metadata
         kind = str(metadata.get("kind") or metadata.get("base_class") or "").lower()
         if "tip_box" not in (base_class, kind):
             return
@@ -802,12 +837,25 @@ class WorkflowExecutor:
             self.bravo._initialize_tipbox_occupancy(
                 loc, labware, fill_state=top_item.get("tipbox_fill_state") or "full"
             )
+            if top_item.get("available_tips") is not None:
+                cells = {_parse_anchor(str(well)) for well in top_item["available_tips"]}
+                rows, cols = int(metadata.get("rows", 0)), int(metadata.get("cols", 0))
+                if any(r < 0 or c < 0 or r >= rows or c >= cols for r, c in cells):
+                    raise ValueError("Available tips contain a cell outside the rack")
+                self.bravo._tipbox_occupancy[loc] = cells
         except Exception as exc:
+            if self._strict_validation or self._reviewed_protocol:
+                raise
             logger.warning("Could not seed tip occupancy at location %d: %s", loc, exc)
 
     def abort(self) -> None:
         """Request abort of the running workflow."""
         self._aborted = True
+        for future in self._user_prompts.values():
+            if not future.done():
+                future.set_exception(OperatorCancelled("Workflow aborted"))
+        self._script_action = "abort"
+        self._script_pause_event.set()
 
     def resolve_script_error(self, action: str, new_source: str = "") -> bool:
         """Resolve a pending script-error pause.
@@ -830,6 +878,7 @@ class WorkflowExecutor:
         node_id: int,
         message: str,
         default: str,
+        required_confirmation: bool = False,
     ) -> str:
         """Register a Future for an operator prompt, emit the WS event, and
         await the answer. Called from the sandbox thread via
@@ -844,6 +893,7 @@ class WorkflowExecutor:
             "node_id": node_id,
             "message": message,
             "default": default,
+            "required_confirmation": required_confirmation,
         })
         try:
             return await fut
@@ -952,6 +1002,10 @@ class WorkflowExecutor:
         # Capture the main loop so sandbox threads (prompt_user) can submit
         # coroutines back via asyncio.run_coroutine_threadsafe.
         self._main_loop = asyncio.get_running_loop()
+        if self._strict_validation and (self._library_src or any(
+            n.get("type") == "logic/Script" for n in self._nodes.values()
+        )):
+            raise ValueError("Strict protocol validation does not execute Python scripts or libraries")
         # Compile the workflow-level library ONCE at run start so every
         # Script node sees the same helpers. A library compile failure
         # aborts the run before any motion.
@@ -984,6 +1038,8 @@ class WorkflowExecutor:
         # the state-machine engine's on_step callback on top produces the
         # "moves repeating 2x" artifact in the 3D viewport.
         engine = self.bravo._engine
+        prior_step_handler = getattr(engine, "_on_step_complete", None)
+        prior_error_handler = getattr(engine, "_on_error", None)
         self._step_event_loop = asyncio.get_event_loop()
         def _on_step(task_name: str, step_name: str) -> None:
             """Synchronous callback from the state-machine engine — runs in
@@ -1054,6 +1110,8 @@ class WorkflowExecutor:
         # resolves with Retry/Ignore/Abort). Latch error state and blink
         # yellow until the next successful step or workflow end.
         def _on_engine_error(task_error) -> None:
+            if self._strict_validation or self._reviewed_protocol:
+                raise RuntimeError(f"{task_error.step_name}: {task_error.message}")
             try:
                 if not self._light_in_error:
                     self._light_in_error = True
@@ -1062,23 +1120,18 @@ class WorkflowExecutor:
                 pass
         engine.set_error_handler(_on_engine_error)
 
-        # Set up deck labware from workflow config
-        await self._setup_deck()
-        self._apply_runtime_snapshot()
-
-        # Solid blue = "workflow running normally". Set BEFORE the start
-        # event so any UI listener sees consistent state from t=0.
-        self._set_workflow_light("running")
-
-        await self._emit({"type": "workflow:start"})
-        await self._emit(self._current_runtime_event_state())
-        # Seed the designer Variables panel with the (empty) blackboard so
-        # stale state from a previous run is cleared.
-        await self._emit_vars_update(force=True)
-        # Give the WebSocket client a moment to connect and receive events
-        await asyncio.sleep(0.3)
-
         try:
+            # Setup can fail before the first node, particularly when a
+            # reviewed tip inventory no longer matches the configured deck.
+            # Keep it inside the event-recording and callback-cleanup boundary.
+            await self._setup_deck()
+            self._apply_runtime_snapshot()
+            self._set_workflow_light("running")
+            await self._emit({"type": "workflow:start"})
+            await self._emit(self._current_runtime_event_state())
+            await self._emit_vars_update(force=True)
+            # Give the WebSocket client a moment to connect and receive events.
+            await asyncio.sleep(0.3)
             await self._walk(start["id"], 0)  # slot 0 = flow output
         except Exception as exc:
             await self._emit({
@@ -1092,17 +1145,16 @@ class WorkflowExecutor:
             self._set_workflow_light("error")
             return
         finally:
-            # Remove step + error handlers so they don't fire for
-            # non-workflow tasks.
-            engine.set_step_handler(None)
-            engine.set_error_handler(None)
+            # Restore the caller's handlers even if deck setup failed.
+            engine.set_step_handler(prior_step_handler)
+            engine.set_error_handler(prior_error_handler)
 
         # Clean completion — green idle so the operator can tell the run
         # is done from across the room.
         self._set_workflow_light("idle")
         await self._emit({
             "type": "workflow:complete",
-            "status": "ok",
+            "status": "aborted" if self._aborted else "ok",
             "vars": _safe_json_snapshot(self._vars),
         })
 
@@ -1213,6 +1265,42 @@ class WorkflowExecutor:
         # ── Flow control nodes ────────────────────────────────────────
         if node_type == "flow/End":
             await self._emit({"type": "workflow:node_complete", "node_id": node_id, "status": "ok"})
+            return
+
+        if node_type in {"system/Manual", "system/Wait"}:
+            if node_type == "system/Manual":
+                message = str(properties.get("message") or "").strip()
+                if not message:
+                    raise ValueError("Manual checkpoint requires instructions")
+                if properties.get("duration_s") is not None:
+                    duration = float(properties["duration_s"])
+                    if not math.isfinite(duration) or duration <= 0:
+                        raise ValueError("Manual checkpoint duration must be positive and finite")
+                    message += f"\nRequired duration: {duration:g} seconds."
+                if self._strict_validation or self._preview_animation:
+                    await self._emit({"type": "workflow:manual_checkpoint", "node_id": node_id,
+                                      "message": message, "simulated": True})
+                else:
+                    answer = await self._open_user_prompt(
+                        str(uuid.uuid4()), node_id, message + "\nType completed to continue.",
+                        "", required_confirmation=True,
+                    )
+                    if answer.strip().lower() != "completed":
+                        raise OperatorCancelled("Manual checkpoint was not confirmed")
+                    await self._emit({"type": "workflow:manual_checkpoint", "node_id": node_id,
+                                      "message": message, "confirmed": True})
+            else:
+                duration = float(properties.get("duration_s", 0))
+                if not math.isfinite(duration) or duration <= 0:
+                    raise ValueError("Wait duration must be a positive finite number")
+                if not self._strict_validation and not self._preview_animation:
+                    deadline = asyncio.get_running_loop().time() + duration
+                    while not self._aborted and asyncio.get_running_loop().time() < deadline:
+                        await asyncio.sleep(min(0.25, max(0, deadline - asyncio.get_running_loop().time())))
+                await self._emit({"type": "workflow:wait", "node_id": node_id,
+                                  "duration_s": duration, "simulated": self._strict_validation or self._preview_animation})
+            await self._emit({"type": "workflow:node_complete", "node_id": node_id, "status": "ok"})
+            await self._walk(node_id, 0)
             return
 
         if node_type == "flow/IfElse":
@@ -1418,6 +1506,8 @@ class WorkflowExecutor:
                         int(anchor_col or 0),
                     )
                 except Exception:
+                    if self._strict_validation or self._reviewed_protocol:
+                        raise
                     pass
 
         # Animate the motion in 3D FIRST (before executing the actual task).
@@ -1505,6 +1595,8 @@ class WorkflowExecutor:
                             self._vars[store_as] = height_val
                             await self._emit_vars_update()
                 else:
+                    if self._strict_validation or self._reviewed_protocol:
+                        raise ValueError(f"Unsupported Bravo method: {method_name}")
                     logger.warning("Unknown bravo method", method=method_name)
             except Exception as exc:
                 # With universal operator-prompt coverage, the engine now
@@ -1513,7 +1605,7 @@ class WorkflowExecutor:
                 # chose Abort, or an unexpected internal fault occurred. In
                 # simulate/preview mode we forgive (animation was the point);
                 # in execute mode we stop the workflow.
-                if self._preview_animation:
+                if self._preview_animation and not self._strict_validation:
                     logger.warning("Task execution error (preview/sim, continuing): %s", exc)
                     await self._emit({
                         "type": "workflow:task_warning",
@@ -1534,9 +1626,9 @@ class WorkflowExecutor:
             # from the Bravo wrapper (some methods swallow abort and return
             # normally with a {status: "aborted"} dict). Stop the workflow.
             if (
-                not self._preview_animation
+                (not self._preview_animation or self._strict_validation)
                 and isinstance(result, dict)
-                and result.get("status") == "aborted"
+                and result.get("status") in {"aborted", "error", "failed"}
             ):
                 logger.warning("Task reported aborted status; halting workflow: %s", result.get("message"))
                 await self._emit({
@@ -1546,6 +1638,9 @@ class WorkflowExecutor:
                 })
                 self._aborted = True
                 return
+
+        elif self._strict_validation:
+            raise ValueError(f"Unsupported workflow node: {node_type}")
 
         await self._emit({"type": "workflow:node_complete", "node_id": node_id, "status": "ok"})
 

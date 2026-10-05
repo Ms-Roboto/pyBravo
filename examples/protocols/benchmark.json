@@ -1,0 +1,2581 @@
+{
+  "schema_version": 1,
+  "review_status": "synthetic; not scientist approved",
+  "description": "Synthetic engineering acceptance cases. They are examples for software qualification and must not be used as experimental protocols.",
+  "cases": [
+    {
+      "id": "whole_plate_transfer",
+      "description": "A grounded 96-channel buffer transfer.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "column_transfer",
+      "description": "A grounded eight-channel transfer addresses one column.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "column",
+          "subset_config": "back_left",
+          "column_count": 1
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "serial_dilution",
+      "description": "Serial transfer between adjacent columns with fresh tips.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel. Transfer 5 uL from samples at A1 to samples at A2, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          },
+          {
+            "id": "dilute",
+            "kind": "transfer",
+            "source": "samples",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A2",
+            "volume_ul": 5,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 5,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "column",
+          "subset_config": "back_left",
+          "column_count": 1
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "transfer_mix",
+      "description": "Transfer then mix with fresh column tips.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel. Mix 5 uL in samples at A1 for 3 cycles.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          },
+          {
+            "id": "mix",
+            "kind": "mix",
+            "material": "samples",
+            "anchor": "A1",
+            "volume_ul": 5,
+            "cycles": 3,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 5,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              },
+              {
+                "field": "cycles",
+                "value": 3,
+                "unit": "count",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "column",
+          "subset_config": "back_left",
+          "column_count": 1
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "repeated_transfer",
+      "description": "Repeat consumes distinct tip columns and accounts cumulative volume.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Repeat 2 times: Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              },
+              {
+                "field": "repeat",
+                "value": 2,
+                "unit": "count",
+                "paragraph_id": "p1"
+              }
+            ],
+            "repeat": 2
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "column",
+          "subset_config": "back_left",
+          "column_count": 1
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "repeat_wait",
+      "description": "Bounded repeated waits preserve minute-to-second conversion.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Repeat 2 times: Wait 2 min.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "block",
+            "kind": "repeat",
+            "repeat": 2,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "repeat",
+                "value": 2,
+                "unit": "count",
+                "paragraph_id": "p1"
+              }
+            ],
+            "steps": [
+              {
+                "id": "wait",
+                "kind": "wait",
+                "duration_s": 120,
+                "source_paragraph_ids": [
+                  "p1"
+                ],
+                "source_values": [
+                  {
+                    "field": "duration_s",
+                    "value": 2,
+                    "unit": "min",
+                    "paragraph_id": "p1"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "manual_handoff",
+      "description": "Manual centrifuge handoff remains an operator checkpoint.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel. Centrifuge the samples and return the plate to slot 2.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          },
+          {
+            "id": "manual",
+            "kind": "manual",
+            "message": "Centrifuge the samples and return the plate to slot 2.",
+            "source_paragraph_ids": [
+              "p1"
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "plate_move",
+      "description": "A gripper move updates the tracked deck.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel. Move the samples plate to deck slot 5.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          },
+          {
+            "id": "move",
+            "kind": "move_plate",
+            "material": "samples",
+            "destination_slot": 5,
+            "source_paragraph_ids": [
+              "p1"
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "dense_plate_phase",
+      "description": "96-channel head on a 384-well plate addresses a sparse footprint.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 16,
+            "cols": 24,
+            "wells": 384,
+            "spacing_x_mm": 4.5,
+            "spacing_y_mm": 4.5,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "missing_volume",
+      "description": "An incomplete volume produces a focused question.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer an unspecified volume from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": null,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": []
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "issue_codes": [
+          "liquid_volume"
+        ]
+      }
+    },
+    {
+      "id": "dead_volume",
+      "description": "Source draw must preserve dead volume.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 25,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "issue_codes": [
+          "insufficient_reagent"
+        ]
+      }
+    },
+    {
+      "id": "overfilled_destination",
+      "description": "Transfer cannot overflow destination wells.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 190,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "issue_codes": [
+          "destination_capacity"
+        ]
+      }
+    },
+    {
+      "id": "fabricated_evidence",
+      "description": "A cited paragraph cannot substantiate an invented numerical value.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 50,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "issue_codes": [
+          "ungrounded_source_value"
+        ]
+      }
+    },
+    {
+      "id": "invented_labware",
+      "description": "Unknown catalog identifiers are rejected.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "invented",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "issue_codes": [
+          "unknown_labware"
+        ]
+      }
+    },
+    {
+      "id": "no_tips",
+      "description": "An empty supply cannot satisfy a liquid step.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3,
+            "available_tips": []
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "issue_codes": [
+          "tip_inventory_exhausted"
+        ]
+      }
+    },
+    {
+      "id": "head_footprint",
+      "description": "The full head cannot address a single corner well.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at H12 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "H12",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "issue_codes": [
+          "unreachable_wells"
+        ]
+      }
+    },
+    {
+      "id": "no_gripper",
+      "description": "A gripper-free machine requires an explicit manual alternative.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel. Move the samples plate to deck slot 5.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          },
+          {
+            "id": "move",
+            "kind": "move_plate",
+            "material": "samples",
+            "destination_slot": 5,
+            "source_paragraph_ids": [
+              "p1"
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "fresh_each_step",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": false,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "issue_codes": [
+          "gripper_unavailable"
+        ]
+      }
+    },
+    {
+      "id": "unreviewed_tip_reuse",
+      "description": "Tip reuse requires a recorded scientific justification.",
+      "source": [
+        {
+          "id": "p1",
+          "text": "Transfer 20.0 uL from buffer at A1 to samples at A1, per active channel.",
+          "page": 1
+        }
+      ],
+      "plan": {
+        "name": "Reviewed buffer transfer",
+        "materials": [
+          {
+            "id": "buffer",
+            "name": "Buffer",
+            "labware_id": "plate",
+            "deck_slot": 1,
+            "initial_volume_ul": 100.0,
+            "dead_volume_ul": 10.0
+          },
+          {
+            "id": "samples",
+            "name": "Samples",
+            "labware_id": "plate",
+            "deck_slot": 2,
+            "initial_volume_ul": 0.0,
+            "dead_volume_ul": 0.0
+          },
+          {
+            "id": "tips",
+            "name": "Fresh tips",
+            "role": "tips",
+            "labware_id": "rack",
+            "deck_slot": 3
+          },
+          {
+            "id": "waste",
+            "name": "Empty tip rack",
+            "role": "waste",
+            "labware_id": "rack",
+            "deck_slot": 4,
+            "available_tips": []
+          }
+        ],
+        "steps": [
+          {
+            "id": "transfer-1",
+            "kind": "transfer",
+            "source": "buffer",
+            "destination": "samples",
+            "source_anchor": "A1",
+            "destination_anchor": "A1",
+            "volume_ul": 20.0,
+            "source_paragraph_ids": [
+              "p1"
+            ],
+            "source_values": [
+              {
+                "field": "volume_ul",
+                "value": 20.0,
+                "unit": "uL",
+                "paragraph_id": "p1"
+              }
+            ]
+          }
+        ]
+      },
+      "setup": {
+        "head_mode": {
+          "subset_type": "all_barrels",
+          "subset_config": "back_left"
+        },
+        "tip_strategy": "reuse_all",
+        "tip_rack_ids": [
+          "tips"
+        ],
+        "tip_disposal_id": "waste",
+        "liquid_class": "water",
+        "distance_from_bottom_mm": 1.0
+      },
+      "context": {
+        "head_type": "HT_96_D_200",
+        "has_gripper": true,
+        "labware": [
+          {
+            "id": "plate",
+            "name": "96 well plate",
+            "kind": "sbs_plate",
+            "base_class": "plate",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0
+          },
+          {
+            "id": "rack",
+            "name": "96 tips",
+            "kind": "tip_box",
+            "base_class": "tip_box",
+            "rows": 8,
+            "cols": 12,
+            "wells": 96,
+            "spacing_x_mm": 9.0,
+            "spacing_y_mm": 9.0,
+            "well_volume_ul": 200.0,
+            "well_depth_mm": 10.0,
+            "tip_definition_id": "tips-200",
+            "supported_tip_ids": [
+              "tips-200"
+            ]
+          }
+        ],
+        "tip_definitions": [
+          {
+            "id": "tips-200",
+            "capacity_ul": 200.0,
+            "compatible_heads": [
+              "HT_96_D_200"
+            ]
+          }
+        ],
+        "liquid_classes": [
+          {
+            "id": "water",
+            "name": "Water"
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "issue_codes": [
+          "tip_reuse_reason"
+        ]
+      }
+    }
+  ]
+}

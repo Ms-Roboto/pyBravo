@@ -18,6 +18,7 @@ operator as warnings without blocking the draft from opening in a tab.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -67,6 +68,8 @@ _REQUIRED_PROPERTIES: dict[str, tuple[str, ...]] = {
     "sensor/ScanStackHeight": ("location",),
     "flow/Loop":       ("count",),
     "logic/Script":    ("script",),
+    "system/Manual":  ("message",),
+    "system/Wait":    ("duration_s",),
 }
 
 
@@ -175,12 +178,32 @@ def _check_required_properties(wf: DraftedWorkflow) -> list[ValidationIssue]:
     for n in wf.graph.nodes:
         required = _REQUIRED_PROPERTIES.get(n.type, ())
         for key in required:
-            if key not in n.properties:
+            if key not in n.properties or n.properties[key] is None or n.properties[key] == "":
                 issues.append(ValidationIssue(
                     severity="error", code="MISSING_PROPERTY",
-                    message=f"Node of type {n.type} is missing required property '{key}'.",
+                    message=f"Node of type {n.type} has an unresolved required property '{key}'. Obtain the scientist's value; do not guess.",
                     node_id=n.id,
                 ))
+    return issues
+
+
+def _check_manual_wait(wf: DraftedWorkflow) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for node in wf.graph.nodes:
+        if node.type not in {"system/Manual", "system/Wait"}:
+            continue
+        value = node.properties.get("duration_s")
+        if value is None:
+            continue
+        try:
+            valid = math.isfinite(float(value)) and float(value) > 0
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            issues.append(ValidationIssue(
+                severity="error", code="INVALID_DURATION", node_id=node.id,
+                message="Duration must be a positive finite number of seconds. Obtain missing values from the scientist.",
+            ))
     return issues
 
 
@@ -511,6 +534,7 @@ def validate_drafted_workflow(
     issues.extend(_check_unique_ids(wf))
     issues.extend(_check_link_endpoints(wf))
     issues.extend(_check_required_properties(wf))
+    issues.extend(_check_manual_wait(wf))
     issues.extend(_check_location_sanity(wf, strict_deck=strict_deck))
     issues.extend(_check_volume_sanity(wf))
     issues.extend(_check_tips_lifecycle(wf))

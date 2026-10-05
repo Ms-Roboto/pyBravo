@@ -22,6 +22,7 @@ The server publishes several browser pages from one process:
 |---|---|---|
 | `/` | Control panel | Day-to-day operation: connect, home, jog, pipette, move plates |
 | `/designer` | Workflow designer | Build, simulate and run node-graph protocols |
+| `/protocol-assistant` | Protocol Assistant | Interpret text/PDF protocols with a local model, review and release workflows |
 | `/labware-editor` | Labware dashboard | Edit labware entries and labware classes |
 | `/liquid-class-editor` | Liquid class editor | Edit liquid classes and pipette techniques |
 | `/tip-editor` | Tip editor | Edit tip definitions |

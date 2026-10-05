@@ -91,6 +91,21 @@ than failing the whole request.
 
 ---
 
+## Build from a conversation
+
+Open **Protocol chat** in the designer and describe the ordered laboratory
+procedure. The local model proposes a structured plan after each message, and
+the designer draws a connected draft graph in its own tab. The graph keeps
+the original messages as citations and shows missing experimental details.
+
+Chat graphs contain review nodes, so they cannot be simulated or executed as
+robot workflows. Use the linked [Protocol Assistant](protocol-assistant.md) to
+complete the deck and liquid setup, resolve questions, validate, strictly
+simulate, and approve. Exporting from Protocol Assistant creates the runnable
+workflow graph in the designer.
+
+---
+
 ## Node types
 
 Nodes are grouped in the designer's left panel in the same categories used
@@ -376,6 +391,12 @@ then simulate before you go anywhere near hardware.
 ---
 
 ## The optional LLM drafter
+
+For the complete source-review, clarification, strict-simulation and approval
+workflow, use [Protocol Assistant](protocol-assistant.md) at
+`/protocol-assistant`. It connects to a local model and releases approved
+workflows into this designer. The `Draft…` flow below remains a quick draft
+editor and does not confer a Protocol Assistant release.
 
 The designer's `Draft…` button can produce a first-pass workflow from a
 description or from a paper.

@@ -264,6 +264,10 @@ _REGISTER_RE = re.compile(
     r"LiteGraph\.registerNodeType\(\s*['\"](?P<type>[^'\"]+)['\"]\s*,\s*(?P<ctor>[A-Za-z_$][A-Za-z0-9_$]*)\s*\)"
 )
 
+# Protocol chat uses this canvas node only to display a reviewed plan. It is
+# never a workflow task and must not enter the legacy drafter's node schema.
+_NON_DRAFTABLE_NODE_TYPES = frozenset({"review/ProtocolStep"})
+
 # Accepts values that are simple primitives: strings, numbers, true/false/null,
 # or empty literal []/{}. Good enough for every addProperty we have today.
 _ADDPROP_RE = re.compile(
@@ -301,7 +305,7 @@ def _scrape_register_node_types(html: str, already_scraped: set[str]) -> dict[st
     out: dict[str, dict[str, Any]] = {}
     for match in _REGISTER_RE.finditer(html):
         type_key = match.group("type")
-        if type_key in already_scraped:
+        if type_key in already_scraped or type_key in _NON_DRAFTABLE_NODE_TYPES:
             continue
         ctor = match.group("ctor")
         func_re = re.compile(rf"function\s+{re.escape(ctor)}\s*\(\s*\)\s*\{{")

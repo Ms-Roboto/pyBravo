@@ -44,6 +44,8 @@ SUPPORTED_NODE_TYPES: tuple[str, ...] = (
     "system/Initialize",
     "system/Home",
     "system/DockGripper",
+    "system/Manual",
+    "system/Wait",
     "logic/Script",
 )
 
@@ -70,6 +72,8 @@ NodeType = Literal[
     "system/Initialize",
     "system/Home",
     "system/DockGripper",
+    "system/Manual",
+    "system/Wait",
     "logic/Script",
 ]
 
@@ -354,6 +358,8 @@ _NODE_SLOTS: dict[str, dict[str, list[tuple[str, int | str]]]] = {
     "system/Initialize":       {"inputs": _FLOW_IN,                                 "outputs": _FLOW_OUT},
     "system/Home":             {"inputs": _FLOW_IN,                                 "outputs": _FLOW_OUT},
     "system/DockGripper":      {"inputs": _FLOW_IN,                                 "outputs": _FLOW_OUT},
+    "system/Manual":           {"inputs": _FLOW_IN,                                 "outputs": _FLOW_OUT},
+    "system/Wait":             {"inputs": _FLOW_IN,                                 "outputs": _FLOW_OUT},
     "logic/Script":            {"inputs": [("flow", -1), ("data", "string")],       "outputs": [("flow", -1), ("result", "string")]},
 }
 

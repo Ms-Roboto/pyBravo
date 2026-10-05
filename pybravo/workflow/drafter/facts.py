@@ -97,7 +97,7 @@ class ExtractedFact(BaseModel):
     )
     speed_rpm: float | None = Field(
         default=None,
-        description="Spin / shake / centrifuge rate, if mentioned. Convert x g when possible.",
+        description="Rotation rate in rpm only if stated. Preserve x g in text; never convert without rotor radius.",
     )
     deck_location: int | None = Field(
         default=None,
@@ -168,37 +168,24 @@ stable paragraph_id (the IDs are provided below).
    is not 10 uL; it's null with an action kind and text describing
    the ambiguity.
 3. Prefer canonical units: uL for volumes, seconds for durations, C
-   for temperatures, rpm for rotation (convert x g when feasible).
+   for temperatures, rpm for stated rotation. Preserve centrifuge x g in
+   text unless rotor radius is explicitly supplied; never guess a conversion.
 4. Each fact's `text` is one sentence. Long compound steps = multiple
    facts sharing the same paragraph_id.
 5. `kind` is a tight vocabulary — use the closest match and put
    ambiguous content in `note`. Do not invent new kinds.
 6. `fact_id` values are `f-1`, `f-2`, ... in the order you emit them.
-7. Omit ambient / computational / sequencing / staining steps that
-   don't involve liquid handling. Keep only what a Bravo robot would
-   actually do (transfers, tip changes, plate movements, read steps).
+7. Preserve the entire selected experimental procedure, including
+   preparation, incubation, centrifugation, staining and external instrument
+   handoffs. Mark unsupported work as manual in the fact text. Never drop
+   necessary dependencies merely because the Bravo cannot perform them.
 8. If the Methods section is not actually a liquid-handling protocol
    (e.g. it's a computational analysis), return an empty facts list
    and a summary explaining why.
-9. A single Methods section often bundles MULTIPLE sub-protocols —
-   bench chemistry (coupling reactions, reagent preparation, column
-   packing) sitting next to the ACTUAL automation step. You MUST
-   privilege the AUTOMATED sub-protocol:
-   * Prefer paragraphs that mention an instrument by name ("Bravo",
-     "Hamilton", "Hamilton STAR", "Tecan", "Tecan EVO", "Tecan Fluent",
-     "liquid handler", "robot", "automated"). These anchor the
-     sub-section that should drive the workflow.
-   * Prefer paragraphs whose volumes are in MICROLITRES (µL / uL).
-     A paragraph that mixes 5 mL / 10 mL / 45 mL volumes is almost
-     certainly bench chemistry — EXCLUDE its facts unless it feeds
-     a later automated step.
-   * Prefer paragraphs that name plate formats ("96-well PCR plate",
-     "384-well", "PCR plate on the deck") or deck positions.
-   * When in doubt between two sub-sections, pick the one with the
-     HIGHEST density of the signals above. The other sub-section is
-     probably bench prep the operator will do manually.
-   This bias is not optional — a drafted workflow that describes the
-   bench-chemistry step instead of the automation step is useless.
+9. Methods may contain multiple sub-protocols. Preserve the supplied
+   selection and describe distinct procedures clearly instead of silently
+   choosing one. Keep preparation dependencies and quantities at their
+   original scale; identify manual work explicitly.
 
 ## Tone
 

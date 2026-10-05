@@ -62,6 +62,7 @@ from pybravo.tips import (
 from pybravo.types import Axis, HeadType, SpeedLevel, safe_home_order
 from pybravo.vision_client import VisionServiceClient, VisionServiceError
 from pybravo.web.middleware import RequestLoggingMiddleware
+from pybravo.workflow.protocols import api as protocol_api
 
 logger = logging.getLogger(__name__)
 
@@ -718,6 +719,7 @@ app = FastAPI(
 )
 
 app.add_middleware(RequestLoggingMiddleware)
+app.include_router(protocol_api.router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -2500,6 +2502,7 @@ async def export_designer_workflow(workflow_id: str):
 
 
 _active_workflow_executor = None
+_workflow_start_lock = asyncio.Lock()
 
 
 def _designer_runtime_snapshot(bravo: Bravo | None) -> dict[str, Any]:
@@ -2591,6 +2594,16 @@ def _validate_workflow_liquid_classes(graph_data: dict, bravo: Bravo) -> list[di
 
 
 async def _run_designer_workflow(workflow_id: str, *, mode: str) -> dict:
+    """Reserve workflow ownership before initialization can yield to another request."""
+    if _workflow_start_lock.locked() or _active_workflow_executor is not None:
+        raise HTTPException(status_code=409, detail="A workflow is starting or running. Wait for it to finish stopping before starting another.")
+    async with _workflow_start_lock:
+        if _active_workflow_executor is not None:
+            raise HTTPException(status_code=409, detail="A workflow is already running.")
+        return await _start_designer_workflow(workflow_id, mode=mode)
+
+
+async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
     """Shared implementation for both simulate and execute endpoints.
 
     mode="simulate": builds a fresh simulation-mode Bravo that reuses the
@@ -2609,6 +2622,19 @@ async def _run_designer_workflow(workflow_id: str, *, mode: str) -> dict:
     if data is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
+    # Chat builds a structural DAG so scientists can see and revise the plan
+    # before setup. Its review nodes are not robot tasks. Refuse both preview
+    # simulation and execution even if a saved copy loses its draft marker.
+    if data.get("protocol_chat_draft") or any(
+        node.get("type") == "review/ProtocolStep"
+        for node in (data.get("graph") or {}).get("nodes", [])
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="This chat graph is a draft. Review, validate, simulate, and approve it in Protocol Assistant before running.",
+        )
+
+    release_run = None
     if mode == "execute":
         if _bravo is None:
             raise HTTPException(status_code=409, detail="No active Bravo — connect before executing")
@@ -2627,17 +2653,9 @@ async def _run_designer_workflow(workflow_id: str, *, mode: str) -> dict:
                     "before executing on hardware."
                 ),
             )
-        # Warm up the controller before the first task so the initial
-        # state-machine bootstrap is not charged to the first node.  This
-        # is a no-op if the user already clicked Initialize.
-        if not getattr(_bravo, "_initialized", False):
-            try:
-                await _bravo.initialize()
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Bravo initialize() failed: {exc}",
-                ) from exc
+        # Review and catalog checks must finish before initialization moves
+        # the instrument. Release records remain authoritative after UI edits.
+        release_run = protocol_api.check_execution_release(workflow_id, data, _bravo)
         target_bravo = _bravo
         runtime_snapshot = None
     else:
@@ -2678,7 +2696,24 @@ async def _run_designer_workflow(workflow_id: str, *, mode: str) -> dict:
                 },
             )
 
+    if mode == "execute" and not getattr(target_bravo, "_initialized", False):
+        try:
+            await target_bravo.initialize()
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=f"Bravo initialize() failed: {exc}") from exc
+
+    if mode == "execute":
+        # Initialization yields: the scientist may edit the approved protocol
+        # or switch instruments while it is in progress. Bind the launch again
+        # before any workflow task is scheduled.
+        if _bravo is not target_bravo:
+            raise HTTPException(status_code=409, detail="The active Bravo changed during initialization. Review the current instrument before restarting.")
+        if release_run:
+            release_run = protocol_api.check_execution_release(workflow_id, data, target_bravo)
+
     async def broadcast_event(event):
+        if release_run:
+            protocol_api.record_execution(release_run, event)
         await ws_manager.broadcast(event)
 
     executor = WorkflowExecutor(
@@ -2689,6 +2724,7 @@ async def _run_designer_workflow(workflow_id: str, *, mode: str) -> dict:
         runtime_state=runtime_snapshot,
         preview_animation=(mode != "execute"),
         library_src=data.get("library", "") or "",
+        **({"reviewed_protocol": True} if release_run else {}),
     )
     _active_workflow_executor = executor
 
@@ -2697,7 +2733,8 @@ async def _run_designer_workflow(workflow_id: str, *, mode: str) -> dict:
         try:
             await executor.execute()
         finally:
-            _active_workflow_executor = None
+            if _active_workflow_executor is executor:
+                _active_workflow_executor = None
 
     asyncio.ensure_future(run())
     return {"status": "started", "workflow_id": workflow_id, "mode": mode}
@@ -2721,8 +2758,9 @@ async def stop_designer_workflow():
     global _active_workflow_executor
     if _active_workflow_executor:
         _active_workflow_executor.abort()
-        _active_workflow_executor = None
-        return {"status": "stopped"}
+        return {"status": "stopping"}
+    if _workflow_start_lock.locked():
+        return {"status": "initializing"}
     return {"status": "no_workflow_running"}
 
 

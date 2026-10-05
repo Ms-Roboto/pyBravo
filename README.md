@@ -53,8 +53,12 @@ https://github.com/user-attachments/assets/48de0bf6-f5a1-409d-ab84-00fcac42d9b6
   classes and pipette techniques.
 - **Tips and labware** — tip pickup and ejection, an editable labware catalog,
   gripper pick-and-place, and lid handling.
-- **Visual workflow designer** — build protocols as a node graph in the
-  browser, simulate them, then run them on the instrument.
+- **Visual workflow designer** — build protocols as a node graph or describe
+  them in a chat that draws a draft graph; review chat drafts in Protocol
+  Assistant before simulation and instrument execution.
+- **Protocol Assistant** — turn text or PDF protocols into reviewed workflows
+  with a local model, resolve missing details, strictly simulate, and reuse
+  approved procedures and setups. See [the guide](docs/protocol-assistant.md).
 - **Deck management** — a 3×3 deck model with per-location teachpoints, and
   obstacle-aware Z clearance when the gripper carries plates between locations.
 - **3D digital twin** — watch a URDF model of the robot mirror the real
