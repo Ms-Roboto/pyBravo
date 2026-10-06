@@ -500,6 +500,8 @@
       "spacing_x_mm": 4.5,
       "spacing_y_mm": 4.5,
       "well_volume_ul": 130.0,
+      "dead_volume_ul": 6.5,
+      "dead_volume_status": "placeholder",
       "well_depth_mm": 11.4,
       "height_mm": 14.4,
       "stack_height_mm": 13.6,

@@ -27,6 +27,8 @@ async function run(){
         requests.push({method:req.method(),endpoint,body});
         let result;
         if(endpoint==='/context')result={tipbox_choices:tipboxChoices,tipbox_choices_reason:tipboxReason,tipbox_catalog_candidates:tipboxCandidates,profile_name:'Test Bravo',head_type:'ST',labware:[{id:'reservoir',name:'Reservoir'},{id:'plate',name:'96-well plate'},{id:'tiprack',name:'Tip rack'}],tip_definitions:[{id:'tip250',name:'250 µL tips'},{id:'tip70',name:'ST 70 µL tips'},{id:'mismatched-tip',name:'Unverified pairing'}],liquid_classes:[{id:'water',name:'Water'}]};
+        else if(endpoint==='/capabilities')result={context_hash:'mock-capabilities',machine:{geometry:{}},assistant_operations:[],setup_options:{tip_disposals:[{id:'return_to_source_rack',value_kind:'literal',setup_value:'return_to_source_rack',requires_tip_strategy:'fresh_each_source'}]}};
+        else if(endpoint==='/setup-recommendations')result={context_hash:'mock-capabilities',plan_fingerprint:'mock-plan',recommendations:[],unresolved:[]};
         else if(endpoint==='/methods'&&req.method()==='GET')result={digest:'mock-registry',methods:[]};
         else if(endpoint==='/methods/lookup')result={registry_digest:'mock-registry',issues:[],candidates:[]};
         else if(endpoint==='/setups'&&req.method()==='GET')result={items:[{id:'setup1',name:'Water qualification',setup,materials:plan.materials}]};
@@ -71,6 +73,7 @@ async function run(){
         await page.locator('[data-path="/steps/0/volume_ul"]').waitFor({state:'visible'});
         await page.waitForFunction(()=>!document.querySelector('[data-path="/steps/0/volume_ul"]').disabled);
         assert.equal(await page.locator('#questions .question').count(),2,'Assigned model tipbox still needs explicit confirmation');
+        await page.locator('#raw-questions summary').click();
         const confirmTipbox=page.getByRole('button',{name:'Confirm selected tipbox'});
         assert.equal(await confirmTipbox.isDisabled(),false);
         await confirmTipbox.click();
@@ -173,7 +176,8 @@ async function run(){
         const firstSlot=page.locator('#deck .deck-slot').first();
         assert.match(await firstSlot.innerText(),/Load bottom → top/);
         assert.match(await firstSlot.innerText(),/Water reservoir.*Level 0.*Upper source plate.*Level 1/s);
-        assert.equal(await page.locator('[data-path="/setup/tip_disposal_id"] option[value="return_to_source_rack"]').count(),1);
+        assert.equal(await page.locator('[data-path="/setup/tip_disposal_id"] option[value="return_to_source_rack"]').count(),0,
+            'Spent-tip return is offered only with a fresh set per source.');
 
         await page.screenshot({path:'/tmp/protocol-assistant-browser.png',fullPage:true});
         assert.deepEqual(errors,[],'UI must not throw browser errors');

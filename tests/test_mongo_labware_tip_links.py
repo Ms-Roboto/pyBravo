@@ -76,3 +76,23 @@ def test_mongo_snapshot_refresh_and_offline_reload_preserve_tip_links(mongo_cata
     offline = labware.build_labware_catalog().get_definition(document["labware_type_id"])
     assert offline.tip_definition_id == "st_10ul"
     assert offline.supported_tip_ids == ["st_10ul", "st_30ul"]
+
+
+def test_mongo_missing_dead_volume_is_visible_in_runtime_and_refreshed_snapshot(mongo_catalog):
+    document, snapshot = mongo_catalog
+    document["name"] = "Synthetic plate"
+    document["kind"] = "sbs_plate"
+    document["base_class"] = "microplate"
+    document["well_dimensions_mm"]["volume_ul"] = 130
+
+    runtime = labware.build_labware_catalog().get_definition(document["labware_type_id"])
+    assert runtime.dead_volume_ul == 6.5
+    assert runtime.dead_volume_status == "placeholder"
+    refreshed = yaml.safe_load(snapshot.read_text())["labware"][0]
+    assert refreshed["dead_volume_ul"] == 6.5
+    assert refreshed["dead_volume_status"] == "placeholder"
+
+    document["well_dimensions_mm"].update(dead_volume_ul=8.0, dead_volume_status="reviewed")
+    reviewed = labware.build_labware_catalog().get_definition(document["labware_type_id"])
+    assert reviewed.dead_volume_ul == 8.0
+    assert reviewed.dead_volume_status == "reviewed"

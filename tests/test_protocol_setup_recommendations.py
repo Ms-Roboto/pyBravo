@@ -66,13 +66,44 @@ def _values(result: dict) -> dict[str, object]:
     return {row["path"]: row["value"] for row in result["recommendations"]}
 
 
+def test_catalog_dead_volume_is_only_proposed_for_sources_and_placeholder_stays_unresolved():
+    plan, setup, manifest = _fixture()
+    source = plan["materials"][0]
+    catalog = next(row for row in manifest["labware"] if row["id"] == source["labware_id"])
+    catalog.update(dead_volume_ul=7.5, dead_volume_status="placeholder")
+    before = copy.deepcopy(plan)
+    result = recommend_setup(plan, setup, manifest)
+    proposals = [row for row in result["recommendations"] if row["rule_id"] == "catalog_source_dead_volume"]
+    assert {row["path"] for row in proposals} == {"/materials/0/dead_volume_ul", "/materials/1/dead_volume_ul"}
+    assert all(row["value"] == 7.5 and row["catalog_dead_volume_status"] == "placeholder"
+               and row["requires_confirmation"] for row in proposals)
+    assert all("method suitability separately" in row["rationale"] for row in proposals)
+    assert plan == before
+
+    source["dead_volume_ul"] = 9.0
+    result = recommend_setup(plan, setup, manifest)
+    assert any(row["path"] == "/materials/0/dead_volume_ul" and
+               row["catalog_dead_volume_status"] == "placeholder" for row in result["unresolved"])
+
+    catalog["dead_volume_status"] = "reviewed"
+    source["dead_volume_ul"] = None
+    result = recommend_setup(plan, setup, manifest)
+    reviewed = next(row for row in result["recommendations"]
+                    if row["path"] == "/materials/0/dead_volume_ul")
+    assert reviewed["catalog_dead_volume_status"] == "reviewed"
+
+
 def test_full_quadrant_plan_yields_rule_backed_setup_proposals_and_scientist_inputs():
     plan, setup, manifest = _fixture()
     before = copy.deepcopy((plan, setup, manifest))
     result = recommend_setup(plan, setup, manifest)
     assert result["plan_fingerprint"] == setup_plan_fingerprint(plan)
     values = _values(result)
+    catalog_dead = next(row["dead_volume_ul"] for row in manifest["labware"]
+                        if row["id"] == plan["materials"][0]["labware_id"])
     assert values == {
+        "/materials/0/dead_volume_ul": catalog_dead,
+        "/materials/1/dead_volume_ul": catalog_dead,
         "/setup/head_mode": {"subset_type": "all_barrels", "subset_config": "back_left",
                              "row_count": None, "column_count": None},
         "/setup/tip_strategy": "fresh_each_source",
@@ -82,6 +113,7 @@ def test_full_quadrant_plan_yields_rule_backed_setup_proposals_and_scientist_inp
     assert {row["rule_id"] for row in result["recommendations"]} == {
         "head_mode_full_footprint", "tip_strategy_dedicated_source",
         "tip_rack_order_by_source", "tip_disposal_return_to_source",
+        "catalog_source_dead_volume",
     }
     assert all(row["requires_confirmation"] and row["provenance"] for row in result["recommendations"])
     assert {row["path"] for row in result["unresolved"]} >= {
@@ -380,7 +412,9 @@ def test_existing_setup_is_preserved_and_manifest_rules_are_authoritative():
 
     plan, setup, manifest = _fixture()
     manifest["setup_decision_rules"] = []
-    assert recommend_setup(plan, setup, manifest)["recommendations"] == []
+    assert {row["path"] for row in recommend_setup(plan, setup, manifest)["recommendations"]} == {
+        "/materials/0/dead_volume_ul", "/materials/1/dead_volume_ul",
+    }
 
 
 def test_unplaced_waste_material_does_not_block_safety_question_or_become_disposal():

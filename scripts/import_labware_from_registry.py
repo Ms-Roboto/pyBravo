@@ -22,6 +22,8 @@ from typing import Any
 
 import yaml
 
+from pybravo.deck.labware import _coerce_dead_volume_ul, _placeholder_dead_volume_ul
+
 _SECTION_RE = re.compile(
     r"\[HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Velocity11\\shared\\Labware\\Labware_Entries\\([^\]]+)\]"
 )
@@ -64,6 +66,12 @@ _WELL_COUNT_TO_GRID: dict[int, tuple[int, int]] = {
     384: (16, 24),
     1536: (32, 48),
 }
+
+_DEAD_VOLUME_GEOMETRY_FIELDS = (
+    "kind", "base_class", "wells", "rows", "cols", "well_depth_mm", "well_diameter_mm",
+    "spacing_x_mm", "spacing_y_mm", "offset_x_mm", "offset_y_mm",
+    "well_volume_ul",
+)
 
 
 def _read_reg_text(path: Path) -> str:
@@ -158,6 +166,8 @@ def reg_entry_to_labware(entry: dict[str, str]) -> dict[str, Any]:
     part_number = entry.get("MANUFACTURER_PART_NUMBER", "")
 
     tip_capacity = _to_float(entry.get("TIP_CAPACITY"), 0.0)
+    well_volume_ul = _to_float(entry.get("WELL_TIP_VOLUME"))
+    dead_volume_ul = _placeholder_dead_volume_ul(base_class, wells, well_volume_ul)
 
     return {
         "id": _make_id(name),
@@ -196,7 +206,11 @@ def reg_entry_to_labware(entry: dict[str, str]) -> dict[str, Any]:
         "offset_y_mm": _to_float(entry.get("Y_TEACHPOINT_TO_WELL")),
         "spacing_x_mm": _to_float(entry.get("X_WELL_TO_WELL")),
         "spacing_y_mm": _to_float(entry.get("Y_WELL_TO_WELL")),
-        "well_volume_ul": _to_float(entry.get("WELL_TIP_VOLUME")),
+        "well_volume_ul": well_volume_ul,
+        **(
+            {"dead_volume_ul": dead_volume_ul, "dead_volume_status": "placeholder"}
+            if dead_volume_ul is not None else {}
+        ),
         "well_diameter_mm": _to_float(entry.get("WELL_DIAMETER")),
         "disposable_tip_capacity_ul": tip_capacity,
         "tip_definition_id": "",
@@ -241,6 +255,20 @@ def import_labware_reg(
             for field in ("tip_definition_id", "supported_tip_ids"):
                 if existing[idx].get(field) and not item.get(field):
                     item[field] = deepcopy(existing[idx][field])
+            # Registry exports have no unusable-volume qualification. Keep a
+            # catalog value, but require review again if the well geometry or
+            # capacity changed since that value was qualified.
+            if "dead_volume_ul" in existing[idx] and item.get("dead_volume_ul") is not None:
+                old = existing[idx]
+                item["dead_volume_ul"] = _coerce_dead_volume_ul(old["dead_volume_ul"], item["name"])
+                same_wells = all(old.get(field) == item.get(field)
+                                 for field in _DEAD_VOLUME_GEOMETRY_FIELDS)
+                item["dead_volume_status"] = (
+                    "reviewed"
+                    if old.get("dead_volume_status") == "reviewed"
+                    and item["dead_volume_ul"] is not None and same_wells
+                    else "placeholder"
+                )
             existing[idx] = item
             updated_count += 1
         else:

@@ -29,15 +29,19 @@ async function run(){
   const errors=[],patches=[];page.on('pageerror',error=>errors.push(error.message));
   let failTips=false;
   let entry={labware_type_id:'rack',name:'384 ST documented rack',wells:384,base_class:'tip_box',tip_definition_id:'',supported_tip_ids:[],well_dimensions_mm:{rows:0,cols:0,spacing_x_mm:4.5,spacing_y_mm:4.5,disposable_tip_capacity_ul:10,custom_note:'keep'}};
+  let plate={labware_type_id:'plate',name:'Z liquid plate',wells:96,base_class:'microplate',tip_definition_id:'',supported_tip_ids:[],well_dimensions_mm:{rows:8,cols:12,dead_volume_ul:8,dead_volume_status:'reviewed'}};
   const tips=[{tip_id:'st10',label:'Short 10',compatible_heads:['HT_384_D_70','HT_16_D_ST']},{tip_id:'st30',label:'Short 30',compatible_heads:[]},{tip_id:'lt250',label:'Long 250',compatible_heads:['HT_96_D_200']}];
   await page.route('**/*',async route=>{
     const req=route.request(),url=new URL(req.url());assert.equal(url.origin,'http://labware.test');
     if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:'<html><body style="background:#0b0b12;font-family:Arial"><div id="root"></div></body></html>'});
     if(url.pathname==='/api/tips')return route.fulfill({status:failTips?503:200,json:failTips?{detail:'Tip catalog unavailable'}:{tips}});
     if(url.pathname==='/labware/classes')return route.fulfill({json:{labware_classes:[]}});
-    if(url.pathname==='/labware/types')return route.fulfill({json:{labware_types:[entry]}});
+    if(url.pathname==='/labware/types')return route.fulfill({json:{labware_types:[entry,plate]}});
     if(url.pathname==='/labware/types/rack'&&req.method()==='PATCH'){
       const payload=req.postDataJSON();patches.push(payload);entry={...entry,...payload};return route.fulfill({json:{labware_type:entry}});
+    }
+    if(url.pathname==='/labware/types/plate'&&req.method()==='PATCH'){
+      const payload=req.postDataJSON();patches.push(payload);plate={...plate,...payload};return route.fulfill({json:{labware_type:plate}});
     }
     throw new Error('Unhandled mock request '+req.method()+' '+url.pathname);
   });
@@ -72,7 +76,19 @@ async function run(){
     await primary.selectOption('');await page.getByRole('checkbox',{name:'removed — missing from catalog',exact:true}).click();
     assert.equal(await page.getByRole('checkbox',{name:'removed — missing from catalog',exact:true}).count(),0);await save.click();
     await page.waitForFunction(()=>document.querySelector('#rack-tip-definition')?.disabled===false);assert.equal(patches.length,3);assert.equal(patches[2].tip_definition_id,'');assert.deepEqual(patches[2].supported_tip_ids,[]);
-    assert.deepEqual(errors,[]);console.log('Labware metadata browser flow passed (3 mocked saves).');
+    assert.equal(await page.getByLabel('Dead volume per well (µL)').count(),0,'A tip box has no dead volume editor');
+    await page.getByText('Z liquid plate',{exact:true}).first().click();
+    assert.match(await page.getByText('Dead volume: reviewed').first().innerText(),/reviewed/);
+    await page.getByRole('button',{name:'Pipette/Well Definition'}).click();
+    const deadVolume=page.getByLabel('Dead volume per well (µL)');
+    const reviewStatus=page.getByLabel('Dead volume review status');
+    assert.equal(await deadVolume.inputValue(),'8');assert.equal(await reviewStatus.inputValue(),'reviewed');
+    await deadVolume.fill('9');assert.equal(await reviewStatus.inputValue(),'placeholder','Editing a reviewed number requires a new review');
+    await save.click();await page.getByText('Dead volume: placeholder — needs review').first().waitFor();
+    assert.equal(patches.length,4);assert.equal(patches[3].well_dimensions_mm.dead_volume_ul,9);assert.equal(patches[3].well_dimensions_mm.dead_volume_status,'placeholder');
+    await reviewStatus.selectOption('reviewed');await save.click();await page.getByText('Dead volume: reviewed').first().waitFor();
+    assert.equal(patches.length,5);assert.equal(patches[4].well_dimensions_mm.dead_volume_status,'reviewed');
+    assert.deepEqual(errors,[]);console.log('Labware metadata browser flow passed (5 mocked saves).');
   }finally{await browser.close();}
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

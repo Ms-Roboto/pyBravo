@@ -16,6 +16,27 @@ function uniq(arr) {
   return Array.from(new Set(arr))
 }
 
+function supportsDeadVolume(entry) {
+  const baseClass = String(entry?.base_class || '').trim().toLowerCase().replace(/\s+/g, '_')
+  return ['microplate', 'filter_plate', 'reservoir', 'tip_wash_station'].includes(baseClass)
+}
+
+function deadVolumePatch(volume, status) {
+  if (status !== 'placeholder' && status !== 'reviewed') {
+    throw new Error('Choose a dead volume review status.')
+  }
+  const text = String(volume ?? '').trim()
+  if (!text) {
+    if (status === 'reviewed') throw new Error('Enter a dead volume before marking it reviewed.')
+    return { dead_volume_ul: null, dead_volume_status: status }
+  }
+  const value = Number(text)
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('Dead volume must be a non-negative number in µL, or blank while placeholder.')
+  }
+  return { dead_volume_ul: value, dead_volume_status: status }
+}
+
 function rackMetadataPatch(entry, values, tips, catalogLoaded) {
   const dimension = (value, label) => {
     if (String(value ?? '').trim() === '') return null
@@ -136,6 +157,25 @@ function SmallButton({ disabled, onClick, children, variant = 'default' }) {
     >
       {children}
     </button>
+  )
+}
+
+function DeadVolumeStatus({ entry }) {
+  if (!supportsDeadVolume(entry)) return null
+  const reviewed = entry?.well_dimensions_mm?.dead_volume_status === 'reviewed'
+  return (
+    <span style={{
+      display: 'inline-block',
+      color: reviewed ? '#95de64' : '#ffd666',
+      background: reviewed ? '#1f3b26' : '#463716',
+      border: `1px solid ${reviewed ? '#3d7a48' : '#8a681d'}`,
+      borderRadius: 6,
+      padding: '3px 7px',
+      fontSize: 12,
+      fontWeight: 'bold',
+    }}>
+      Dead volume: {reviewed ? 'reviewed' : 'placeholder — needs review'}
+    </span>
   )
 }
 
@@ -419,7 +459,7 @@ function LabwareDashboard() {
         name: newEntryName.trim(),
         wells: Number(newEntryWells),
         plate_dimensions_mm: { length_mm: 127.76, width_mm: 85.48, height_mm: 0 },
-        well_dimensions_mm: {},
+        well_dimensions_mm: { dead_volume_ul: null, dead_volume_status: 'placeholder' },
       }
       const res = await fetch(`${API_URL}/labware/types`, {
         method: 'POST',
@@ -566,6 +606,8 @@ function LabwareDashboard() {
 
   // -------- Pipette/Well Definition tab state (editable) --------
   const [wdVolumeUl, setWdVolumeUl] = useState('')
+  const [wdDeadVolumeUl, setWdDeadVolumeUl] = useState('')
+  const [wdDeadVolumeStatus, setWdDeadVolumeStatus] = useState('placeholder')
   const [wdRows, setWdRows] = useState('')
   const [wdCols, setWdCols] = useState('')
   const [wdDepthMm, setWdDepthMm] = useState('')
@@ -612,6 +654,8 @@ function LabwareDashboard() {
     setWdRows(wd.rows === 0 ? '' : f(wd.rows))
     setWdCols(wd.cols === 0 ? '' : f(wd.cols))
     setWdVolumeUl(f(wd.volume_ul))
+    setWdDeadVolumeUl(f(wd.dead_volume_ul))
+    setWdDeadVolumeStatus(wd.dead_volume_status === 'reviewed' ? 'reviewed' : 'placeholder')
     setWdDepthMm(f(wd.depth_mm))
     setWdDiameterMm(f(wd.diameter_mm))
     setWdOffsetX(f(wd.offset_x_mm))
@@ -654,6 +698,7 @@ function LabwareDashboard() {
           rows: rack.rows,
           cols: rack.cols,
           volume_ul: n(wdVolumeUl),
+          ...(supportsDeadVolume(selectedType) ? deadVolumePatch(wdDeadVolumeUl, wdDeadVolumeStatus) : {}),
           depth_mm: n(wdDepthMm),
           diameter_mm: n(wdDiameterMm),
           offset_x_mm: n(wdOffsetX),
@@ -1082,6 +1127,7 @@ function LabwareDashboard() {
                       {t.vendor ? ` · ${t.vendor}` : ''}
                       {t.catalog_number ? ` · ${t.catalog_number}` : ''}
                     </div>
+                    {supportsDeadVolume(t) && <div style={{ marginTop: 5 }}><DeadVolumeStatus entry={t} /></div>}
                   </div>
                 ))}
               </div>
@@ -1097,6 +1143,7 @@ function LabwareDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                   <div>
                     <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '1.2em' }}>{selectedType.name}</div>
+                    {supportsDeadVolume(selectedType) && <div style={{ marginTop: 7 }}><DeadVolumeStatus entry={selectedType} /></div>}
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
                     <SmallButton disabled={busy} onClick={renameEntry}>Rename</SmallButton>
@@ -1297,11 +1344,29 @@ function LabwareDashboard() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 10, alignItems: 'center' }}>
                           <div style={fieldLabel}>Well volume (uL)</div>
                           <input value={wdVolumeUl} onChange={(e) => setWdVolumeUl(e.target.value)} style={input} disabled={busy} />
+                          {supportsDeadVolume(selectedType) && (
+                            <>
+                              <label htmlFor="dead-volume-ul" style={fieldLabel}>Dead volume per well (µL)</label>
+                              <input id="dead-volume-ul" type="number" min="0" step="any" value={wdDeadVolumeUl} onChange={(e) => { setWdDeadVolumeUl(e.target.value); setWdDeadVolumeStatus('placeholder') }} style={input} disabled={busy} placeholder="Unknown" />
+                            </>
+                          )}
                           <div style={fieldLabel}>Well depth (mm)</div>
                           <input value={wdDepthMm} onChange={(e) => setWdDepthMm(e.target.value)} style={input} disabled={busy} />
                           <div style={fieldLabel}>Well diameter (mm)</div>
                           <input value={wdDiameterMm} onChange={(e) => setWdDiameterMm(e.target.value)} style={input} disabled={busy} />
                         </div>
+                        {supportsDeadVolume(selectedType) && (
+                          <div style={{ marginTop: 14, padding: 10, border: '1px solid #8a681d', borderRadius: 8, background: '#262015' }}>
+                            <label htmlFor="dead-volume-status" style={{ ...label, display: 'block', color: '#ffd666' }}>Dead volume review status</label>
+                            <select id="dead-volume-status" value={wdDeadVolumeStatus} onChange={(e) => setWdDeadVolumeStatus(e.target.value)} style={input} disabled={busy}>
+                              <option value="placeholder">Placeholder — needs review</option>
+                              <option value="reviewed">Reviewed</option>
+                            </select>
+                            <div style={{ color: '#d2c9ac', fontSize: '0.85em', marginTop: 8 }}>
+                              Editing the value returns it to placeholder until reviewed again. Bravo usable residual depends on the tip, liquid, and aspiration method; a reviewed catalog value remains a default, not a qualified method.
+                            </div>
+                          </div>
+                        )}
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14 }}>
                           <div style={{ border: '1px solid #333', borderRadius: 12, padding: 12 }}>

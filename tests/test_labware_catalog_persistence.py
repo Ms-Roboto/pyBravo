@@ -1,11 +1,160 @@
 """Catalog editing and reimport must retain recorded tipbox metadata."""
 
+import json
+from pathlib import Path
+
 import pytest
 import yaml
 
 from pybravo import labware_editor
-from pybravo.deck.labware import LabwareDefinition
+from pybravo.deck.labware import LabwareDefinition, _read_labware_snapshot
 from scripts.import_labware_from_registry import import_labware_reg
+
+_ROOT = Path(__file__).resolve().parents[1]
+_LIQUID_BASE_CLASSES = {"microplate", "filter_plate", "reservoir", "wash_station", "Tip Wash Station"}
+
+
+def test_checked_in_liquid_catalog_rows_have_unreviewed_numeric_dead_volumes():
+    """Every shipped liquid plate is reviewable; accessories have no invented value."""
+    sources = (
+        ("config/labware_catalog.snapshot.yaml", "labware", False),
+        ("config/labware_catalog.d/96am.yaml", "labware", False),
+        ("config/labware_editor.yaml", "labware_types", True),
+        ("config/labware_types.seed.json", None, True),
+    )
+    for filename, key, nested in sources:
+        text = (_ROOT / filename).read_text()
+        document = json.loads(text) if filename.endswith(".json") else yaml.safe_load(text)
+        rows = document if key is None else document[key]
+        for row in rows:
+            geometry = (row.get("well_dimensions_mm") or {}) if nested else row
+            dead_volume = geometry.get("dead_volume_ul")
+            if row.get("base_class") in _LIQUID_BASE_CLASSES:
+                assert isinstance(dead_volume, (int, float)) and dead_volume > 0, (
+                    filename, row["name"]
+                )
+                assert geometry.get("dead_volume_status") == "placeholder", (filename, row["name"])
+                capacity = geometry.get("volume_ul" if nested else "well_volume_ul")
+                if capacity and capacity > 0:
+                    assert dead_volume < capacity, (filename, row["name"])
+            else:
+                assert dead_volume is None, (filename, row["name"])
+
+
+def test_mongo_missing_dead_volume_is_placeholder_but_explicit_reviewed_value_survives():
+    base = {"labware_type_id": "plate", "name": "Example plate", "kind": "sbs_plate",
+            "base_class": "microplate", "wells": 384,
+            "well_dimensions_mm": {"volume_ul": 130}}
+    missing = LabwareDefinition.from_mongo(base)
+    assert missing.dead_volume_ul == 6.5
+    assert missing.dead_volume_status == "placeholder"
+    assert missing.to_summary()["dead_volume_ul"] == 6.5
+
+    base["well_dimensions_mm"]["dead_volume_status"] = "reviewed"
+    assert LabwareDefinition.from_mongo(base).dead_volume_status == "placeholder"
+    del base["well_dimensions_mm"]["dead_volume_status"]
+
+    base["wells"] = 1536
+    base["well_dimensions_mm"] = {"volume_ul": 5.5}
+    assert LabwareDefinition.from_mongo(base).dead_volume_ul == 0.3
+    base["wells"] = 384
+    base["well_dimensions_mm"] = {"volume_ul": 130}
+
+    base["well_dimensions_mm"].update(dead_volume_ul=8.0, dead_volume_status="reviewed")
+    reviewed = LabwareDefinition.from_mongo(base)
+    assert reviewed.dead_volume_ul == 8.0
+    assert reviewed.dead_volume_status == "reviewed"
+
+    base["well_dimensions_mm"] = {"volume_ul": 130, "dead_volume_ul": None}
+    assert LabwareDefinition.from_mongo(base).dead_volume_ul is None
+    base["base_class"] = "tip_box"
+    base["well_dimensions_mm"] = {"volume_ul": 0}
+    assert LabwareDefinition.from_mongo(base).dead_volume_ul is None
+
+
+@pytest.mark.parametrize("invalid", ["not-a-number", float("nan"), float("inf"), -1, True])
+def test_invalid_dead_volume_downgrades_reviewed_catalog_row(invalid, caplog, tmp_path):
+    mongo_row = {"name": "Example plate", "kind": "sbs_plate", "base_class": "microplate",
+                 "wells": 96, "well_dimensions_mm": {
+                     "volume_ul": 100, "dead_volume_ul": invalid,
+                     "dead_volume_status": "reviewed"}}
+    from_mongo = LabwareDefinition.from_mongo(mongo_row)
+    assert from_mongo.dead_volume_ul is None
+    assert from_mongo.dead_volume_status == "placeholder"
+
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(yaml.safe_dump({"labware": [{
+        "id": "example", "name": "Example plate", "kind": "sbs_plate",
+        "base_class": "microplate", "wells": 96,
+        "dead_volume_ul": invalid, "dead_volume_status": "reviewed",
+    }]}))
+    loaded = _read_labware_snapshot(snapshot_path)[0]
+    assert loaded.dead_volume_ul is None
+    assert loaded.dead_volume_status == "placeholder"
+    editor_row = labware_editor._normalize_type_item({
+        "labware_type_id": "example", "name": "Example plate", "kind": "sbs_plate",
+        "base_class": "microplate", "wells": 96,
+        "well_dimensions_mm": {"dead_volume_ul": invalid, "dead_volume_status": "reviewed"},
+    })
+    assert editor_row["well_dimensions_mm"]["dead_volume_ul"] is None
+    assert editor_row["well_dimensions_mm"]["dead_volume_status"] == "placeholder"
+    assert "Ignoring invalid dead_volume_ul" in caplog.text
+
+
+def test_editor_exposes_missing_placeholder_and_preserves_reviewed_edit(monkeypatch, tmp_path):
+    editor_path = tmp_path / "editor.yaml"
+    snapshot_path = tmp_path / "snapshot.yaml"
+    monkeypatch.setenv("PYBRAVO_LABWARE_EDITOR_PATH", str(editor_path))
+    monkeypatch.setenv("PYBRAVO_LABWARE_SNAPSHOT_PATH", str(snapshot_path))
+    monkeypatch.setattr(labware_editor, "_mongo_enabled", lambda: False)
+    editor_path.write_text(yaml.safe_dump({"labware_types": [
+        {"labware_type_id": "plate", "name": "Example plate", "kind": "sbs_plate",
+         "base_class": "microplate", "wells": 384, "well_dimensions_mm": {"volume_ul": 130}},
+        {"labware_type_id": "tips", "name": "Tips", "kind": "sbs_plate",
+         "base_class": "tip_box", "wells": 384, "well_dimensions_mm": {}},
+    ]}))
+
+    listed = {row["labware_type_id"]: row for row in labware_editor.list_types()}
+    assert listed["plate"]["well_dimensions_mm"]["dead_volume_ul"] == 6.5
+    assert listed["plate"]["well_dimensions_mm"]["dead_volume_status"] == "placeholder"
+    assert "dead_volume_ul" not in listed["tips"]["well_dimensions_mm"]
+
+    labware_editor.patch_type("plate", {"well_dimensions_mm": {
+        "dead_volume_ul": 7.0, "dead_volume_status": "reviewed"}})
+    saved = yaml.safe_load(snapshot_path.read_text())["labware"]
+    plate = next(row for row in saved if row["id"] == "plate")
+    assert plate["dead_volume_ul"] == 7.0
+    assert plate["dead_volume_status"] == "reviewed"
+
+
+def test_editor_mongo_list_shows_placeholder_for_legacy_plate(monkeypatch, tmp_path):
+    mongo_doc = {
+        "labware_type_id": "legacy-plate", "name": "Legacy plate", "kind": "sbs_plate",
+        "base_class": "microplate", "wells": 96,
+        "well_dimensions_mm": {"volume_ul": 200},
+    }
+
+    class Collection:
+        def __init__(self, docs):
+            self.docs = docs
+
+        def find(self, query):
+            return self.docs
+
+    class Client:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(labware_editor, "_mongo_enabled", lambda: True)
+    monkeypatch.setattr(labware_editor, "_mongo_collections", lambda: (
+        Client(), Collection([mongo_doc]), Collection([]),
+    ))
+    monkeypatch.setenv("PYBRAVO_LABWARE_EDITOR_PATH", str(tmp_path / "editor.yaml"))
+    monkeypatch.setenv("PYBRAVO_LABWARE_SNAPSHOT_PATH", str(tmp_path / "snapshot.yaml"))
+
+    row = labware_editor.list_types()[0]
+    assert row["well_dimensions_mm"]["dead_volume_ul"] == 10.0
+    assert row["well_dimensions_mm"]["dead_volume_status"] == "placeholder"
 
 
 @pytest.mark.parametrize(
@@ -85,11 +234,61 @@ def test_registry_replace_does_not_copy_links_from_discarded_catalog(tmp_path):
     assert items[0]["supported_tip_ids"] == []
 
 
-def _write_registry(tmp_path):
+def test_registry_reimport_keeps_reviewed_dead_volume(tmp_path):
+    registry_path = _write_registry(tmp_path, base_class="1", well_volume_ul=130)
+    output_path = tmp_path / "snapshot.yaml"
+    prior = import_labware_reg(registry_path, merge=False)[0][0]
+    prior.update(dead_volume_ul=7.0, dead_volume_status="reviewed")
+    output_path.write_text(yaml.safe_dump({"labware": [prior]}))
+
+    items, new_count, updated_count = import_labware_reg(registry_path, output_path=output_path)
+
+    assert (new_count, updated_count) == (0, 1)
+    assert items[0]["dead_volume_ul"] == 7.0
+    assert items[0]["dead_volume_status"] == "reviewed"
+    assert yaml.safe_load(output_path.read_text())["labware"][0]["dead_volume_ul"] == 7.0
+
+    imported, _, _ = import_labware_reg(registry_path, merge=False)
+    assert imported[0]["dead_volume_ul"] == 6.5
+    assert imported[0]["dead_volume_status"] == "placeholder"
+
+
+def test_registry_geometry_change_demotes_reviewed_dead_volume(tmp_path):
+    registry_path = _write_registry(tmp_path, base_class="1", well_volume_ul=130)
+    output_path = tmp_path / "snapshot.yaml"
+    prior = import_labware_reg(registry_path, merge=False)[0][0]
+    prior.update(dead_volume_ul=7.0, dead_volume_status="reviewed")
+    output_path.write_text(yaml.safe_dump({"labware": [prior]}))
+    _write_registry(tmp_path, base_class="1", well_volume_ul=200)
+
+    items, _, _ = import_labware_reg(registry_path, output_path=output_path)
+
+    assert items[0]["dead_volume_ul"] == 7.0
+    assert items[0]["dead_volume_status"] == "placeholder"
+    assert items[0]["well_volume_ul"] == 200.0
+
+
+def test_registry_reclassification_to_tipbox_clears_dead_volume(tmp_path):
+    registry_path = _write_registry(tmp_path, base_class="1", well_volume_ul=130)
+    output_path = tmp_path / "snapshot.yaml"
+    prior = import_labware_reg(registry_path, merge=False)[0][0]
+    prior.update(dead_volume_ul=7.0, dead_volume_status="reviewed")
+    output_path.write_text(yaml.safe_dump({"labware": [prior]}))
+    _write_registry(tmp_path, base_class="6", well_volume_ul=0)
+
+    items, _, _ = import_labware_reg(registry_path, output_path=output_path)
+
+    assert items[0]["base_class"] == "tip_box"
+    assert "dead_volume_ul" not in items[0]
+    assert "dead_volume_status" not in items[0]
+
+
+def _write_registry(tmp_path, *, base_class="6", well_volume_ul=None):
     path = tmp_path / "synthetic.reg"
     path.write_text(
         r"[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Velocity11\shared\Labware\Labware_Entries\Synthetic rack]"
-        '\n"NAME"="Synthetic rack"\n"BASE_CLASS"="6"\n"NUMBER_OF_WELLS"="384"'
+        f'\n"NAME"="Synthetic rack"\n"BASE_CLASS"="{base_class}"\n"NUMBER_OF_WELLS"="384"'
         '\n"THICKNESS"="25"\n"X_WELL_TO_WELL"="4.5"\n"Y_WELL_TO_WELL"="4.5"\n'
+        + (f'"WELL_TIP_VOLUME"="{well_volume_ul}"\n' if well_volume_ul is not None else '')
     )
     return path

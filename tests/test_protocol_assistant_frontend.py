@@ -428,7 +428,7 @@ def test_guided_quadrant_answers_require_exact_mapping_and_explicit_facts(tmp_pa
     html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
     functions = []
     for name in (
-        "liquidSourceOrder", "proposedMethodRack", "currentSetupRecommendations",
+        "recordDeadVolumeReview", "liquidSourceOrder", "proposedMethodRack", "currentSetupRecommendations",
         "guidedQuadrantSetup", "guidedPhysicalLayout", "applyGuidedSourceVolumes",
         "applyGuidedEmptyDestinations", "applyGuidedFullRacks", "applyGuidedTipReuse",
     ):
@@ -480,6 +480,7 @@ assert.ok(guidedQuadrantSetup());
 assert.throws(()=>applyGuidedSourceVolumes(20,2,false),/Confirm/);
 applyGuidedSourceVolumes(20,2,true);
 assert.ok(materials.slice(0,4).every(row=>row.initial_volume_ul===20&&row.dead_volume_ul===2));
+assert.equal(state.session.plan.decisions.filter(row=>row.path.endsWith('/dead_volume_review')).length,4);
 assert.throws(()=>applyGuidedSourceVolumes(20,11,true),/at least 10 µL/);
 materials[0].well_volumes_ul={A1:25};
 assert.throws(()=>applyGuidedSourceVolumes(20,2,true),/individual source well/);
@@ -498,16 +499,72 @@ state.setupRecommendations={context_hash:'catalog',plan_fingerprint:'fingerprint
 state.setupRecommendationKey=JSON.stringify(['s',state.session.plan,state.session.setup,['p'],'catalog']);
 applyGuidedTipReuse(true);
 assert.equal(state.session.setup.tip_strategy,'fresh_each_source');
+assert.equal(state.session.setup.tip_disposal_id,'return_to_source_rack');
 assert.match(state.session.setup.tip_reuse_reason,/without contacting liquid/);
 assert.ok(state.session.plan.decisions.some(row=>row.path==='/setup/same_source_reuse_authorized'&&
   row.value.plan_fingerprint==='fingerprint'));
 state.session.setup.tip_reuse_reason='Custom conflicting assessment';
 state.setupRecommendationKey=JSON.stringify(['s',state.session.plan,state.session.setup,['p'],'catalog']);
 assert.throws(()=>applyGuidedTipReuse(true),/different tip-reuse assessment/);
+state.session.setup.tip_reuse_reason='Both 1536 plates start empty. One clean ST10 tip set touches only one source, dispenses into both destinations without contacting liquid, and is discarded before the next source.';
+state.session.setup.tip_disposal_id='custom-waste';
+state.setupRecommendationKey=JSON.stringify(['s',state.session.plan,state.session.setup,['p'],'catalog']);
+assert.throws(()=>applyGuidedTipReuse(true),/different spent-tip destination/);
 assert.ok(dirtied>=4);
 """
     )
     script = tmp_path / "guided-quadrant.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_catalog_dead_volume_confirmation_binds_plate_and_value(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in ("recordDeadVolumeReview", "hasDeadVolumeReview", "catalogDeadVolumeFor",
+                 "confirmCatalogDeadVolume", "confirmCurrentDeadVolume"):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+const state={busy:false,context:{labware:[
+  {id:'plate',dead_volume_ul:6.5,dead_volume_status:'placeholder'},
+  {id:'new-plate',dead_volume_ul:6.5,dead_volume_status:'placeholder'}]},
+  session:{plan:{materials:[{id:'source',name:'Source',role:'liquid',labware_id:'plate',dead_volume_ul:null}],decisions:[]}}};
+function clone(value){return JSON.parse(JSON.stringify(value));}
+function decide(path,value,reason){
+  state.session.plan.decisions=state.session.plan.decisions.filter(row=>row.path!==path);
+  state.session.plan.decisions.push({path,value:clone(value),reason,actor:'scientist'});
+}
+let renders=0,dirtied=0;
+function dirty(){dirtied++;}
+function renderPlan(){renders++;}
+function notify(){}
+"""
+        + "\n".join(functions)
+        + """
+const material=state.session.plan.materials[0];
+assert.equal(material.dead_volume_ul,null);
+assert.equal(catalogDeadVolumeFor(material).status,'placeholder');
+confirmCatalogDeadVolume(0,6.5);
+assert.equal(material.dead_volume_ul,6.5);
+assert.ok(hasDeadVolumeReview(0,material,6.5));
+material.labware_id='new-plate';
+assert.equal(hasDeadVolumeReview(0,material,6.5),false);
+confirmCurrentDeadVolume(0);
+assert.ok(hasDeadVolumeReview(0,material,6.5));
+material.dead_volume_ul=8;
+assert.equal(hasDeadVolumeReview(0,material,8),false);
+confirmCurrentDeadVolume(0);
+assert.ok(hasDeadVolumeReview(0,material,8));
+assert.equal(renders,3);
+assert.equal(dirtied,3);
+"""
+    )
+    script = tmp_path / "catalog-dead-volume.cjs"
     script.write_text(source)
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
 

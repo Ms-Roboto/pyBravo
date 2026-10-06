@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -28,6 +29,59 @@ def _labware_overlay_dir() -> Path:
     return Path(override) if override else _LABWARE_OVERLAY_DIR
 _LABWARE_ASSET_DIR = Path(__file__).resolve().parents[2] / "labware"
 _DEFAULT_LABWARE_SNAPSHOT_PATH = Path(__file__).resolve().parents[2] / "config" / "labware_catalog.snapshot.yaml"
+
+
+def _placeholder_dead_volume_ul(base_class: str, well_count: int, capacity_ul: float) -> float | None:
+    """Give liquid labware an unreviewed starting value when none was recorded.
+
+    The fraction is a catalog review aid, never a validated aspiration limit.
+    Fixtures such as tip boxes and cartridge racks deliberately have no value.
+    """
+    liquid_classes = {
+        "microplate", "filter_plate", "filter plate", "reservoir",
+        "wash_station", "tip wash station",
+    }
+    if str(base_class or "").strip().lower() not in liquid_classes:
+        return None
+    if math.isfinite(capacity_ul) and capacity_ul > 0:
+        rounded = round(capacity_ul * 0.05, 1)
+        return rounded if 0 < rounded < capacity_ul else capacity_ul * 0.05
+    if well_count >= 1536:
+        return 0.3
+    if well_count >= 384:
+        return 5.0
+    if well_count >= 96:
+        return 10.0
+    return 25.0
+
+
+def _coerce_dead_volume_ul(raw: Any, label: str) -> float | None:
+    if raw is None:
+        return None
+    try:
+        value = float(raw) if not isinstance(raw, bool) else float("nan")
+    except (TypeError, ValueError, OverflowError):
+        value = float("nan")
+    if not math.isfinite(value) or value < 0:
+        logger.warning("Ignoring invalid dead_volume_ul for %s; value must be finite and nonnegative", label)
+        return None
+    return value
+
+
+def _recorded_or_placeholder_dead_volume(
+    wells: dict[str, Any], *, base_class: str, well_count: int, capacity_ul: float,
+    label: str = "labware",
+) -> tuple[float | None, str]:
+    """Preserve an explicit catalog value; mark missing values as placeholders."""
+    if "dead_volume_ul" in wells:
+        value = _coerce_dead_volume_ul(wells["dead_volume_ul"], label)
+        status = str(wells.get("dead_volume_status") or "placeholder").strip().lower()
+    else:
+        value = _placeholder_dead_volume_ul(base_class, well_count, capacity_ul)
+        status = "placeholder"
+    if status != "reviewed" or value is None:
+        status = "placeholder"
+    return value, status
 
 try:
     from pymongo import MongoClient
@@ -72,6 +126,8 @@ class LabwareDefinition:
     spacing_x_mm: float = 0.0
     spacing_y_mm: float = 0.0
     well_volume_ul: float = 0.0
+    dead_volume_ul: float | None = None
+    dead_volume_status: str = "placeholder"
     well_diameter_mm: float = 0.0
     disposable_tip_capacity_ul: float = 0.0
     tip_definition_id: str = ""
@@ -92,11 +148,28 @@ class LabwareDefinition:
     can_mount: bool = False
     can_be_mounted: bool = False
 
+    def __post_init__(self) -> None:
+        self.dead_volume_ul = _coerce_dead_volume_ul(self.dead_volume_ul, self.name or self.id)
+        status = str(self.dead_volume_status or "placeholder").strip().lower()
+        if status not in {"placeholder", "reviewed"}:
+            logger.warning("Ignoring invalid dead_volume_status for %s: %s", self.name or self.id, status)
+        self.dead_volume_status = (
+            "reviewed" if status == "reviewed" and self.dead_volume_ul is not None
+            else "placeholder"
+        )
+
     @classmethod
     def from_mongo(cls, doc: dict[str, Any]) -> "LabwareDefinition":
         dims = doc.get("plate_dimensions_mm", {}) or {}
         props = doc.get("plate_properties", {}) or {}
         wells = doc.get("well_dimensions_mm", {}) or {}
+        dead_volume_ul, dead_volume_status = _recorded_or_placeholder_dead_volume(
+            wells,
+            base_class=str(doc.get("base_class") or ""),
+            well_count=int(doc.get("wells") or 0),
+            capacity_ul=float(wells.get("volume_ul") or 0.0),
+            label=str(doc.get("name") or doc.get("labware_type_id") or "labware"),
+        )
         object_id = str(doc.get("labware_type_id") or doc.get("_id") or doc.get("name") or "")
         return cls(
             id=object_id,
@@ -140,6 +213,8 @@ class LabwareDefinition:
             spacing_x_mm=float(wells.get("spacing_x_mm") or 0.0),
             spacing_y_mm=float(wells.get("spacing_y_mm") or 0.0),
             well_volume_ul=float(wells.get("volume_ul") or 0.0),
+            dead_volume_ul=dead_volume_ul,
+            dead_volume_status=dead_volume_status,
             well_diameter_mm=float(wells.get("diameter_mm") or 0.0),
             disposable_tip_capacity_ul=float(wells.get("disposable_tip_capacity_ul") or 0.0),
             tip_definition_id=str(doc.get("tip_definition_id") or ""),
@@ -728,6 +803,14 @@ def _read_labware_snapshot(snapshot_path: Path) -> list[LabwareDefinition]:
         if not isinstance(item, dict):
             continue
         try:
+            if "dead_volume_ul" not in item:
+                item = dict(item)
+                item["dead_volume_ul"] = _placeholder_dead_volume_ul(
+                    str(item.get("base_class") or ""),
+                    int(item.get("wells") or 0),
+                    float(item.get("well_volume_ul") or 0.0),
+                )
+                item["dead_volume_status"] = "placeholder"
             definition = LabwareDefinition(**item)
         except TypeError as exc:
             logger.warning("Skipping malformed labware snapshot row in %s: %s", snapshot_path, exc)
@@ -807,6 +890,8 @@ def _mirrored_builtin_definitions() -> list[LabwareDefinition]:
             spacing_x_mm=4.5,
             spacing_y_mm=4.5,
             well_volume_ul=130.0,
+            dead_volume_ul=6.5,
+            dead_volume_status="placeholder",
             well_diameter_mm=3.3,
             disposable_tip_capacity_ul=10.0,
             model_3d="384 Greiner 781091 PS uclear.gltf",
@@ -844,6 +929,8 @@ def _mirrored_builtin_definitions() -> list[LabwareDefinition]:
             spacing_x_mm=9.0,
             spacing_y_mm=9.0,
             well_volume_ul=300.0,
+            dead_volume_ul=15.0,
+            dead_volume_status="placeholder",
             well_diameter_mm=6.9,
             disposable_tip_capacity_ul=200.0,
             model_3d=None,
@@ -923,6 +1010,8 @@ def _apply_mirrored_motion_fields(definition: LabwareDefinition) -> LabwareDefin
         spacing_x_mm=definition.spacing_x_mm or mirrored.spacing_x_mm,
         spacing_y_mm=definition.spacing_y_mm or mirrored.spacing_y_mm,
         well_volume_ul=definition.well_volume_ul or mirrored.well_volume_ul,
+        dead_volume_ul=definition.dead_volume_ul,
+        dead_volume_status=definition.dead_volume_status,
         well_diameter_mm=definition.well_diameter_mm or mirrored.well_diameter_mm,
         disposable_tip_capacity_ul=(
             definition.disposable_tip_capacity_ul or mirrored.disposable_tip_capacity_ul

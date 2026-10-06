@@ -41,6 +41,8 @@
     "requires_insert": "None"
   },
   "well_dimensions_mm": {
+    "dead_volume_ul": 10.0,
+    "dead_volume_status": "placeholder",
     "diameter_mm": 6.4,
     "depth_mm": 10.75,
     "spacing_x_mm": 9,
@@ -220,6 +222,8 @@
     "requires_insert": "None"
   },
   "well_dimensions_mm": {
+    "dead_volume_ul": 6.5,
+    "dead_volume_status": "placeholder",
     "diameter_mm": 3.5,
     "depth_mm": 11.4,
     "volume_ul": 130,
@@ -481,6 +485,8 @@
     "requires_insert": "None"
   },
   "well_dimensions_mm": {
+    "dead_volume_ul": 0.3,
+    "dead_volume_status": "placeholder",
     "rows": 32,
     "cols": 48,
     "volume_ul": 5.5,
@@ -589,7 +595,10 @@
     "filter_channel_resting_depth_mm": null,
     "requires_insert": "None"
   },
-  "well_dimensions_mm": {},
+  "well_dimensions_mm": {
+    "dead_volume_ul": 5.0,
+    "dead_volume_status": "placeholder"
+  },
   "pf400": {},
   "planar_motor": {},
   "labware_class_ids": [
@@ -642,6 +651,8 @@
     "requires_insert": "None"
   },
   "well_dimensions_mm": {
+    "dead_volume_ul": 6.5,
+    "dead_volume_status": "placeholder",
     "diameter_mm": 3.5,
     "depth_mm": 11.4,
     "volume_ul": 130,

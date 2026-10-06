@@ -74,6 +74,41 @@ def test_dead_volume_is_required_only_when_a_plate_is_aspirated():
                for issue in report["issues"])
 
 
+def test_unreviewed_catalog_dead_volume_requires_plate_bound_scientist_confirmation():
+    plan, setup, context, sources = protocol_fixture()
+    context["labware"][0].update(dead_volume_ul=10.0, dead_volume_status="placeholder")
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert "unreviewed_catalog_dead_volume" in codes(report)
+    with pytest.raises(ProtocolCompilationError):
+        compile_plan(plan, setup, context, sources=sources)
+
+    plan["decisions"] = [{
+        "path": "/materials/0/dead_volume_review",
+        "value": {"material_id": "buffer", "labware_id": "plate", "dead_volume_ul": 10.0},
+        "reason": "Scientist accepted the source residual estimate for this plate.",
+    }]
+    assert validate_plan(plan, setup, context, sources=sources)["valid"]
+
+    context["labware"].append({**context["labware"][0], "id": "different-plate"})
+    plan["materials"][0]["labware_id"] = "different-plate"
+    assert "unreviewed_catalog_dead_volume" in codes(validate_plan(plan, setup, context, sources=sources))
+
+
+def test_reviewed_catalog_dead_volume_can_support_matching_value_but_override_needs_review():
+    plan, setup, context, sources = protocol_fixture()
+    context["labware"][0].update(dead_volume_ul=10.0, dead_volume_status="reviewed")
+    assert validate_plan(plan, setup, context, sources=sources)["valid"]
+
+    plan["materials"][0]["dead_volume_ul"] = 12.0
+    assert "catalog_dead_volume_override" in codes(validate_plan(plan, setup, context, sources=sources))
+    plan["decisions"] = [{
+        "path": "/materials/0/dead_volume_review",
+        "value": {"material_id": "buffer", "labware_id": "plate", "dead_volume_ul": 12.0},
+        "reason": "Scientist entered a measured residual for this plate.",
+    }]
+    assert validate_plan(plan, setup, context, sources=sources)["valid"]
+
+
 def test_distribute_uses_one_aspiration_and_ordered_distinct_dispenses():
     plan, setup, context, sources = protocol_fixture()
     plan["materials"].append({"id": "samples-2", "name": "Second empty plate", "labware_id": "plate",
@@ -561,7 +596,14 @@ def _four_source_quadrant_fixture():
                           "source_values": [{"field": "volume_ul", "value": 5.0, "unit": "uL", "paragraph_id": "p1"}]})
         steps.append({"id": f"file-{source_id}", "kind": "move_plate" if index == 0 else "stack_plate",
                       "material": source_id, "destination_slot": 7, "source_paragraph_ids": ["p1"]})
-    plan = {"name": "Four sources into two 1536 plates", "materials": materials, "steps": steps}
+    plan = {"name": "Four sources into two 1536 plates", "materials": materials, "steps": steps,
+            "decisions": [
+                {"path": f"/materials/{index}/dead_volume_review",
+                 "value": {"material_id": material["id"], "labware_id": material["labware_id"],
+                           "dead_volume_ul": material["dead_volume_ul"]},
+                 "reason": "Scientist accepted this source residual estimate for the selected plate."}
+                for index, material in enumerate(materials[:4])
+            ]}
     setup = {"head_mode": {"subset_type": "all_barrels", "subset_config": "back_left"},
              "tip_strategy": "fresh_each_source", "tip_rack_ids": [f"rack-{n}" for n in range(1, 5)],
              "tip_disposal_id": "return_to_source_rack", "liquid_class": "reviewed-st10-water",

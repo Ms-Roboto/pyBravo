@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node is required for front
 def run_js(tmp_path, checks):
     source = (ROOT / "frontend/src/LabwareDashboard.jsx").read_text()
     functions = []
-    for name in ("uniq", "rackMetadataPatch", "tipCompatibilitySummary"):
+    for name in ("uniq", "supportsDeadVolume", "deadVolumePatch", "rackMetadataPatch", "tipCompatibilitySummary"):
         match = re.search(rf"function {name}\([^\n]*\) \{{[\s\S]*?\n\}}", source)
         assert match, name
         functions.append(match[0])
@@ -68,16 +68,34 @@ assert.deepEqual(rackMetadataPatch(stored,values,tips,true).supported_tip_ids,[]
 """)
 
 
+def test_dead_volume_requires_explicit_review_and_a_valid_value(tmp_path):
+    run_js(tmp_path, """
+assert.equal(supportsDeadVolume({base_class:'microplate'}),true);
+assert.equal(supportsDeadVolume({base_class:'filter_plate'}),true);
+assert.equal(supportsDeadVolume({base_class:'reservoir'}),true);
+assert.equal(supportsDeadVolume({base_class:'tip_wash_station'}),true);
+assert.equal(supportsDeadVolume({base_class:'Tip Wash Station'}),true);
+assert.equal(supportsDeadVolume({base_class:'tip_box'}),false);
+assert.deepEqual(deadVolumePatch('', 'placeholder'),{dead_volume_ul:null,dead_volume_status:'placeholder'});
+assert.deepEqual(deadVolumePatch('12.5', 'placeholder'),{dead_volume_ul:12.5,dead_volume_status:'placeholder'});
+assert.deepEqual(deadVolumePatch('0', 'reviewed'),{dead_volume_ul:0,dead_volume_status:'reviewed'});
+assert.throws(()=>deadVolumePatch('', 'reviewed'),/Enter a dead volume/);
+assert.throws(()=>deadVolumePatch('-1', 'placeholder'),/non-negative number/);
+assert.throws(()=>deadVolumePatch('Infinity', 'reviewed'),/non-negative number/);
+assert.throws(()=>deadVolumePatch('12', 'unknown'),/review status/);
+""")
+
+
 def test_save_handler_sends_top_level_links_and_nested_grid(tmp_path):
     source = (ROOT / "frontend/src/LabwareDashboard.jsx").read_text()
     handler = re.search(r"  const saveWellDefinition = async \(\) => \{[\s\S]*?\n  \}", source)
     assert handler
     run_js(tmp_path, """
-const selectedType={labware_type_id:'rack',wells:384,well_dimensions_mm:{custom_note:'preserve'},supported_tip_ids:[]};
+const selectedType={labware_type_id:'rack',base_class:'microplate',wells:384,well_dimensions_mm:{custom_note:'preserve'},supported_tip_ids:[]};
 const wdRows='16',wdCols='24',tipDefinitionId='st10',supportedTipIds=['st10'];
 const tipDefinitions=[{tip_id:'st10'}],tipCatalogLoaded=true;
 const tipSource='agilent',tipCapacityUl=10,thirdPartyTipCapacityUl='',disposableTipLengthMm='19.9';
-const wdVolumeUl='',wdDepthMm='',wdDiameterMm='',wdOffsetX='2.25',wdOffsetY='2.25',wdPitchX='4.5',wdPitchY='4.5',wdGeometry=1,wdBottomShape=2;
+const wdVolumeUl='',wdDeadVolumeUl='12.5',wdDeadVolumeStatus='reviewed',wdDepthMm='',wdDiameterMm='',wdOffsetX='2.25',wdOffsetY='2.25',wdPitchX='4.5',wdPitchY='4.5',wdGeometry=1,wdBottomShape=2;
 const API_URL='http://mock.test';
 let captured,refreshed=false,error='';
 const setBusy=()=>{},setError=value=>{error=value;},fetchAll=async()=>{refreshed=true;};
@@ -87,6 +105,8 @@ const fetch=async(url,options)=>{captured={url,...options,body:JSON.parse(option
 assert.equal(error,'');assert.equal(refreshed,true);assert.equal(captured.method,'PATCH');
 assert.equal(captured.body.tip_definition_id,'st10');assert.deepEqual(captured.body.supported_tip_ids,['st10']);
 assert.equal(captured.body.well_dimensions_mm.rows,16);assert.equal(captured.body.well_dimensions_mm.cols,24);
+assert.equal(captured.body.well_dimensions_mm.dead_volume_ul,12.5);
+assert.equal(captured.body.well_dimensions_mm.dead_volume_status,'reviewed');
 assert.equal(captured.body.well_dimensions_mm.custom_note,'preserve');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 """)

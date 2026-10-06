@@ -79,7 +79,20 @@ function pointerSet(root,path,value){const keys=path.split('/').slice(1).map(par
 function dirty(){state.dirty=true;$('plan-reviewed').checked=false;$('deck-confirmed').checked=false;gates();}
 function sourceSelectionChanged(){dirty();$('source-reviewed').checked=false;scheduleSetupRecommendations();}
 function decide(path,value,reason=null){if(!state.session?.plan)return;const explanation=reason||$('correction-reason').value.trim()||'Reviewed and edited by scientist in Protocol Assistant';const decisions=state.session.plan.decisions??=[];state.session.plan.decisions=decisions.filter(item=>item.path!==path);state.session.plan.decisions.push({path,value:clone(value),reason:explanation,actor:'scientist'});}
-function edit(path,value,{rerender=false}={}){if(!state.session)return;const setup=path.startsWith('/setup/');pointerSet(setup?state.session:state.session.plan,path,value);decide(path,value);dirty();if(rerender)renderPlan();else if(state.session?.plan){renderQuestions();renderReview();if(setup||path.startsWith('/steps/')||path.startsWith('/materials/'))renderSetup();}}
+function recordDeadVolumeReview(index,value,reason){
+    const material=state.session?.plan?.materials?.[index];
+    if(!material?.id||!material.labware_id||!Number.isFinite(value)||value<0)return;
+    decide(`/materials/${index}/dead_volume_review`,
+        {material_id:material.id,labware_id:material.labware_id,dead_volume_ul:value},
+        reason||'Scientist accepted this source residual estimate for the selected plate; liquid, tip, and method suitability need separate review.');
+}
+function hasDeadVolumeReview(index,material,value){
+    return list(state.session?.plan?.decisions).some(item=>item.actor==='scientist'&&
+        item.path===`/materials/${index}/dead_volume_review`&&
+        item.value?.material_id===material.id&&item.value?.labware_id===material.labware_id&&
+        item.value?.dead_volume_ul===value);
+}
+function edit(path,value,{rerender=false}={}){if(!state.session)return;const setup=path.startsWith('/setup/');pointerSet(setup?state.session:state.session.plan,path,value);decide(path,value);const dead=path.match(/^\/materials\/(\d+)\/dead_volume_ul$/);if(dead)recordDeadVolumeReview(Number(dead[1]),value);dirty();if(rerender)renderPlan();else if(state.session?.plan){renderQuestions();renderReview();if(setup||path.startsWith('/steps/')||path.startsWith('/materials/'))renderSetup();}}
 function makeField(label,path,{type='text',options=null,help='',wide=false,min=null,max=null,step=null,placeholder=''}={}){const setup=path.startsWith('/setup/');const value=pointerGet(setup?state.session:state.session?.plan,path);const field=el('label',{class:'field'+(wide?' wide':'')},label);let input;if(options){input=el('select',{'data-path':path});for(const option of options){const item=typeof option==='string'?{value:option,label:option}:option;input.append(el('option',{value:item.value},item.label));}input.value=textValue(value);if(value!=null&&!options.some(item=>textValue(typeof item==='string'?item:item.value)===textValue(value)))input.append(el('option',{value:String(value)},String(value)));input.value=textValue(value);}else{input=el(type==='textarea'?'textarea':'input',{'data-path':path,type:type==='number'?'number':'text',min,max,step:type==='number'?(step??'any'):null,placeholder});input.value=textValue(value);}if(/\/name$/.test(path)&&!path.startsWith('/setup/'))input.required=true;
 input.addEventListener('change',()=>{const raw=input.value.trim();const requiredString=/\/(name|description)$/.test(path);const next=type==='number'?(raw===''?null:Number(raw)):(requiredString?raw:raw||null);edit(path,next);});field.append(input);if(help)field.append(el('small',{},help));return field;}
 function catalogOptions(key){return [{value:'',label:'Select explicitly…'},...list(state.context[key==='tips'?'tip_definitions':key]).map(item=>({value:item.id??item.tip_id??item.name,label:item.name??item.display_name??item.id??item.tip_id}))];}
@@ -718,8 +731,40 @@ function renderTipRackOrder(session){
 }
 const SETUP_LABELS={'/setup/head_mode':'Head footprint and corner','/setup/tip_strategy':'Tip strategy','/setup/tip_rack_ids':'Tip rack order','/setup/tip_disposal_id':'Tip disposal','/setup/liquid_class':'Liquid class','/setup/distance_from_bottom_mm':'Pipetting height','/setup/tip_reuse_reason':'Tip reuse assessment'};
 function recommendationRoot(path){return path.startsWith('/materials/')||path.startsWith('/steps/')?state.session?.plan:state.session;}
+function catalogDeadVolumeFor(material){
+    const row=list(state.context?.labware).find(item=>item.id===material?.labware_id);
+    const value=row?.dead_volume_ul;
+    if(row?.provisional||!['reviewed','placeholder'].includes(row?.dead_volume_status)||
+        typeof value!=='number'||!Number.isFinite(value)||value<0)return null;
+    return {value,status:row.dead_volume_status,labware_id:row.id};
+}
+function confirmCatalogDeadVolume(index,value){
+    const material=state.session?.plan?.materials?.[index];
+    const catalog=catalogDeadVolumeFor(material);
+    if(state.busy||!material||!catalog||catalog.value!==value)return;
+    if(material.dead_volume_ul!=null&&material.dead_volume_ul!==value)return;
+    material.dead_volume_ul=value;
+    decide(`/materials/${index}/dead_volume_ul`,value,
+        `Scientist accepted the ${catalog.status} catalog source residual estimate for ${material.labware_id}; method suitability needs separate review.`);
+    recordDeadVolumeReview(index,value,
+        'Scientist accepted this catalog source residual estimate for the selected plate; liquid, tip, and method suitability need separate review.');
+    dirty();renderPlan();
+    notify(`Dead volume for ${material.name||material.id} confirmed at ${value} µL per well. Save and validate the draft.`);
+}
+function confirmCurrentDeadVolume(index){
+    const material=state.session?.plan?.materials?.[index];
+    const value=material?.dead_volume_ul;
+    if(state.busy||!material?.labware_id||typeof value!=='number'||!Number.isFinite(value)||value<0)return;
+    decide(`/materials/${index}/dead_volume_ul`,value,
+        'Scientist accepted this source residual estimate for the selected plate; liquid, tip, and method suitability need separate review.');
+    recordDeadVolumeReview(index,value);
+    dirty();renderPlan();
+    notify(`Dead volume for ${material.name||material.id} confirmed at ${value} µL per well. Save and validate the draft.`);
+}
 function setupChoiceLabel(path){
     if(SETUP_LABELS[path])return SETUP_LABELS[path];
+    const dead=String(path||'').match(/^\/materials\/(\d+)\/dead_volume_ul$/);
+    if(dead){const material=state.session?.plan?.materials?.[Number(dead[1])];return `Source dead volume · ${material?.name||material?.id||'material '+dead[1]}`;}
     const tipInventory=String(path||'').match(/^\/materials\/(\d+)\/available_tips$/);
     if(tipInventory){
         const material=state.session?.plan?.materials?.[Number(tipInventory[1])];
@@ -865,7 +910,8 @@ function applyGuidedSourceVolumes(initial,dead,confirmed){
     for(const {material,index} of model.sources){
         material.initial_volume_ul=initial;material.dead_volume_ul=dead;
         decide(`/materials/${index}/initial_volume_ul`,initial,'Scientist confirmed this starting volume is the same in every well of all four source plates.');
-        decide(`/materials/${index}/dead_volume_ul`,dead,'Scientist confirmed this dead volume is the same in every well of all four source plates.');
+        decide(`/materials/${index}/dead_volume_ul`,dead,'Scientist accepted this source residual estimate for every well of all four selected plates.');
+        recordDeadVolumeReview(index,dead,'Scientist accepted this source residual estimate for all four selected plates; liquid, tip, and method suitability need separate review.');
     }
     dirty();renderPlan();notify('Shared source volumes recorded for all four plates. Save the draft, then validate the per-well supply.');
 }
@@ -906,16 +952,24 @@ function applyGuidedTipReuse(confirmed){
     if(model.destinations.some(({material,index})=>material.initial_volume_ul!==0||
         !decisions.some(row=>row.path===`/materials/${index}/initial_volume_ul`&&row.actor==='scientist'&&row.value===0)))
         throw new Error('First confirm that both 1536 destination plates start empty.');
+    const layout=guidedPhysicalLayout(model);
+    if(!layout.ok||layout.pairs.some(({material,index})=>material.available_tips!=='full'||
+        !decisions.some(row=>row.path===`/materials/${index}/available_tips`&&row.actor==='scientist'&&row.value==='full')))
+        throw new Error('First confirm the inspected full ST10 racks and exact source-to-rack order.');
     const reason='Both 1536 plates start empty. One clean ST10 tip set touches only one source, dispenses into both destinations without contacting liquid, and is discarded before the next source.';
     if(state.session.setup?.tip_reuse_reason&&state.session.setup.tip_reuse_reason!==reason)
         throw new Error('A different tip-reuse assessment is already recorded. Review that rationale in the individual setup field.');
+    if(state.session.setup?.tip_disposal_id&&state.session.setup.tip_disposal_id!=='return_to_source_rack')
+        throw new Error('A different spent-tip destination is already selected. Review it in the individual setup field.');
     state.session.setup??={};state.session.setup.tip_strategy='fresh_each_source';
     state.session.setup.tip_reuse_reason=reason;
+    state.session.setup.tip_disposal_id='return_to_source_rack';
     decide('/setup/same_source_reuse_authorized',
         {authorized:true,plan_fingerprint:data.plan_fingerprint},
         'Scientist confirmed the destination wells start empty and the same-source dispense path avoids liquid contact and unacceptable carryover.');
     decide('/setup/tip_strategy','fresh_each_source','Scientist confirmed one fresh tip set per source, changed before the next source.');
     decide('/setup/tip_reuse_reason',state.session.setup.tip_reuse_reason,'Scientist reviewed the same-source tip reuse and noncontact rationale.');
+    decide('/setup/tip_disposal_id','return_to_source_rack','Scientist confirmed each spent set returns to its own now-empty rack and will never be selected again.');
     dirty();renderPlan();notify('Same-source tip reuse recorded for this exact plan. Review rack order and run strict validation.');
 }
 function guidedDraftForPlan(){
@@ -976,6 +1030,10 @@ function renderGuidedSetup(){
     dead.value=draft.dead!==''?draft.dead:
         sharedDead.size===1&&model.sources[0].material.dead_volume_ul!=null?
             String(model.sources[0].material.dead_volume_ul):'';
+    const sourceCatalogValues=model.sources.map(row=>catalogDeadVolumeFor(row.material));
+    const commonCatalog=sourceCatalogValues[0]&&sourceCatalogValues.every(row=>row&&
+        row.value===sourceCatalogValues[0].value&&row.status===sourceCatalogValues[0].status)?sourceCatalogValues[0]:null;
+    if(commonCatalog&&!dead.value)dead.value=String(commonCatalog.value);
     const same=el('input',{type:'checkbox',checked:draft.sameSources,disabled:sourceConflict});
     const sourceButton=el('button',{class:'small'},'Record for four source plates');
     const updateSource=()=>{draft.initial=initial.value;draft.dead=dead.value;draft.sameSources=same.checked;
@@ -989,6 +1047,8 @@ function renderGuidedSetup(){
             el('label',{class:'field'},'Dead volume (µL / well)',dead)),
         el('label',{class:'check'},same,'I confirm the same starting and dead volume in every source well on all four plates.'),
         sourceButton);
+    if(commonCatalog)sourcePanel.append(el('p',{class:'muted'},
+        `${commonCatalog.status==='reviewed'?'Reviewed catalog starting estimate':'Unreviewed catalog placeholder'}: ${commonCatalog.value} µL per well. Accept it for these source plates or enter a measured value. Review liquid, tip, and method suitability separately.`));
     if(sourceConflict)sourcePanel.append(el('p',{class:'issue warn'},'At least one source has a well-specific volume. Keep its individual values in the material fields below.'));
     else if(sharedInitial.size===1&&sharedDead.size===1&&model.sources[0].material.initial_volume_ul!=null&&model.sources[0].material.dead_volume_ul!=null)
         sourcePanel.append(el('p',{class:'muted'},`Recorded: ${model.sources[0].material.initial_volume_ul} µL starting and ${model.sources[0].material.dead_volume_ul} µL dead volume per well.`));
@@ -1024,15 +1084,17 @@ function renderGuidedSetup(){
 
     const destinationRecorded=model.destinations.every(({material,index})=>material.initial_volume_ul===0&&
         list(state.session?.plan?.decisions).some(row=>row.path===`/materials/${index}/initial_volume_ul`&&row.actor==='scientist'&&row.value===0));
-    const reuse=el('input',{type:'checkbox',checked:draft.reuseNoContact,disabled:!destinationRecorded||!data?.plan_fingerprint});
-    const reuseButton=el('button',{class:'small',disabled:state.busy||!destinationRecorded||!data?.plan_fingerprint||!reuse.checked},'Record same-source tip reuse');
-    reuse.addEventListener('change',()=>{draft.reuseNoContact=reuse.checked;reuseButton.disabled=state.busy||!destinationRecorded||!data?.plan_fingerprint||!reuse.checked;});
+    const racksRecorded=layout.ok&&layout.pairs.every(({material,index})=>material.available_tips==='full'&&
+        list(state.session?.plan?.decisions).some(row=>row.path===`/materials/${index}/available_tips`&&row.actor==='scientist'&&row.value==='full'));
+    const reuse=el('input',{type:'checkbox',checked:draft.reuseNoContact,disabled:!destinationRecorded||!racksRecorded||!data?.plan_fingerprint});
+    const reuseButton=el('button',{class:'small',disabled:state.busy||!destinationRecorded||!racksRecorded||!data?.plan_fingerprint||!reuse.checked},'Record tip path and spent-tip return');
+    reuse.addEventListener('change',()=>{draft.reuseNoContact=reuse.checked;reuseButton.disabled=state.busy||!destinationRecorded||!racksRecorded||!data?.plan_fingerprint||!reuse.checked;});
     reuseButton.addEventListener('click',()=>{try{applyGuidedTipReuse(reuse.checked);}catch(error){notify(error.message,true);}});
     const reusePanel=el('div',{class:'row-card'},el('strong',{},'4. Tip path and cross-contamination'),
-        el('p',{class:'muted'},'One clean ST10 tip set may serve the same source plate and dispense into both initially empty destinations only if it never contacts destination liquid. Change to a fresh set before the next source.'),
-        el('label',{class:'check'},reuse,'I confirm the empty-destination, no-liquid-contact path is acceptable for this experiment.'),reuseButton);
-    if(!destinationRecorded)reusePanel.append(el('p',{class:'muted'},'First record the two empty destinations above.'));
-    else if(sameSourceReuseDecision(data))reusePanel.append(el('p',{class:'muted'},'Recorded: one fresh tip set per source, with no destination-liquid contact.'));
+        el('p',{class:'muted'},'One clean ST10 tip set may serve the same source plate and dispense into both initially empty destinations only if it never contacts destination liquid. After the second dispense, return the spent set to its own now-empty rack and never pick it again.'),
+        el('label',{class:'check'},reuse,'I confirm the empty-destination, no-liquid-contact path and return of each spent set to its own empty rack.'),reuseButton);
+    if(!destinationRecorded||!racksRecorded)reusePanel.append(el('p',{class:'muted'},'First record both empty destinations and inspect the four full racks above.'));
+    else if(sameSourceReuseDecision(data))reusePanel.append(el('p',{class:'muted'},'Recorded: one fresh tip set per source, with spent tips returned to their own racks.'));
     host.append(reusePanel);
 
     const classGap=localLiquidClassGap({tip_id:'st_10ul'});
@@ -1078,6 +1140,7 @@ function renderSetupRecommendations(){
         const current=pointerGet(recommendationRoot(row.path),row.path);
         const same=JSON.stringify(current)===JSON.stringify(row.value);
         const conflict=current!=null&&current!==''&&!same;
+        const deadVolumeMatch=String(row.path).match(/^\/materials\/(\d+)\/dead_volume_ul$/);
         const block=el('div',{class:'setup-recommendation'},
             el('strong',{},setupChoiceLabel(row.path)),
             el('span',{class:'badge'},row.evidence_level==='derived'?'Derived':'Suggested'),
@@ -1090,13 +1153,14 @@ function renderSetupRecommendations(){
         }
         block.append(el('div',{class:'actions',style:'margin-top:8px'},el('button',{type:'button',class:'small',disabled:state.busy||same||conflict,onclick:()=>{
             if(state.busy||!state.session?.plan)return;
+            if(deadVolumeMatch){confirmCatalogDeadVolume(Number(deadVolumeMatch[1]),row.value);return;}
             const present=pointerGet(recommendationRoot(row.path),row.path);
             if(present!=null&&present!==''&&JSON.stringify(present)!==JSON.stringify(row.value))return;
             pointerSet(recommendationRoot(row.path),row.path,clone(row.value));
             decide(row.path,row.value,`Accepted Bravo capability rule ${row.rule_id} as a draft choice; scientific review still required`);
             dirty();renderPlan();
             notify(`${setupChoiceLabel(row.path)} added to the draft. Review it and validate before approval.`);
-        }},same?'Already selected':conflict?'Current choice differs':'Use in draft')));
+        }},same?'Already selected':conflict?'Current choice differs':deadVolumeMatch?'Review and confirm estimate':'Use in draft')));
         if(conflict)block.append(el('small',{class:'muted'},'A different choice is already selected. Change it directly if needed.'));
         panel.append(block);
     }
@@ -1106,6 +1170,15 @@ function renderSetupRecommendations(){
         details.open=open.some(item=>item.path==='/setup/tip_strategy');
         for(const item of open){
             details.append(el('p',{class:'muted',style:'font-size:12px;margin:8px 0'},`${setupChoiceLabel(item.path)}: ${item.reason||list(item.required_evidence).join(', ')||'Review required.'}`));
+            const deadVolumeMatch=String(item.path).match(/^\/materials\/(\d+)\/dead_volume_ul$/);
+            if(deadVolumeMatch&&item.catalog_dead_volume_status){
+                const index=Number(deadVolumeMatch[1]);
+                const current=state.session?.plan?.materials?.[index]?.dead_volume_ul;
+                if(typeof current==='number'&&Number.isFinite(current))
+                    details.append(el('button',{type:'button',class:'small',disabled:state.busy,
+                        onclick:()=>confirmCurrentDeadVolume(index)},
+                        `Confirm ${current} µL for this source`));
+            }
             if(item.path==='/setup/tip_strategy'&&data.plan_fingerprint){
                 const chooseReuse=authorized=>{
                     if(state.busy||!state.session?.plan)return;
@@ -1231,6 +1304,24 @@ function verifiedFullTipCount(material){
     return Number.isInteger(rows)&&Number.isInteger(cols)&&rows>0&&cols>0
         &&rows*cols===wells&&wells<=1536 ? wells : null;
 }
+function renderMaterialDeadVolumeReview(material,index){
+    if(material.role!=='liquid'||!liquidSourceOrder(state.session?.plan?.steps).includes(material.id))return null;
+    const catalog=catalogDeadVolumeFor(material);
+    if(!catalog)return null;
+    const current=material.dead_volume_ul;
+    const needsReview=typeof current==='number'&&Number.isFinite(current)&&
+        (catalog.status==='placeholder'||current!==catalog.value)&&
+        !hasDeadVolumeReview(index,material,current);
+    const block=el('div',{class:'row-card',style:'margin-top:10px'},
+        el('strong',{},catalog.status==='reviewed'?'Reviewed catalog starting estimate':'Unreviewed catalog placeholder'),
+        el('p',{class:'muted'},`${catalog.value} µL per well for ${material.labware_id}. The usable dead volume can change with the liquid, tip, and aspiration method. Accept this source estimate or enter a measured value; review method suitability separately.`));
+    if(current==null)block.append(el('button',{type:'button',class:'small',disabled:state.busy,
+        onclick:()=>confirmCatalogDeadVolume(index,catalog.value)},`Review and use ${catalog.value} µL`));
+    else if(needsReview)block.append(el('button',{type:'button',class:'small',disabled:state.busy,
+        onclick:()=>confirmCurrentDeadVolume(index)},`Confirm current ${current} µL for this source`));
+    else if(catalog.status==='placeholder')block.append(el('small',{class:'muted'},'Scientist confirmation recorded for this source value.'));
+    return block;
+}
 function renderPlan(){const plan=state.session?.plan;$('plan-content').hidden=!plan;$('no-plan').hidden=!!plan;if(!plan)return;const materialCards=list(plan.materials).map((m,index)=>{const base='/materials/'+index;const role=makeField('Role',base+'/role',{options:[{value:'liquid',label:'Liquid / plate'},{value:'tips',label:'Tips'},{value:'waste',label:'Waste'}]});role.querySelector('select').addEventListener('change',()=>{renderPlan();renderSetup();});const grid=el('div',{class:'fields four'},makeField('Material name',base+'/name'),role,makeField('Labware',base+'/labware_id',{options:catalogOptions('labware')}),makeField('Deck position',base+'/deck_slot',{type:'number',min:1,max:9,step:1}));if(m.role==='liquid')grid.append(makeField('Stack level',base+'/stack_order',{type:'number',min:0,step:1,help:'For plates sharing one position: bottom = 0, then 1, 2, 3. Leave blank for a single plate.'}));if(m.role==='liquid')grid.append(makeField('Reagent identity',base+'/reagent_id',{placeholder:'e.g. buffer A'}),makeField('Reagent family',base+'/reagent_family',{placeholder:'e.g. aqueous, viscous, volatile'}));if(m.role==='liquid')grid.append(makeField('Starting volume per well (µL)',base+'/initial_volume_ul',{type:'number',min:0}),makeField('Dead volume per well (µL)',base+'/dead_volume_ul',{type:'number',min:0}));if(m.role==='tips')grid.append(makeField('Tip definition',base+'/tip_definition_id',{options:catalogOptions('tips')}));const advanced=el('details',{},el('summary',{},'Well-specific supply and source details'));if(m.role==='liquid'){const label=el('label',{class:'field'},'Starting volume overrides (one well: µL per line)');const input=el('textarea',{'aria-label':'Well volume overrides for '+m.name,placeholder:'A1: 500\nB1: 500'});input.value=Object.entries(m.well_volumes_ul??{}).map(([well,volume])=>`${well}: ${volume}`).join('\n');input.addEventListener('change',()=>{try{const values={};for(const line of input.value.split('\n').filter(value=>value.trim())){const match=line.match(/^\s*([A-Za-z]+\d+)\s*:\s*(\d+(?:\.\d+)?)\s*$/);if(!match)throw new Error('Use one well and non-negative volume per line, such as A1: 500.');values[match[1].toUpperCase()]=Number(match[2]);}input.setCustomValidity('');edit(base+'/well_volumes_ul',values);}catch(error){input.setCustomValidity(error.message);input.reportValidity();}});label.append(input);advanced.append(label);}if(m.role==='tips'){const label=el('label',{class:'field'},'Available tip wells (comma separated; full means inspected full; blank means unspecified)');const input=el('input',{placeholder:'A1, B1, C1','aria-label':'Available tips for '+m.name});input.value=m.available_tips==='full'?'full':list(m.available_tips).join(', ');input.addEventListener('change',()=>{const value=input.value.trim();edit(base+'/available_tips',value.toLowerCase()==='full'?'full':value?value.split(/[\s,]+/).filter(Boolean).map(x=>x.toUpperCase()):null);});label.append(input);advanced.append(label);}const fullCount=m.role==='tips'?verifiedFullTipCount(m):null;
 const inventoryAction=m.role==='tips'?el('div',{class:'actions'},
     el('button',{type:'button',class:'small',disabled:!fullCount,onclick:()=>{
@@ -1242,7 +1333,7 @@ const inventoryAction=m.role==='tips'?el('div',{class:'actions'},
     el('span',{class:'muted',style:'font-size:11px'},fullCount
         ? 'Use only after confirming every well in this physical rack contains the selected tip.'
         : 'Select a verified rack / tip pair before recording a full inventory.')):null;
-const remove=el('button',{class:'small danger',onclick:()=>{plan.materials.splice(index,1);decide('/materials',plan.materials);dirty();renderPlan();renderSetup();}},'Remove');return el('div',{class:'row-card'},el('div',{class:'row-top'},el('h3',{},m.name||'Unnamed material'),el('span',{class:'badge'},m.id),el('span',{class:'spacer'}),remove),grid,inventoryAction,advanced);});$('materials').replaceChildren(...(materialCards.length?materialCards:[el('p',{class:'muted'},'No materials yet. Add the actual plates, reagent reservoirs, tip racks, and waste.') ]));$('steps').replaceChildren(...renderSteps(list(plan.steps),'/steps'));renderQuestions();renderSetup();renderMethodPreview();renderReview();gates();}
+const remove=el('button',{class:'small danger',onclick:()=>{plan.materials.splice(index,1);decide('/materials',plan.materials);dirty();renderPlan();renderSetup();}},'Remove');return el('div',{class:'row-card'},el('div',{class:'row-top'},el('h3',{},m.name||'Unnamed material'),el('span',{class:'badge'},m.id),el('span',{class:'spacer'}),remove),grid,renderMaterialDeadVolumeReview(m,index),inventoryAction,advanced);});$('materials').replaceChildren(...(materialCards.length?materialCards:[el('p',{class:'muted'},'No materials yet. Add the actual plates, reagent reservoirs, tip racks, and waste.') ]));$('steps').replaceChildren(...renderSteps(list(plan.steps),'/steps'));renderQuestions();renderSetup();renderMethodPreview();renderReview();gates();}
 function renderSteps(steps,base){return steps.map((step,index)=>{const path=base+'/'+index;const kind=makeField('Operation',path+'/kind',{options:operationOptions()});kind.querySelector('select').addEventListener('change',()=>renderPlan());const fields=el('div',{class:'fields'},kind,makeField('Description',path+'/description',{wide:true}));if(['transfer','distribute','mix'].includes(step.kind))fields.append(makeField('Reagent identity override',path+'/reagent_id',{placeholder:'If different from the source material'}),makeField('Reagent family override',path+'/reagent_family',{placeholder:'If different from the source material'}));if(step.kind==='transfer')fields.append(makeField('Source',path+'/source',{options:materialOptions('liquid')}),makeField('Source anchor well',path+'/source_anchor',{placeholder:'A1'}),makeField('Volume per channel (µL)',path+'/volume_ul',{type:'number',min:0}),makeField('Destination',path+'/destination',{options:materialOptions('liquid')}),makeField('Destination anchor well',path+'/destination_anchor',{placeholder:'A1'}));if(step.kind==='transfer')fields.append(el('p',{class:'muted',style:'grid-column:1/-1;font-size:12px;margin:0'},'One transfer becomes two separate Bravo operations after validation: aspirate the stated volume from the source, then dispense that volume into the destination.'));if(step.kind==='distribute'){fields.append(makeField('Source',path+'/source',{options:materialOptions('liquid')}),makeField('Source anchor well',path+'/source_anchor',{placeholder:'A1'}));step.dispenses??=[];const targets=el('div',{class:'wide'},el('h3',{},'Ordered dispenses'));for(let targetIndex=0;targetIndex<step.dispenses.length;targetIndex++){const targetPath=path+'/dispenses/'+targetIndex;targets.append(el('div',{class:'fields row-card'},makeField('Destination',targetPath+'/destination',{options:materialOptions('liquid')}),makeField('Destination anchor well',targetPath+'/destination_anchor',{placeholder:'A1'}),makeField('Dispense per channel (µL)',targetPath+'/volume_ul',{type:'number',min:0}),el('button',{class:'small danger',onclick:()=>{step.dispenses.splice(targetIndex,1);decide(path+'/dispenses',step.dispenses);dirty();renderPlan();}},'Remove target')));}targets.append(el('button',{class:'small',onclick:()=>{step.dispenses.push({destination:'',destination_anchor:'',volume_ul:0});dirty();renderPlan();}},'Add dispense target'));fields.append(targets);}if(step.kind==='mix')fields.append(makeField('Material',path+'/material',{options:materialOptions('liquid')}),makeField('Anchor well',path+'/anchor',{placeholder:'A1'}),makeField('Volume per channel (µL)',path+'/volume_ul',{type:'number',min:0}),makeField('Mix cycles',path+'/cycles',{type:'number',min:1}));if(step.kind==='manual')fields.append(makeField('Operator instruction',path+'/message',{type:'textarea',wide:true}));if(step.kind==='wait')fields.append(makeField('Duration (seconds)',path+'/duration_s',{type:'number',min:0}));if(['move_plate','destack_plate','stack_plate'].includes(step.kind))fields.append(makeField('Material',path+'/material',{options:materialOptions()}),makeField('Destination position',path+'/destination_slot',{type:'number',min:1,max:9,step:1}));if(step.kind==='repeat')fields.append(makeField('Repeat count',path+'/repeat',{type:'number',min:1}));const top=el('div',{class:'row-top'},el('h3',{},`${index+1}. ${step.description||step.kind}`),el('span',{class:'badge'},step.id),el('span',{class:'spacer'}),el('button',{class:'small',disabled:index===0,'aria-label':'Move step up',onclick:()=>{[steps[index-1],steps[index]]=[steps[index],steps[index-1]];decide(base,steps);dirty();renderPlan();}},'↑'),el('button',{class:'small',disabled:index===steps.length-1,'aria-label':'Move step down',onclick:()=>{[steps[index+1],steps[index]]=[steps[index],steps[index+1]];decide(base,steps);dirty();renderPlan();}},'↓'),el('button',{class:'small danger',onclick:()=>{steps.splice(index,1);decide(base,steps);dirty();renderPlan();}},'Remove'));const citations=el('div',{class:'citations'});for(const id of list(step.source_paragraph_ids))citations.append(el('button',{onclick:()=>showSource(id)},id));if(!citations.childElementCount)citations.append(el('span',{class:'muted',style:'font-size:11px'},'No source citation — record the reason for this scientist-authored step.'));const card=el('div',{class:'row-card'},top,fields,citations,evidenceEditor(step,path));if(['transfer','distribute','mix'].includes(step.kind))card.append(renderMethodSelection(step,path));const sourceDetails=list(step.source_values);if(sourceDetails.length)card.append(el('details',{},el('summary',{},'Extracted source quantities'),...sourceDetails.map(item=>el('p',{class:'muted',style:'font-size:12px;margin-top:6px'},`${item.field}: ${textValue(item.value)} ${item.unit||''} · ${item.paragraph_id||'uncited'}`))));if(step.kind==='repeat'){step.steps??=[];card.append(el('div',{class:'nested'},...renderSteps(step.steps,path+'/steps'),el('button',{class:'small',onclick:()=>{step.steps.push(newStep());dirty();renderPlan();}},'Add repeated step')));}return card;});}
 function evidenceEditor(step,path){
     const details=el('details',{},el('summary',{},'Review or correct source references'));

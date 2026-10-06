@@ -105,6 +105,28 @@ def _dedupe_string_list(values: list[Any] | None) -> list[str]:
 
 def _normalize_type_item(item: dict[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(item)
+    wells = normalized.get("well_dimensions_mm") or {}
+    if not isinstance(wells, dict):
+        wells = {}
+    normalized["well_dimensions_mm"] = wells
+    if "dead_volume_ul" not in wells:
+        placeholder = labware_module._placeholder_dead_volume_ul(
+            str(normalized.get("base_class") or ""),
+            int(normalized.get("wells") or 0),
+            float(wells.get("volume_ul") or 0.0),
+        )
+        if placeholder is not None:
+            wells["dead_volume_ul"] = placeholder
+            wells["dead_volume_status"] = "placeholder"
+    if "dead_volume_ul" in wells:
+        wells["dead_volume_ul"] = labware_module._coerce_dead_volume_ul(
+            wells["dead_volume_ul"], str(normalized.get("name") or "labware")
+        )
+        status = str(wells.get("dead_volume_status") or "placeholder").strip().lower()
+        wells["dead_volume_status"] = (
+            "reviewed" if status == "reviewed" and wells["dead_volume_ul"] is not None
+            else "placeholder"
+        )
     normalized["labware_class_ids"] = _dedupe_string_list(normalized.get("labware_class_ids") or [])
     normalized["supported_tip_ids"] = _dedupe_string_list(normalized.get("supported_tip_ids") or [])
     normalized["compatible_head_types"] = _dedupe_string_list(normalized.get("compatible_head_types") or [])
@@ -469,6 +491,13 @@ def _editor_type_to_definition(item: dict[str, Any]) -> LabwareDefinition:
     dims = item.get("plate_dimensions_mm", {}) or {}
     props = item.get("plate_properties", {}) or {}
     wells = item.get("well_dimensions_mm", {}) or {}
+    dead_volume_ul, dead_volume_status = labware_module._recorded_or_placeholder_dead_volume(
+        wells,
+        base_class=str(item.get("base_class") or ""),
+        well_count=int(item.get("wells") or 0),
+        capacity_ul=float(wells.get("volume_ul") or 0.0),
+        label=str(item.get("name") or item.get("labware_type_id") or "labware"),
+    )
     model = item.get("model_3d", {}) or {}
     definition = LabwareDefinition(
         id=str(item.get("labware_type_id") or ""),
@@ -512,6 +541,8 @@ def _editor_type_to_definition(item: dict[str, Any]) -> LabwareDefinition:
         spacing_x_mm=float(wells.get("spacing_x_mm") or 0.0),
         spacing_y_mm=float(wells.get("spacing_y_mm") or 0.0),
         well_volume_ul=float(wells.get("volume_ul") or 0.0),
+        dead_volume_ul=dead_volume_ul,
+        dead_volume_status=dead_volume_status,
         well_diameter_mm=float(wells.get("diameter_mm") or 0.0),
         disposable_tip_capacity_ul=float(wells.get("disposable_tip_capacity_ul") or 0.0),
         tip_definition_id=str(item.get("tip_definition_id") or ""),
@@ -635,6 +666,11 @@ def _definition_to_editor_type(definition: LabwareDefinition) -> dict[str, Any]:
             "spacing_x_mm": definition.spacing_x_mm,
             "spacing_y_mm": definition.spacing_y_mm,
             "volume_ul": definition.well_volume_ul,
+            **(
+                {"dead_volume_ul": definition.dead_volume_ul,
+                 "dead_volume_status": definition.dead_volume_status}
+                if definition.dead_volume_ul is not None else {}
+            ),
             "diameter_mm": definition.well_diameter_mm,
             "disposable_tip_capacity_ul": definition.disposable_tip_capacity_ul,
         },

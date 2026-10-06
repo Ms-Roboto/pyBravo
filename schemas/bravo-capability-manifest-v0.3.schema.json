@@ -286,6 +286,8 @@
         "spacing_x_mm": { "type": "number", "minimum": 0 },
         "spacing_y_mm": { "type": "number", "minimum": 0 },
         "well_volume_ul": { "type": "number", "minimum": 0 },
+        "dead_volume_ul": { "type": ["number", "null"], "minimum": 0 },
+        "dead_volume_status": { "enum": ["placeholder", "reviewed"] },
         "provisional": { "type": "boolean" },
         "catalog_status": { "enum": ["provisional", "catalog_entry"] },
         "tip_definition_id": { "type": "string" },

@@ -55,6 +55,7 @@ producer MUST publish these top-level fields:
 | `tipbox_catalog_candidates` | Plausible incomplete rack records for catalog maintenance, never verified choices. |
 | `tip_plate_compatibility` | Exact tip ID to catalog plate ID planning rules, including explicit incompatibilities. These rules do not qualify a run. |
 | `labware`, `tip_definitions`, `liquid_classes` | Compact catalog entries with stable IDs and known values. A listed entry does not establish physical presence on the deck. |
+| `labware[].dead_volume_ul`, `labware[].dead_volume_status` | A plate's catalog starting estimate and whether it is `reviewed` or an unreviewed `placeholder`. The value does not establish the residual for a particular liquid, tip, or aspiration method; the protocol planner requests scientist confirmation before using a placeholder for a source. |
 | `catalog_summary` | Counts by catalog status, with provenance of the configured stores. `identity_complete` for a liquid class means its machine, head and tip identifiers exist; it does not mean the class has been calibrated. |
 | `method_registry` | Version, digest, status counts, and discovery URLs for the separate method library. No motion setpoints or asserted live inventory are embedded. |
 | `setup_decision_rules` | Conditional, evidence-tagged recommendations for setup fields. These are planning suggestions, not completed scientist decisions. |

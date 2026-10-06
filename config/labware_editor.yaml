@@ -1,3 +1,5 @@
+# dead_volume_ul values are unreviewed review placeholders; see
+# docs/labware_dead_volume_review.md before using them for a protocol.
 version: 1
 labware_types:
 - labware_type_id: lw-3918306f45b8
@@ -37,6 +39,8 @@ labware_types:
     rows: 32
     cols: 48
     volume_ul: 5.5
+    dead_volume_ul: 0.3
+    dead_volume_status: placeholder
     depth_mm: 5.2
     diameter_mm: 1.7
     offset_x_mm: 3.375
@@ -92,7 +96,9 @@ labware_types:
     filter_channel_resting_depth_mm: null
     requires_insert: None
     robot_lid_gripper_offset_mm: 0.5
-  well_dimensions_mm: {}
+  well_dimensions_mm:
+    dead_volume_ul: 5.0
+    dead_volume_status: placeholder
   pf400: {}
   planar_motor: {}
   labware_class_ids:
@@ -141,6 +147,8 @@ labware_types:
     diameter_mm: 3.5
     depth_mm: 11.4
     volume_ul: 130
+    dead_volume_ul: 6.5
+    dead_volume_status: placeholder
     spacing_x_mm: 4.5
     spacing_y_mm: 4.5
     offset_x_mm: 2.25
@@ -379,6 +387,8 @@ labware_types:
     filter_channel_resting_depth_mm: 0.0
     requires_insert: None
   well_dimensions_mm:
+    dead_volume_ul: 10.0
+    dead_volume_status: placeholder
     diameter_mm: 6.4
     depth_mm: 10.75
     spacing_x_mm: 9.0
@@ -544,6 +554,8 @@ labware_types:
     requires_insert: None
   well_dimensions_mm:
     volume_ul: 200
+    dead_volume_ul: 10.0
+    dead_volume_status: placeholder
     depth_mm: 32.4
     diameter_mm: 6.5
     offset_x_mm: null
@@ -600,6 +612,8 @@ labware_types:
     requires_insert: None
   well_dimensions_mm:
     volume_ul: 100
+    dead_volume_ul: 5.0
+    dead_volume_status: placeholder
     depth_mm: 9
     diameter_mm: 6.4
     offset_x_mm: null
@@ -707,7 +721,9 @@ labware_types:
     filter_tip_pin_tool_length_mm: null
     filter_channel_resting_depth_mm: null
     requires_insert: None
-  well_dimensions_mm: {}
+  well_dimensions_mm:
+    dead_volume_ul: 10.0
+    dead_volume_status: placeholder
   pf400: {}
   planar_motor: {}
   labware_class_ids: []

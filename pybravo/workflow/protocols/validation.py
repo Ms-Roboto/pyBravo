@@ -24,6 +24,7 @@ from pybravo.head_mode import (
 )
 from pybravo.types import HeadType
 
+from .dead_volume import catalog_dead_volume, scientist_confirmed_dead_volume
 from .models import ProtocolPlan, ProtocolSetup, ProtocolStep
 from .tipbox_choices import catalog_tip_ids, rack_tip_stride, selected_tip_id
 
@@ -369,6 +370,25 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                     continue
                 if not _positive(getattr(material, field_name), zero=True):
                     result.issue("missing_volume", f"{path}/{field_name}", f"{field_name} must be explicitly supplied and nonnegative.", f"What is the per-well {field_name} for {material.name} (uL)?")
+            catalog_dead = catalog_dead_volume(definition)
+            if (material.id in aspirated_material_ids and _positive(material.dead_volume_ul, zero=True)
+                    and catalog_dead is not None
+                    and (catalog_dead[1] == "placeholder" or material.dead_volume_ul != catalog_dead[0])
+                    and not scientist_confirmed_dead_volume(
+                        plan.decisions, i, material.id, material.labware_id, material.dead_volume_ul
+                    )):
+                if catalog_dead[1] == "placeholder":
+                    result.issue(
+                        "unreviewed_catalog_dead_volume", path + "/dead_volume_ul",
+                        "The selected plate has only an unreviewed catalog dead-volume placeholder. Confirm this source estimate for the plate before validation; review liquid, tip, and method suitability separately.",
+                        f"Confirm {material.dead_volume_ul:g} uL as the dead volume for {material.name}, or enter a measured value.",
+                    )
+                else:
+                    result.issue(
+                        "catalog_dead_volume_override", path + "/dead_volume_ul",
+                        "This source dead volume differs from the reviewed catalog starting estimate. Confirm the value for its plate before validation; review liquid, tip, and method suitability separately.",
+                        f"Confirm {material.dead_volume_ul:g} uL as the dead volume for {material.name}.",
+                    )
             initial = material.initial_volume_ul if _positive(material.initial_volume_ul, zero=True) else 0.0
             volumes[material.id] = {(r, c): initial for r in range(rows) for c in range(cols)}
             for anchor, value in material.well_volumes_ul.items():

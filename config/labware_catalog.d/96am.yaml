@@ -12,6 +12,8 @@
 # than description: the AssayMAP references every Z to the top of the labware, so
 # the seated press depth and the stripper-plate shuck height are both computed
 # from it. Do not adjust it to make a plate "look right" in a viewer.
+# dead_volume_ul values on liquid-bearing rows are unreviewed review placeholders;
+# see docs/labware_dead_volume_review.md before using them for a protocol.
 labware:
 - id: lw-5ae0ff54b01a
   name: 96 Eppendorf Twin.tec PCR
@@ -47,6 +49,8 @@ labware:
   spacing_x_mm: 9.0
   spacing_y_mm: 9.0
   well_volume_ul: 0.0
+  dead_volume_ul: 10.0
+  dead_volume_status: placeholder
   well_diameter_mm: 6.22
   disposable_tip_capacity_ul: 60.0
   tip_definition_id: ''
@@ -311,6 +315,8 @@ labware:
   spacing_x_mm: 9.0
   spacing_y_mm: 9.0
   well_volume_ul: 250.0
+  dead_volume_ul: 12.5
+  dead_volume_status: placeholder
   well_diameter_mm: 5.5
   disposable_tip_capacity_ul: 60.0
   tip_definition_id: ''
@@ -352,6 +358,8 @@ labware:
   spacing_x_mm: 9.0
   spacing_y_mm: 9.0
   well_volume_ul: 250.0
+  dead_volume_ul: 12.5
+  dead_volume_status: placeholder
   well_diameter_mm: 9.0
   disposable_tip_capacity_ul: 60.0
   tip_definition_id: ''

@@ -18,6 +18,7 @@ from typing import Any
 from pybravo.head_mode import head_geometry_for_type, normalize_head_mode, plate_footprint_wells
 from pybravo.types import HeadType
 
+from .dead_volume import catalog_dead_volume, scientist_confirmed_dead_volume
 from .validation import well_cell
 
 
@@ -754,6 +755,8 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
     explicit_fresh_tips = _explicit_fresh_tip_requirement(cited_scope_text)
     source_ids = list(dict.fromkeys(step.get("source") for step in liquid_steps
                                     if step.get("kind") in {"transfer", "distribute"}))
+    aspirated_ids = {step.get("material") if step.get("kind") == "mix" else step.get("source")
+                     for step in liquid_steps}
     catalog_labware = {row.get("id"): row for row in _rows(manifest.get("labware")) if row.get("id")}
     def addressed_materials(step: Mapping[str, Any]) -> list[Any]:
         if step.get("kind") == "transfer":
@@ -1010,6 +1013,52 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
                               "per_well_dispenses_ul": volumes,
                               "source_paragraph_ids": scope_paragraph_ids,
                               "catalog_labware_id": source_material.get("labware_id")}],
+            })
+    for index, material in enumerate(material_rows):
+        if (material.get("role", "liquid") != "liquid" or not isinstance(material.get("id"), str)
+                or material["id"] not in aspirated_ids):
+            continue
+        labware_id = material.get("labware_id")
+        catalog_value = catalog_dead_volume(catalog_labware.get(labware_id))
+        if catalog_value is None:
+            continue
+        value, status = catalog_value
+        path = f"/materials/{index}/dead_volume_ul"
+        evidence = [{"source": "active_labware_catalog", "labware_id": labware_id,
+                     "dead_volume_ul": value, "dead_volume_status": status}]
+        rationale = ("This reviewed catalog value is a starting estimate. Accept it for the selected source "
+                     "plate or enter a measured value; review liquid, tip, and method suitability separately."
+                     if status == "reviewed" else
+                     "This catalog number is an unreviewed placeholder, not a measured source dead volume. "
+                     "Accept it for the selected source plate or enter a measured value; review liquid, tip, "
+                     "and method suitability separately.")
+        if material.get("dead_volume_ul") is None:
+            recommendations.append({
+                "path": path, "value": value, "rule_id": "catalog_source_dead_volume",
+                "rationale": rationale, "evidence_level": "catalog_reviewed" if status == "reviewed" else "catalog_placeholder",
+                "catalog_dead_volume_status": status, "requires_confirmation": True,
+                "provenance": ["active_labware_catalog"],
+                "required_evidence": ["Scientist acceptance of the source residual estimate for the selected plate."],
+                "evidence": evidence,
+            })
+        elif ((status == "placeholder" or material.get("dead_volume_ul") != value)
+              and isinstance(material.get("dead_volume_ul"), (int, float))
+              and not isinstance(material.get("dead_volume_ul"), bool)
+              and math.isfinite(material["dead_volume_ul"])
+              and not scientist_confirmed_dead_volume(plan.get("decisions") or [], index,
+                                                     material["id"], labware_id,
+                                                     material["dead_volume_ul"])):
+            unresolved.append({
+                "path": path, "rule_id": "catalog_source_dead_volume_review",
+                "reason": (rationale if status == "placeholder" else
+                           f"The plan uses {material['dead_volume_ul']:g} µL rather than the reviewed catalog "
+                           f"starting estimate of {value:g} µL. Confirm the plan value for this source plate; "
+                           "review liquid, tip, and method suitability separately."),
+                "evidence_level": "scientist_input",
+                "catalog_dead_volume_status": status, "requires_confirmation": True,
+                "provenance": ["active_labware_catalog"],
+                "required_evidence": ["Explicit scientist confirmation for this source plate and value."],
+                "evidence": evidence,
             })
     # Inventory is physical run state, never a catalog or model inference.
     tipbox_by_slot = {row["slot"]: row for row in runtime_advisory["tipbox_inventory"]}
