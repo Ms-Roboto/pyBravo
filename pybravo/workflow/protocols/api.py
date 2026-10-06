@@ -23,6 +23,7 @@ from pybravo.workflow.protocols.ingest import (
     ingest_pdf,
     ingest_text,
 )
+from pybravo.workflow.protocols.liquid_class_proposals import LiquidClassProposalQuery
 from pybravo.workflow.protocols.methods import MethodQuery, MethodRecord
 from pybravo.workflow.protocols.models import ProtocolPlan, ProtocolSetup
 from pybravo.workflow.protocols.store import (
@@ -209,6 +210,14 @@ async def method_lookup(request: MethodQuery):
     from pybravo.workflow.protocols.methods import lookup_methods
 
     return lookup_methods(machine_context(_bravo()), request)
+
+
+@router.post("/api/protocols/liquid-class-proposals")
+async def liquid_class_proposals(request: LiquidClassProposalQuery):
+    """Read cross-profile class settings as unverified planning references only."""
+    from pybravo.workflow.protocols.liquid_class_proposals import propose_liquid_classes
+
+    return propose_liquid_classes(machine_context(_bravo()), request)
 
 
 @router.post("/api/protocols/setup-recommendations")
