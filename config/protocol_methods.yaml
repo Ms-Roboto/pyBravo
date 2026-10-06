@@ -23,7 +23,7 @@ methods:
   - method_id: reference:agilent-384st10-dmso
     version: 1.0.0
     status: reference_candidate
-    title: Agilent 384ST10 tartrazine in DMSO performance example
+    title: Agilent 384ST10 0.25% tartrazine in DMSO performance example
     applicability:
       head_types: [HT_384_D_70, HT_384_D_70_S2]
       tip_ids: [st_10ul]
@@ -35,7 +35,7 @@ methods:
       - source_type: publication
         source_url: https://www.agilent.com/cs/library/technicaloverviews/public/te-bravo-automated-liquid-handling-384st-10-ul-tip-5990-3645en-agilent.pdf
         retrieved_at: '2026-10-06'
-        note: Vendor measured 0.3, 0.5, and 2.0 uL tartrazine in DMSO from a reservoir into a dry 384-well polystyrene plate. At 2 uL, the reported task used 6 mm aspiration height and 1 uL preaspirate, then 0 mm dispense height and 1 uL blowout for that reservoir-to-PS geometry. The cataloged upper range uses the vendor's statement that performance above 2 uL meets or exceeds the 2 uL result; 5 uL was not separately measured. It supplies no liquid-class motion settings and does not validate those heights or Labcyte PP into Labcyte LDV on this machine.
+        note: Vendor used 0.25% (w/v) tartrazine dissolved in DMSO, not neat DMSO. Transfer performance was reported for 0.3, 0.5, and 2.0 uL from a manual-fill reservoir into a dry 384-well polystyrene plate. The 5 uL point was used in an absorbance calibration curve, not reported as a separate transfer-performance result. At 2 uL, the task used 6 mm aspiration height and 1 uL preaspirate, then 0 mm dispense height and 1 uL blowout for that reservoir-to-polystyrene geometry. The broad DMSO reagent-family tag supports related-reference discovery only; it is not an exact formulation match, does not provide liquid-class motion settings, and does not qualify neat DMSO or Labcyte PP-to-LDV transfer on this machine.
   - method_id: reference:agilent-aspirate-task
     version: 1.0.0
     status: reference_candidate

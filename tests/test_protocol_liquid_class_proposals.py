@@ -165,6 +165,21 @@ def test_related_publication_is_context_only_not_numeric_class_provenance(monkey
     assert propose_liquid_classes(_context(), _query(reagent_family="aqueous"))["references"] == []
 
 
+def test_shipped_agilent_dmso_reference_does_not_claim_neat_dmso_qualification(monkeypatch, tmp_path):
+    _write_classes(monkeypatch, tmp_path, [_class()])
+    monkeypatch.delenv("PYBRAVO_METHOD_STORE_PATH")
+
+    result = propose_liquid_classes(_context(), _query(reagent_family="DMSO"))
+    publication = next(row for row in result["references"]
+                       if row["method_id"] == "reference:agilent-384st10-dmso")
+    assert publication["relation"] == "context_only"
+    assert publication["qualifies_numeric_settings"] is False
+    assert "0.25%" in publication["note"]
+    assert "not neat DMSO" in publication["note"]
+    assert "PP-to-LDV" in publication["note"]
+    assert all(not row["execution_ready"] for row in result["candidates"])
+
+
 @pytest.mark.asyncio
 async def test_liquid_class_proposal_endpoint_is_read_only_and_typed(monkeypatch, tmp_path):
     source = _write_classes(monkeypatch, tmp_path, [_class()])

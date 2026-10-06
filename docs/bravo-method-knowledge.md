@@ -86,8 +86,11 @@ supplies the proposed stroke volume and, when known, reagent family and plate
 IDs. The response includes the original machine, motion settings, calibration
 points, source digest, field origins, and gaps in reagent, plate and height
 evidence. These are `imported_unverified` planning references. A publication
-about DMSO is listed separately as context and never certifies another
-class's numeric settings. Keeping or rejecting a proposal records a planning
+using a dye dissolved in DMSO may be listed as related solvent-family context
+for a neat-DMSO request. The family match is not an exact formulation match and
+never certifies another class's numeric settings. Record the source material as
+neat DMSO when that is what the scientist states; do not silently rename it to
+the publication's dye solution. Keeping or rejecting a proposal records a planning
 decision; it cannot populate an active class, pin a method, or release a run.
 The same read-only lookup is available to tool-using agents as the
 `bravo_propose_liquid_classes` MCP tool.
@@ -103,7 +106,7 @@ record; keep the source's applicability and any local test result distinct.
 | --- | --- | --- |
 | [Agilent, Creating a liquid class](https://automation.help.agilent.com/AutomationSolutionsKB14/VWorks%20Setup%20Guide/03_SpecPipetteSpeed.06.4.html) | Vendor setup guide defines separate aspirate/dispense stroke, delay and Z entry/exit settings. It notes published limits may not be achievable on every device. | `reference_candidate` |
 | [Agilent, Aspirate task parameters](https://automation.help.agilent.com/AutomationSolutionsKB14/Bravo%20User%20Guide/QuickRef.11.11.html) and [Dispense task parameters](https://automation.help.agilent.com/AutomationSolutionsKB14/Bravo%20User%20Guide/QuickRef.11.12.html) | Vendor task references identify technique choices such as air volumes, height, dynamic tip movement, blowout and tip touch. | `reference_candidate` |
-| [Agilent, 384ST 10 µL tip performance](https://www.agilent.com/cs/library/technicaloverviews/public/te-bravo-automated-liquid-handling-384st-10-ul-tip-5990-3645en-agilent.pdf) | Vendor measured tartrazine in DMSO at 0.3, 0.5 and 2 µL and states performance above 2 µL meets or exceeds the 2 µL result. Its reservoir-to-384-polystyrene setup gives neither the motion settings nor a qualification for a 5 µL Labcyte PP-to-LDV transfer. | `reference_candidate` |
+| [Agilent, 384ST 10 µL tip performance](https://www.agilent.com/cs/library/technicaloverviews/public/te-bravo-automated-liquid-handling-384st-10-ul-tip-5990-3645en-agilent.pdf) | Vendor tested 0.25% (w/v) tartrazine dissolved in DMSO, not neat DMSO. It reports transfer performance at 0.3, 0.5 and 2 µL and states performance above 2 µL meets or exceeds the 2 µL result; 5 µL appears in its absorbance calibration curve, not as a separate transfer-performance result. The reservoir-to-384-polystyrene setup gives neither the liquid-class motion settings nor qualification for a 5 µL neat-DMSO Labcyte PP-to-LDV transfer, even in simulation. | `reference_candidate` |
 | [Agilent, Bravo automated liquid handling applications](https://www.agilent.com/en/product/automated-liquid-handling/automated-liquid-handling-applications/bravo-ngs) | Vendor application notes and protocols are candidates for recipe structure and stated consumables; each referenced application needs its own provenance record. | `reference_candidate` |
 | [Reddi et al., 2026, DOI 10.1016/j.slast.2026.100442](https://pubmed.ncbi.nlm.nih.gov/42229725/) | Peer-reviewed Bravo 96-head study of low-volume photometric verification; its abstract reports different performance for tip and post-aspirate-air combinations. Useful for qualification-test design, not transferable speed settings. | `reference_candidate` |
 | [Automated gravimetric calibration, 2016](https://pmc.ncbi.nlm.nih.gov/articles/PMC5030733/) | Peer-reviewed study on another liquid handler showing that fluid properties affect class selection and that calibration needs confirmation for each liquid. Methodology reference only. | `reference_candidate` |
