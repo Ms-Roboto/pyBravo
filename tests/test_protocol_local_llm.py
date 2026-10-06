@@ -625,8 +625,7 @@ def test_quadrant_isolation_questions_show_top_first_rack_pairing_and_alignment(
     llm._add_isolated_source_setup_questions(plan, source)
     prompts = {question.path: question.prompt for question in plan.questions}
     assert "fresh_each_source" in prompts["/setup/tip_strategy"]
-    assert "src4 → tip4" in prompts["/setup/tip_rack_ids"]
-    assert "src1 → tip1" in prompts["/setup/tip_rack_ids"]
+    assert "/setup/tip_rack_ids" not in prompts
     assert "two destinations" in prompts["/setup/tip_reuse_reason"]
     assert "own now-empty rack" in prompts["/setup/tip_disposal_id"]
     assert sum("alignment and teachpoint" in prompt for prompt in prompts.values()) == 2
@@ -708,8 +707,10 @@ async def test_exact_four_source_quadrant_request_uses_catalog_template_without_
     assert plan.decisions == []
     assert len(result.metadata["catalog_recommendations"]) == 4
     assert {question.path for question in plan.questions} >= {
-        "/setup/tip_strategy", "/setup/tip_rack_ids", "/setup/tip_reuse_reason",
-        "/setup/tip_disposal_id", "/setup/liquid_class",
+        "/setup/tip_strategy", "/setup/tip_reuse_reason", "/setup/tip_disposal_id",
+    }
+    assert not {"/setup/head_mode", "/setup/tip_rack_ids", "/setup/liquid_class"} & {
+        question.path for question in plan.questions
     }
 
 

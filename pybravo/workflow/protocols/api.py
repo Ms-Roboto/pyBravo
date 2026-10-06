@@ -303,7 +303,10 @@ async def ingest(file: UploadFile = File(...)):
 def _chat_preview(record: dict, capabilities: dict | None = None) -> dict:
     from pybravo.workflow.protocols.preview import build_chat_preview
 
-    preview = build_chat_preview(record["plan"], record["id"], record["revision"], sources=_sources(record))
+    preview = build_chat_preview(
+        record["plan"], record["id"], record["revision"], sources=_sources(record),
+        setup=record.get("setup") or {},
+    )
     preview.setdefault("questions", preview.get("protocol_questions", []))
     machine = capabilities if capabilities is not None else machine_context(_bravo())
     preview["head_type"] = machine.get("head_type")
@@ -317,7 +320,7 @@ def _chat_reply(plan: ProtocolPlan, preview: dict) -> str:
     """Describe the proposed plan without implying scientific or run approval."""
     count = len(plan.steps)
     reply = f"Proposed {count} {'step' if count == 1 else 'steps'} for review."
-    questions = preview.get("questions") or [q.model_dump() for q in plan.questions]
+    questions = preview.get("questions", [])
     if questions:
         prompts = [str(q.get("prompt") or "").strip() for q in questions[:3]]
         prompts = [prompt for prompt in prompts if prompt]

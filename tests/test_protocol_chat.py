@@ -13,6 +13,15 @@ from pybravo.workflow.protocols.models import ProtocolPlan
 from pybravo.workflow.protocols.store import ProtocolStore
 
 
+def test_chat_reply_does_not_repeat_filtered_legacy_setup_questions():
+    plan = ProtocolPlan.model_validate({"name": "Transfer", "questions": [
+        {"id": "draft:liquid-class", "path": "/setup/liquid_class", "prompt": "Choose a class."},
+    ]})
+    reply = api._chat_reply(plan, {"questions": []})
+    assert "Choose a class" not in reply
+    assert "complete the instrument setup" in reply
+
+
 @pytest.fixture
 def chat_environment(tmp_path, monkeypatch):
     store = ProtocolStore(tmp_path / "protocols")

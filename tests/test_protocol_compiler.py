@@ -553,6 +553,22 @@ def test_corrected_question_is_resolved_from_exact_pointer():
     assert "unresolved_question" in codes(validate_plan(plan, setup, context, sources=sources))
 
 
+def test_old_setup_questions_do_not_duplicate_structured_readiness_checks():
+    plan, setup, context, sources = protocol_fixture()
+    plan["questions"] = [
+        {"id": "draft:liquid-class", "path": "/setup/liquid_class", "prompt": "Choose a class."},
+        {"id": "draft:head-mode", "path": "/setup/head_mode", "prompt": "Confirm full head."},
+        {"id": "source-isolation:rack-order", "path": "/setup/tip_rack_ids", "prompt": "Confirm racks."},
+    ]
+    setup["liquid_class"] = None
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert "liquid_class" in codes(report)
+    assert not any(issue["code"] == "unresolved_question" and issue["path"].startswith("/setup/")
+                   for issue in report["issues"])
+    setup["liquid_class"] = "water"
+    assert validate_plan(plan, setup, context, sources=sources)["valid"]
+
+
 def test_liquid_class_id_resolves_name_and_requires_tip_specific_calibration():
     plan, setup, context, sources = protocol_fixture()
     context["liquid_classes"] = [{"liquid_class_id": "class-id", "name": "Calibrated water", "head_type": "HT_96_D_200", "tip_capacity_ul": 200}]

@@ -44,6 +44,24 @@ def test_incomplete_plan_builds_deterministic_non_executable_cited_preview():
     assert properties["_source_citation"]["paragraph_ids"] == ["p1"]
 
 
+def test_legacy_setup_questions_use_guided_controls_and_keep_scientific_questions():
+    plan = unfinished_plan()
+    plan["questions"].extend([
+        {"id": "draft:liquid-class", "path": "/setup/liquid_class", "prompt": "Choose a class."},
+        {"id": "draft:head-mode", "path": "/setup/head_mode", "prompt": "Choose a head mode."},
+        {"id": "source-isolation:rack-order", "path": "/setup/tip_rack_ids", "prompt": "Confirm racks."},
+        {"id": "source-isolation:reuse-reason", "path": "/setup/tip_reuse_reason",
+         "prompt": "Explain contamination assessment."},
+    ])
+    preview = build_chat_preview(plan, "chat", 1, setup={
+        "head_mode": {"subset_type": "all_barrels", "subset_config": "back_left"},
+        "tip_rack_ids": ["tips"],
+    })
+    assert {q["id"] for q in preview["questions"]} == {"q1", "source-isolation:reuse-reason"}
+    # Filtering is presentation-only; the original audit record is intact.
+    assert len(plan["questions"]) == 5
+
+
 def test_transfer_review_node_names_aspirate_and_dispense_without_creating_commands():
     plan = unfinished_plan()
     plan["steps"][0].update(source_anchor="A1", destination_anchor="B2", volume_ul=5.0)

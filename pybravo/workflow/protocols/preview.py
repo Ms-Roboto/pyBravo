@@ -15,6 +15,9 @@ from .models import ProtocolPlan, ProtocolStep
 MAX_PREVIEW_STEPS = 498
 MAX_PREVIEW_DEPTH = 8
 PREVIEW_NODE_TYPE = "review/ProtocolStep"
+GUIDED_SETUP_QUESTION_PATHS = frozenset({
+    "/setup/head_mode", "/setup/tip_rack_ids", "/setup/liquid_class",
+})
 _STEP_TITLES = {
     "transfer": "Transfer", "mix": "Mix", "manual": "Manual checkpoint",
     "wait": "Wait", "move_plate": "Move plate", "destack_plate": "Destack plate",
@@ -49,6 +52,47 @@ def _source_map(sources: Any) -> dict[str, dict]:
 
 def _quantity(value: int | float | None, unit: str) -> str:
     return f"{value:g} {unit}" if value is not None else f"unspecified {unit}"
+
+
+def _pointer(document: dict, path: str) -> Any:
+    current: Any = document
+    for part in path.strip("/").split("/"):
+        try:
+            current = current[int(part)] if isinstance(current, list) else current[part]
+        except (IndexError, KeyError, TypeError, ValueError):
+            return None
+    return current
+
+
+def open_plan_questions(plan: ProtocolPlan, setup: dict | None = None) -> list[dict]:
+    """Exclude confirmed prompts and setup checks already owned by validation.
+
+    The original plan and its scientist decisions remain intact for audit. A
+    catalog-tipbox confirmation is special: merely selecting a rack is not
+    evidence that the scientist accepted the exact rack/tip pairing.
+    """
+    document = {**plan.model_dump(mode="json"), "setup": setup or {}}
+    decisions = {decision.path: decision.value for decision in plan.decisions}
+    remaining: list[dict] = []
+    for question in plan.questions:
+        path = question.path
+        if path in GUIDED_SETUP_QUESTION_PATHS:
+            # These three fields have dedicated guided controls and validation.
+            # A pinned method also makes the legacy class field optional.
+            continue
+        if question.id.startswith("catalog-tipbox:"):
+            tip_path = path.removesuffix("/labware_id") + "/tip_definition_id"
+            rack = _pointer(document, path)
+            tip = _pointer(document, tip_path)
+            if rack and tip and decisions.get(path) == rack and decisions.get(tip_path) == tip:
+                continue
+            remaining.append(question.model_dump(mode="json"))
+            continue
+        value = _pointer(document, path)
+        if path in decisions and value == decisions[path]:
+            continue
+        remaining.append(question.model_dump(mode="json"))
+    return remaining
 
 
 def _proposed_deck(plan: ProtocolPlan) -> dict[str, list[dict]]:
@@ -127,6 +171,8 @@ def build_chat_preview(
     session_id: str,
     revision: int,
     sources: Any = None,
+    *,
+    setup: dict | None = None,
 ) -> dict:
     """Return a marked LiteGraph workflow containing only structural review nodes.
 
@@ -141,7 +187,7 @@ def build_chat_preview(
         raise ValueError("Chat preview requires a positive integer revision.")
     paragraphs = _source_map(sources)
     names = {material.id: material.name for material in plan.materials}
-    questions = [question.model_dump(mode="json") for question in plan.questions]
+    questions = open_plan_questions(plan, setup)
     specs: list[dict] = []
 
     def visit(steps: list[ProtocolStep], prefix: str, numbering: tuple[int, ...], parent: str | None) -> None:

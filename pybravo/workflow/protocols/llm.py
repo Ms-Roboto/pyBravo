@@ -735,12 +735,9 @@ def _add_isolated_source_setup_questions(plan: "ProtocolPlan", source: IngestedP
     rack_ids = [material.id for material in plan.materials if material.role == "tips"]
     if len(source_order) < 2 or len(source_order) != len(rack_ids):
         return
-    pairing = ", ".join(f"{source_id} → {rack_id}" for source_id, rack_id in zip(source_order, rack_ids))
     questions = [
         ProtocolQuestion(id="source-isolation:tip-strategy", path="/setup/tip_strategy",
                          prompt="Confirm fresh_each_source: use one clean tip set for both destination transfers from a source, then change tips before the next source."),
-        ProtocolQuestion(id="source-isolation:rack-order", path="/setup/tip_rack_ids",
-                         prompt=f"Confirm rack order for top-to-bottom source processing. Proposed pairing: {pairing}. Verify each rack is separately loaded with the requested tip type."),
         ProtocolQuestion(id="source-isolation:reuse-reason", path="/setup/tip_reuse_reason",
                          prompt="Confirm the reuse rationale: both 1536 destinations start empty, and each source's ST10 tip set touches only that source and its two destinations."),
         ProtocolQuestion(id="source-isolation:tip-disposal", path="/setup/tip_disposal_id",
@@ -904,10 +901,6 @@ def _recognized_quadrant_plan(
             {"id": "draft:starting-volume", "path": "/materials/0/initial_volume_ul",
              "prompt": ("Confirm starting volume for every source well; each source supplies 5 uL to each of two destinations. "
                         "Review the source plate's catalog dead-volume estimate in the draft.")},
-            {"id": "draft:liquid-class", "path": "/setup/liquid_class",
-             "prompt": "Choose and confirm a validated 5 uL ST10 liquid class for this source and destination geometry."},
-            {"id": "draft:head-mode", "path": "/setup/head_mode",
-             "prompt": "Confirm the 384-channel all-barrels head mode and full-plate footprint before execution."},
             {"id": "draft:deck-clearance", "path": "/materials/3/deck_slot",
              "prompt": "Confirm source-stack gripper clearance and the proposed deck slots 1–9, including empty work slot 6 and processed slot 7."},
             {"id": "draft:quadrants", "path": "/steps/0/destination_slot",

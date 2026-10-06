@@ -26,6 +26,7 @@ from pybravo.types import HeadType
 
 from .dead_volume import catalog_dead_volume, scientist_confirmed_dead_volume
 from .models import ProtocolPlan, ProtocolSetup, ProtocolStep
+from .preview import GUIDED_SETUP_QUESTION_PATHS
 from .tipbox_choices import catalog_tip_ids, rack_tip_stride, selected_tip_id
 
 MAX_OPERATIONS = 1000
@@ -227,6 +228,11 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
     decisions = {d.path: d for d in plan.decisions}
     doc = {**plan.model_dump(), "setup": setup.model_dump()}
     for question in plan.questions:
+        if question.path in GUIDED_SETUP_QUESTION_PATHS:
+            # The head, rack order, and legacy liquid class have their own
+            # structured validator checks. A stale extraction prompt must not
+            # add a second, free-text blocker after those fields are resolved.
+            continue
         if question.id.startswith("catalog-tipbox:"):
             match = re.fullmatch(r"/materials/(\d+)/labware_id", question.path)
             material = plan.materials[int(match[1])] if match and int(match[1]) < len(plan.materials) else None
