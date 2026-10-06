@@ -152,6 +152,12 @@ wells and are never reselected. A waste receptacle instead requires its actual
 on-deck material ID. These conditions are not claims that racks are stocked or
 that waste capacity is sufficient.
 
+The manifest identifies only active machine classes. In simulation,
+`POST /api/protocols/liquid-class-proposals` may present explicit head/tip
+classes from another local machine as non-executable planning references,
+with source settings and unresolved applicability. It never makes a
+cross-machine class an active catalog option.
+
 Pipetting height is never guessed from plate depth. Its rule publishes the
 only generic bound supported by the catalog and validator:
 `0 <= distance_from_bottom_mm < minimum_addressed_well_depth_mm` when all

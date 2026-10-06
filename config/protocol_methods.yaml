@@ -20,6 +20,22 @@ methods:
         source_url: https://automation.help.agilent.com/AutomationSolutionsKB13/vworks4_ug/08_LiquidHandling.12.15.html
         retrieved_at: '2026-10-05'
         note: Vendor example of quadrant mapping from four 384-well sources to a 1536-well destination; no motion settings asserted here.
+  - method_id: reference:agilent-384st10-dmso
+    version: 1.0.0
+    status: reference_candidate
+    title: Agilent 384ST10 tartrazine in DMSO performance example
+    applicability:
+      head_types: [HT_384_D_70, HT_384_D_70_S2]
+      tip_ids: [st_10ul]
+      reagent_families: [DMSO]
+      operations: [transfer, distribute]
+      min_volume_ul: 0.3
+      max_volume_ul: 10.0
+    evidence:
+      - source_type: publication
+        source_url: https://www.agilent.com/cs/library/technicaloverviews/public/te-bravo-automated-liquid-handling-384st-10-ul-tip-5990-3645en-agilent.pdf
+        retrieved_at: '2026-10-06'
+        note: Vendor measured 0.3, 0.5, and 2.0 uL tartrazine in DMSO from a reservoir into a dry 384-well polystyrene plate. At 2 uL, the reported task used 6 mm aspiration height and 1 uL preaspirate, then 0 mm dispense height and 1 uL blowout for that reservoir-to-PS geometry. The cataloged upper range uses the vendor's statement that performance above 2 uL meets or exceeds the 2 uL result; 5 uL was not separately measured. It supplies no liquid-class motion settings and does not validate those heights or Labcyte PP into Labcyte LDV on this machine.
   - method_id: reference:agilent-aspirate-task
     version: 1.0.0
     status: reference_candidate

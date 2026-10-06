@@ -14,6 +14,9 @@ def test_protocol_skills_are_selected_by_task():
     ]
     assert all(body and "---" not in body for _, body in pipetting)
 
+    solvent = selected_skills(ingest_text("The solvent is DMSO."))
+    assert "liquid-methods" in dict(solvent)
+
     plural_hardware = selected_skills(ingest_text("Place four plates and four tipboxes on the deck."))
     assert [name for name, _ in plural_hardware] == ["protocol-interpretation", "deck-and-tips"]
 

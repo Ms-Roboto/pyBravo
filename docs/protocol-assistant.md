@@ -339,6 +339,7 @@ simulation never execute physical hardware.
 | `GET /context` | Active machine and authoritative catalogs |
 | `GET /capabilities` | Published Bravo Capability Manifest and method-registry pointer |
 | `GET /methods`, `POST /methods/lookup` | Versioned method registry and read-only applicability lookup |
+| `POST /liquid-class-proposals` | Read-only, cross-profile liquid-class planning candidates when simulation lacks an active class; includes original settings and provenance without making them executable |
 | `POST /methods` | Save a complete scientist-reviewed method version against expected registry and method revisions |
 | `GET /recipes` | Read-only recipe patterns and review points |
 | `POST /chat` | Add a scientist message and return a cited draft graph |
