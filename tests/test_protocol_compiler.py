@@ -571,12 +571,51 @@ def test_old_setup_questions_do_not_duplicate_structured_readiness_checks():
 
 def test_liquid_class_id_resolves_name_and_requires_tip_specific_calibration():
     plan, setup, context, sources = protocol_fixture()
-    context["liquid_classes"] = [{"liquid_class_id": "class-id", "name": "Calibrated water", "head_type": "HT_96_D_200", "tip_capacity_ul": 200}]
+    context["liquid_classes"] = [{"liquid_class_id": "class-id", "name": "Calibrated water",
+                                  "head_type": "HT_96_D_200", "tip_id": "tips-200", "tip_capacity_ul": 200},
+                                 {"liquid_class_id": "class-2", "name": "Slower water",
+                                  "head_type": "HT_96_D_200", "tip_id": "tips-200", "tip_capacity_ul": 200}]
     setup["liquid_class"] = "class-id"
     workflow = compile_plan(plan, setup, context, sources=sources)
     assert next(n for n in workflow["graph"]["nodes"] if n["type"] == "liquid/Aspirate")["properties"]["liquid_class"] == "Calibrated water"
+    setup["liquid_class"] = "class-2"
+    workflow = compile_plan(plan, setup, context, sources=sources)
+    assert next(n for n in workflow["graph"]["nodes"] if n["type"] == "liquid/Aspirate")["properties"]["liquid_class"] == "Slower water"
+    setup["liquid_class"] = "class-id"
     context["liquid_classes"][0]["tip_capacity_ul"] = 50
     assert "liquid_class_tip" in codes(validate_plan(plan, setup, context, sources=sources))
+
+
+def test_provisional_liquid_choice_is_traceable_and_simulation_only():
+    plan, setup, context, sources = protocol_fixture()
+    context["controller_type"] = "simulation"
+    setup["simulation_only_liquid_assumption"] = {
+        "liquid_class_id": "water",
+        "distance_from_bottom_mm": 1.0,
+        "basis": "unqualified_geometric_placeholder",
+    }
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"]
+    assert any(issue["code"] == "simulation_only_liquid_assumption" and issue["severity"] == "warning"
+               for issue in report["issues"])
+    assert compile_plan(plan, setup, context, sources=sources)
+
+    context["controller_type"] = "darwin_native"
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert "simulation_only_liquid_assumption" in codes(report)
+    assert not report["valid"]
+    with pytest.raises(ProtocolCompilationError):
+        compile_plan(plan, setup, context, sources=sources)
+
+    context["controller_type"] = "simulation"
+    setup["distance_from_bottom_mm"] = 2.0
+    assert "simulation_assumption_height_changed" in codes(validate_plan(plan, setup, context, sources=sources))
+    setup["distance_from_bottom_mm"] = 1.0
+    setup["simulation_only_liquid_assumption"]["liquid_class_id"] = "different-class"
+    assert "simulation_assumption_class_changed" in codes(validate_plan(plan, setup, context, sources=sources))
+    setup["simulation_only_liquid_assumption"]["liquid_class_id"] = "water"
+    plan["steps"] = []
+    assert "simulation_assumption_unused" in codes(validate_plan(plan, setup, context, sources=sources))
 
 
 def test_tip_disposal_pitch_and_explicit_head_counts_are_never_normalized_silently():

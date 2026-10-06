@@ -110,7 +110,9 @@ def _catalog(context: dict, key: str) -> dict[str, dict]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        identity = row.get("id") or row.get("tip_id") or row.get("liquid_class_id") or row.get("name")
+        identity = (row.get("liquid_class_id") or row.get("id") or row.get("name")) if key == "liquid_classes" else (
+            row.get("id") or row.get("tip_id") or row.get("name")
+        )
         catalog[str(identity)] = row
         if key == "liquid_classes" and row.get("name"):
             catalog[str(row["name"])] = row
@@ -475,6 +477,15 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         result.deck[str(slot)] = [deck_entries[material.id] for _, material in ordered]
     mode, head_type, liquid_class = None, None, None
     legacy_liquid_steps = any(step.method_ref is None for step in liquid_steps)
+    assumption = setup.simulation_only_liquid_assumption
+    assumption_path = "/setup/simulation_only_liquid_assumption"
+    if assumption is not None:
+        if context.get("controller_type") != "simulation":
+            result.issue("simulation_only_liquid_assumption", assumption_path,
+                         "This provisional liquid-class and height choice is for software simulation only; remove it and review a physical method before running on an instrument.")
+        if not legacy_liquid_steps:
+            result.issue("simulation_assumption_unused", assumption_path,
+                         "This provisional liquid assumption is no longer used; remove it before validating the revised plan.")
     if liquid_steps:
         try:
             ht = context.get("head_type")
@@ -511,9 +522,23 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         liquid_classes = _catalog(context, "liquid_classes")
         liquid_class = liquid_classes.get(setup.liquid_class)
         if legacy_liquid_steps and (not setup.liquid_class or setup.liquid_class not in liquid_classes):
-            result.issue("liquid_class", "/setup/liquid_class", "Choose an approved liquid class from the active catalog.", "Which approved liquid class should be used?")
+            result.issue("liquid_class", "/setup/liquid_class", "Choose a compatible liquid class from the active catalog.", "Which compatible liquid class should be used?")
         if legacy_liquid_steps and not _positive(setup.distance_from_bottom_mm, zero=True):
             result.issue("pipetting_height", "/setup/distance_from_bottom_mm", "Specify a nonnegative pipetting height above the well bottom.", "What approved distance above the well bottom should be used (mm)?")
+        if assumption is not None:
+            selected_class_id = (liquid_class or {}).get("liquid_class_id") or (liquid_class or {}).get("id")
+            if selected_class_id != assumption.liquid_class_id:
+                result.issue("simulation_assumption_class_changed", assumption_path,
+                             "The selected liquid class differs from the recorded simulation-only assumption; review the choice again.")
+            if (setup.distance_from_bottom_mm is None or not math.isclose(
+                setup.distance_from_bottom_mm, assumption.distance_from_bottom_mm, rel_tol=0, abs_tol=_EPS
+            )):
+                result.issue("simulation_assumption_height_changed", assumption_path,
+                             "The pipetting height differs from the recorded simulation-only assumption; review the choice again.")
+            if context.get("controller_type") == "simulation" and selected_class_id == assumption.liquid_class_id:
+                result.issue("simulation_only_liquid_assumption", assumption_path,
+                             "The existing liquid class and geometric height are provisional simulation inputs, not a reagent-qualified or physical Bravo method.",
+                             severity="warning")
         if not setup.tip_rack_ids:
             result.issue("tip_supply", "/setup/tip_rack_ids", "Select at least one tip supply material.", "Which tip racks should the workflow consume?")
         if len(set(setup.tip_rack_ids)) != len(setup.tip_rack_ids):
@@ -636,8 +661,8 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             if liquid_class and step.method_ref is None:
                 class_tip = liquid_class.get("tip_id")
                 class_capacity = liquid_class.get("tip_capacity_ul")
-                if class_tip and class_tip != tip_id or (
-                    not class_tip and _positive(class_capacity) and not math.isclose(class_capacity, tip["capacity_ul"])
+                if (class_tip and class_tip != tip_id) or (
+                    _positive(class_capacity) and not math.isclose(class_capacity, tip["capacity_ul"])
                 ):
                     result.issue("liquid_class_tip", "/setup/liquid_class", f"The liquid class is not calibrated for tip {tip_id!r}.")
                 if liquid_class.get("head_type") and liquid_class["head_type"] != head_type.name:

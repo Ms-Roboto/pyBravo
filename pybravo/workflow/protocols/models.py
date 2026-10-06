@@ -108,6 +108,14 @@ class ProtocolHeadMode(StrictModel):
     column_count: int | None = None
 
 
+class ProtocolSimulationLiquidAssumption(StrictModel):
+    """A visible planning assumption that must never authorize physical motion."""
+
+    liquid_class_id: str = Field(min_length=1)
+    distance_from_bottom_mm: float = Field(ge=0)
+    basis: Literal["unqualified_geometric_placeholder"]
+
+
 class ProtocolSetup(StrictModel):
     name: str = ""
     head_mode: ProtocolHeadMode | None = None
@@ -117,3 +125,4 @@ class ProtocolSetup(StrictModel):
     tip_disposal_id: str | None = None
     liquid_class: str | None = None
     distance_from_bottom_mm: float | None = None
+    simulation_only_liquid_assumption: ProtocolSimulationLiquidAssumption | None = None

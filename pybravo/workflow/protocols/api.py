@@ -607,11 +607,21 @@ def _require_passed(record: dict, capabilities: dict) -> tuple[str, dict]:
     return fingerprint, workflow
 
 
+def _require_releasable_liquid_method(record: dict) -> None:
+    if (record.get("setup") or {}).get("simulation_only_liquid_assumption") is not None:
+        raise HTTPException(
+            409,
+            "This protocol uses a software-simulation-only liquid assumption and cannot be approved or released. "
+            "Replace it with a reviewed liquid method, then validate and simulate the revised protocol.",
+        )
+
+
 @router.post("/api/protocols/{identity}/approve")
 async def approve(identity: str, request: ApprovalRequest):
     record = _record(identity)
     if request.revision is not None and request.revision != record["revision"]:
         raise HTTPException(409, "Protocol changed; reload before approval.")
+    _require_releasable_liquid_method(record)
     if not request.scientist.strip() or not request.reviewed or not request.deck_confirmed:
         raise HTTPException(422, "Record the reviewer and confirm the protocol and deck review.")
     if request.qualification not in {"qualification_run", "previously_qualified", "scientist_reviewed_simulated"}:
@@ -644,6 +654,7 @@ async def approve(identity: str, request: ApprovalRequest):
 
 
 def _require_approved(record: dict, capabilities: dict) -> dict:
+    _require_releasable_liquid_method(record)
     fingerprint, workflow = _require_passed(record, capabilities)
     approval = record.get("approval") or {}
     if approval.get("record_hash") != fingerprint or approval.get("workflow_hash") != workflow_digest(workflow):

@@ -104,6 +104,36 @@ async def test_full_review_release_library_and_setup_lifecycle(environment):
 
 
 @pytest.mark.asyncio
+async def test_simulation_only_liquid_assumption_cannot_be_approved_or_released(environment):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+        session = await session_with_plan(client)
+        assumption = {
+            "liquid_class_id": "existing-class",
+            "distance_from_bottom_mm": 1.0,
+            "basis": "unqualified_geometric_placeholder",
+        }
+        response = await client.patch(f"/api/protocols/{session['id']}", json={
+            "revision": session["revision"],
+            "setup": {"simulation_only_liquid_assumption": assumption},
+        })
+        assert response.status_code == 200, response.text
+        session = response.json()
+        identity = session["id"]
+        approval = await client.post(f"/api/protocols/{identity}/approve", json={
+            "scientist": "Test reviewer", "reviewed": True, "deck_confirmed": True,
+            "qualification": "qualification_run", "revision": session["revision"],
+        })
+        assert approval.status_code == 409
+        assert "simulation-only liquid assumption" in approval.json()["detail"]
+        exported = await client.post(f"/api/protocols/{identity}/export-workflow")
+        assert exported.status_code == 409
+        assert "simulation-only liquid assumption" in exported.json()["detail"]
+        published = await client.post(f"/api/protocols/{identity}/publish", json={"name": "Unsafe release"})
+        assert published.status_code == 409
+        assert "simulation-only liquid assumption" in published.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_setup_recommendations_use_active_context_without_saving_draft(environment, monkeypatch):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
         session = await session_with_plan(client)
