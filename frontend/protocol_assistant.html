@@ -39,7 +39,7 @@
 <div class="panel" id="source-extract-panel"><div class="panel-title"><div><h2>Interpret the selected procedure</h2><p class="muted">The local model proposes a structured plan. Missing quantities and experimental choices remain open for review.</p></div></div><label class="field">Experiment context / extraction instructions<textarea id="extraction-instructions" placeholder="For example: use only the plate preparation section; preserve the centrifugation step as a manual handoff."></textarea></label><div class="actions"><button id="extract" class="primary">Interpret with local LLM</button><span class="muted" id="extraction-status"></span></div></div>
 </details>
 <div class="panel" id="setup-panel"><div class="panel-title"><div><h2>Experiment setup</h2><p class="muted" id="instrument-summary">Loading the active instrument catalog…</p><p class="muted" style="font-size:12px">Catalog corrections: <a href="/labware-editor" target="_blank" rel="noopener">labware geometry</a> · <a href="/tip-editor" target="_blank" rel="noopener">tip definitions</a> · <a href="/liquid-class-editor" target="_blank" rel="noopener">liquid classes</a>. Validation uses the catalog dimensions, not the labware name.</p></div><span class="badge" id="model-status">Local model</span></div><div id="liquid-class-proposals" class="row-card" hidden></div><div id="guided-setup" class="row-card" hidden></div><details id="setup-recommendations-details"><summary>Detailed capability recommendations</summary><div id="setup-recommendations" class="row-card" hidden></div></details><details id="method-preview-details"><summary>Automatic method proposals and evidence</summary><div id="method-preview" class="row-card" hidden></div></details><details id="setup-advanced"><summary>Edit advanced head, tip, and liquid setup</summary><div class="fields" id="setup-fields"></div><div id="setup-tipbox-choices" class="row-card" style="margin-top:18px"></div><div class="actions"><label class="field" style="min-width:240px">Reusable setup<select id="setup-picker"><option value="">Choose a saved setup</option></select></label><button id="apply-setup">Apply setup</button><button id="prepare-deck">Configure materials</button><button id="suggest-methods">Suggest liquid methods</button><label class="field" style="flex:1;min-width:170px">Save setup as<input id="setup-name" placeholder="A descriptive laboratory setup name"></label><button id="save-setup">Save setup</button></div></details></div>
-<div id="plan-content" hidden><div id="guided-plan-summary" class="row-card" hidden></div><details id="plan-details"><summary>Edit individual materials, deck positions and transfer steps</summary><div class="panel"><div class="panel-title"><div><h2>Materials &amp; deck assignments</h2><p class="muted">Volumes are per well unless a well-specific override is supplied. Enter 0 µL for an empty destination. For plates sharing a deck position, assign stack levels from bottom 0 upward.</p></div><button id="add-material" class="small">Add material</button></div><div id="materials"></div></div><div class="panel"><div class="panel-title"><div><h2>Review the experimental steps</h2><p class="muted">Edit the interpretation and follow its source links. External operations remain explicit manual instructions.</p></div><button id="add-step" class="small">Add step</button></div><label class="field" style="margin-bottom:16px">Reason for corrections<input id="correction-reason" placeholder="For example, confirmed volume against laboratory SOP v3"></label><div id="steps"></div></div></details><div class="panel" id="questions-panel"><div class="panel-title"><div><h2>Individual questions and exceptions</h2><p class="muted">Use these fields when a plate, well, or tip rack differs from the guided setup. Answers are recorded as scientist decisions.</p></div></div><details id="raw-questions"><summary id="raw-questions-summary">Review individual questions</summary><div id="questions"></div></details></div><div class="actions end"><button data-go="review" class="primary">Review &amp; validate</button></div></div>
+<div id="plan-content" hidden><div id="guided-plan-summary" class="row-card" hidden></div><details id="plan-details"><summary>Edit individual materials, deck positions and transfer steps</summary><div class="panel"><div class="panel-title"><div><h2>Materials &amp; deck assignments</h2><p class="muted">Volumes are per well unless a well-specific override is supplied. Enter 0 µL for an empty destination. For plates sharing a deck position, assign stack levels from bottom 0 upward.</p></div><button id="add-material" class="small">Add material</button></div><div id="materials"></div></div><div class="panel"><div class="panel-title"><div><h2>Review the experimental steps</h2><p class="muted">Edit the interpretation and follow its source links. External operations remain explicit manual instructions.</p></div><button id="add-step" class="small">Add step</button></div><label class="field" style="margin-bottom:16px">Reason for corrections<input id="correction-reason" placeholder="For example, confirmed volume against laboratory SOP v3"></label><div id="steps"></div></div></details><div class="panel" id="questions-panel"><div class="panel-title"><div><h2>Individual questions and exceptions</h2><p class="muted">Use these fields for exceptions that need a specific answer. Head, rack-order, and liquid-method choices are handled in Experiment setup above.</p></div></div><details id="raw-questions"><summary id="raw-questions-summary">Review individual questions</summary><div id="questions"></div></details></div><div class="actions end"><button data-go="review" class="primary">Review &amp; validate</button></div></div>
 </section>
 <section id="review-view" role="tabpanel" aria-labelledby="tab-review" hidden>
 <div class="panel"><div class="panel-title"><div><h2>Readiness checks</h2><p class="muted">Validate the saved plan, then run a simulation that stops on any task error.</p></div><button id="print" class="small no-print">Print run sheet</button></div><div class="summary-grid"><div class="metric"><strong id="validation-status">Not validated</strong><span>Plan and instrument compatibility</span></div><div class="metric"><strong id="simulation-status">Not simulated</strong><span>Strict simulation</span></div><div class="metric"><strong id="approval-status">Needs review</strong><span>Approval for this saved revision</span></div></div><div id="validation-summary" class="muted" style="font-size:12px;margin-bottom:14px"></div><div id="blocking-summary"></div><details id="issues-details"><summary id="issues-summary">View every detailed readiness check</summary><div id="issues" class="issues"></div></details><div class="actions"><button id="validate" class="primary">Validate plan</button><button id="simulate">Run strict simulation</button></div><details id="simulation-details" hidden><summary>Simulation events</summary><pre class="log" id="simulation-events"></pre></details></div>
@@ -1340,7 +1340,8 @@ function renderGuidedSetup(){
     host.append(reusePanel);
 
     const classGap=localLiquidClassGap({tip_id:'st_10ul'});
-    if(classGap){
+    const needsMethod=model.transfers.some(step=>!step.method_ref);
+    if(needsMethod&&classGap){
         const proposed=liquidClassProposalQueries().length>0;
         host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
             el('p',{style:'margin:6px 0 0'},proposed?
@@ -1351,12 +1352,12 @@ function renderGuidedSetup(){
             el('a',{href:'/',target:'_blank',rel:'noopener'},'Open Control Panel'),' · ',
             el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Open liquid-class editor')));
     }
-    else if(list(state.methodPreview?.items).some(item=>item.status==='needs_curation'))
+    else if(needsMethod)
         host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
-            el('p',{style:'margin:6px 0 0'},'An active hardware liquid class can be inspected above as a candidate for method review. No reviewed method covers all eight transfers yet.'),
+            el('p',{style:'margin:6px 0 0'},'Inspect the active hardware liquid-class candidates above and the method proposals. A reviewed method is still needed for every transfer.'),
             liquidClassProposalQueries().length?el('a',{href:'#liquid-class-proposals'},'Inspect liquid-class candidates'):null,
             ' · ',el('a',{href:'#method-preview-details'},'Inspect method gaps')));
-    host.append(el('button',{class:'small',onclick:()=>{$('raw-questions').open=true;$('raw-questions').scrollIntoView({behavior:'smooth',block:'start'});}},
+    if(allQuestions().length)host.append(el('button',{class:'small',onclick:()=>{$('raw-questions').open=true;$('raw-questions').scrollIntoView({behavior:'smooth',block:'start'});}},
         'Review individual questions and exceptions'));
 }
 function renderSetupRecommendations(){
@@ -1635,18 +1636,27 @@ function questionAnsweredInDraft(question){
         (!Array.isArray(current)||current.length>0)&&JSON.stringify(recorded.value)===JSON.stringify(current);
 }
 function allQuestions(){
+    // These paths are resolved through the visible method/candidate card and
+    // the guided or advanced setup controls. Their raw answer box cannot write
+    // a valid head-mode object or an ordered rack list.
+    const handledBySetup=new Set(['/setup/liquid_class','/setup/head_mode','/setup/tip_rack_ids']);
     const stored=list(state.session?.plan?.questions).filter(item=>{
         const confirmation=tipboxConfirmation(item);
         if(confirmation)return !confirmation.confirmed;
         const value=pointerGet(item.path?.startsWith('/setup/')?state.session:state.session?.plan,item.path||'');
         return (value==null||value===''||(Array.isArray(value)&&!value.length))&&!list(state.session?.plan?.decisions).some(decision=>decision.path===item.path);
     });
-    const previous=list(state.session?.validation?.questions).filter(item=>!state.dirty||!questionAnsweredInDraft(item));
+    const previous=list(state.session?.validation?.questions).filter(item=>!questionAnsweredInDraft(item));
     const questions=[...stored,...previous];
-    const seen=new Set();return questions.filter(item=>{if(tipboxConfirmation(item)?.confirmed)return false;const key=item.path||item.id;if(seen.has(key))return false;seen.add(key);return true;});
+    const seen=new Set();return questions.filter(item=>{
+        if(state.session?.plan&&handledBySetup.has(item.path))return false;
+        if(tipboxConfirmation(item)?.confirmed)return false;
+        const key=item.path||item.id;if(seen.has(key))return false;seen.add(key);return true;
+    });
 }
 function renderQuestions(){
     const questions=allQuestions();
+    $('questions-panel').hidden=!questions.length;
     if($('raw-questions-summary'))$('raw-questions-summary').textContent=
         `Review ${questions.length} individual question${questions.length===1?'':'s'} and exceptions`;
     const rows=questions.map(question=>{

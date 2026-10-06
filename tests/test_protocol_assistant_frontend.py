@@ -878,22 +878,66 @@ function pointerGet(root,path){return path.split('/').slice(1).reduce((row,key)=
 const initial={path:'/materials/0/initial_volume_ul',prompt:'Starting volume'};
 const tips={path:'/materials/1/available_tips',prompt:'Fresh tip inventory'};
 const liquid={path:'/setup/liquid_class',prompt:'Liquid class'};
+const head={path:'/setup/head_mode',prompt:'Head footprint'};
+const racks={path:'/setup/tip_rack_ids',prompt:'Rack order'};
+const exception={path:'/materials/2/deck_slot',prompt:'Check deck position'};
 const state={dirty:true,session:{setup:{},plan:{materials:[
-  {initial_volume_ul:20},{available_tips:'full'}],questions:[initial,liquid],decisions:[
+  {initial_volume_ul:20},{available_tips:'full'},{deck_slot:null}],
+  questions:[initial,liquid,head,racks,exception],decisions:[
   {path:initial.path,value:20,actor:'scientist'},
   {path:tips.path,value:'full',actor:'scientist'}]},
-  validation:{questions:[initial,tips,liquid]}}};
+  validation:{questions:[initial,tips,liquid,head,racks,exception]}}};
 """
         + "\n".join(functions)
         + """
-assert.deepEqual(allQuestions().map(row=>row.path),['/setup/liquid_class']);
+assert.deepEqual(allQuestions().map(row=>row.path),[exception.path]);
 state.dirty=false;
-assert.deepEqual(allQuestions().map(row=>row.path),[
-  '/setup/liquid_class','/materials/0/initial_volume_ul','/materials/1/available_tips']);
+assert.deepEqual(allQuestions().map(row=>row.path),[exception.path],
+  'Saved validation questions with matching scientist decisions stay hidden');
+state.session.plan.materials[1].available_tips=['A1'];
+assert.deepEqual(allQuestions().map(row=>row.path),[exception.path,tips.path],
+  'Changing a reviewed value makes its saved question open again');
 """
     )
     script = tmp_path / "stale-guided-questions.cjs"
     script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_only_structured_setup_questions_hide_individual_exceptions_panel(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in ("questionAnsweredInDraft", "allQuestions", "renderQuestions"):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    script = tmp_path / "structured-setup-questions.cjs"
+    script.write_text(
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+const state={session:{setup:{},plan:{materials:[],questions:[
+  {path:'/setup/liquid_class',prompt:'Choose a liquid class'},
+  {path:'/setup/head_mode',prompt:'Confirm head mode'},
+  {path:'/setup/tip_rack_ids',prompt:'Confirm rack order'}],decisions:[]},
+  validation:{questions:[{path:'/setup/head_mode',prompt:'Confirm head mode'}]}}};
+function tipboxConfirmation(){return null;}
+function sameSourceReuseDecision(){return false;}
+function currentSetupRecommendations(){return null;}
+function pointerGet(root,path){return path.split('/').slice(1).reduce((row,key)=>row?.[key],root);}
+const nodes={'questions-panel':{hidden:false},'raw-questions-summary':{textContent:''},
+  questions:{children:[],replaceChildren(...items){this.children=items;}}};
+function $(id){return nodes[id];}
+function el(tag,attrs,...children){return {tag,attrs,children};}
+"""
+        + "\n".join(functions)
+        + """
+renderQuestions();
+assert.equal(nodes['questions-panel'].hidden,true);
+assert.match(nodes['raw-questions-summary'].textContent,/0 individual questions/);
+assert.equal(nodes.questions.children[0].tag,'p');
+"""
+    )
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
 
 
