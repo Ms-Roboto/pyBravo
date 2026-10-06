@@ -414,6 +414,16 @@ async function api(path,options){assert.equal(path,'/liquid-class-proposals');lo
   assert.match(content,/imported_config/);
   assert.match(content,/does not qualify the class settings/);
   assert.match(content,/config\\/liquid_classes.yaml/);
+  const group=panel.children.find(node=>node.tag==='div'&&node.children?.[0]?.tag==='strong');
+  const firstCard=group.children[1];
+  assert.equal(text(firstCard.children[0]),'ST10 low volume',
+    'The proposed class should appear before publication detail');
+  assert.equal(firstCard.children.filter(node=>node.attrs?.class==='issue warn').length,1,
+    'Keep one visible qualification warning; detailed caveats belong in disclosure');
+  const evidenceIndex=group.children.findIndex(node=>node.tag==='details'&&
+    text(node).includes('DMSO context only'));
+  assert.ok(evidenceIndex>1,'Vendor note should be in a disclosure after the class');
+  assert.equal(group.children[evidenceIndex].children[0].tag,'summary');
   assert.equal(state.session.setup.liquid_class,undefined);
   assert.ok(steps.every(step=>!step.method_ref));
   const keep=panel.children.flatMap(buttons).find(button=>text(button)==='Keep as candidate');

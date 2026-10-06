@@ -292,8 +292,8 @@ function renderLiquidClassProposals(){
     if(!panel)return;
     panel.hidden=!data?.items?.length;
     if(panel.hidden)return;
-    panel.replaceChildren(el('h3',{},'Liquid-class starting points from the knowledge base'),
-        el('p',{class:'muted'},'These are catalog records from another machine profile. They are options to inspect or reject, not approved settings for this active instrument. Keeping one here does not fill the executable liquid-class field or pin a method.'));
+    panel.replaceChildren(el('h3',{},'Suggested liquid-class starting point'),
+        el('p',{class:'muted'},'Review the recorded class below. It is a planning option; keeping it does not apply robot settings.'));
     if(sharedSourceLiquidMissing()){
         const input=el('input',{type:'text',maxlength:120,placeholder:'For example, DMSO or aqueous buffer',
             'aria-label':'Liquid family in every source plate'});
@@ -315,16 +315,8 @@ function renderLiquidClassProposals(){
         const group=el('div',{class:'row-card'},el('strong',{},label));
         if(item.status==='loading'){group.append(el('p',{class:'muted'},'Checking compatible local class records…'));panel.append(group);continue;}
         if(item.error){group.append(el('p',{class:'issue error'},'Proposal lookup failed: '+item.error));panel.append(group);continue;}
-        if(item.summary_reason)group.append(el('p',{class:'muted'},item.summary_reason));
-        for(const reference of list(item.references)){
-            const href=safeMethodSourceUrl(reference.source_url);
-            const referenceNote=reference.note||'Published context only; no local numeric setting is qualified by this source.';
-            group.append(el('p',{class:'muted',style:'margin:7px 0'},
-                href?el('a',{href,target:'_blank',rel:'noopener noreferrer'},reference.title||'Published context'):null,
-                `${href?' · ':''}${referenceNote} ${reference.qualifies_numeric_settings===false?'It does not qualify the class settings shown below.':''}`));
-        }
         const candidates=list(item.candidates);
-        if(!candidates.length){group.append(el('p',{class:'issue warn'},'No matching class record can be proposed for this tip and volume. A reviewed class and method must be added for the active machine.'));
+        if(!candidates.length){group.append(el('p',{class:'issue warn'},item.summary_reason||'No matching class record can be proposed for this tip and volume. A reviewed class and method must be added for the active machine.'));
             group.append(el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Open liquid-class editor'));panel.append(group);continue;}
         const alternatives=candidates.length>1?el('details',{},
             el('summary',{},`Show ${Math.min(candidates.length-1,2)} other class option${candidates.length===2?'':'s'}`)):null;
@@ -338,12 +330,14 @@ function renderLiquidClassProposals(){
                 el('p',{class:'muted',style:'margin:7px 0'},
                     `Source: ${sourceMachine} / ${sourceHead} / ${sourceTip}. Class ${id||'unknown'}; ${candidate.status||'unverified'}.`));
             if(candidate.ranking_reason)card.append(el('p',{class:'muted',style:'margin:5px 0'},candidate.ranking_reason));
-            for(const reason of list(candidate.reasons))card.append(el('p',{class:'muted',style:'margin:5px 0'},reason));
             const caveats=list(candidate.caveats);
             if(/DMSO/i.test(query.reagent_family||'')&&!caveats.some(value=>/DMSO/i.test(value)))
                 caveats.unshift(`DMSO suitability for this ${query.volume_ul} µL transfer from ${sourceName} to ${destinationName} has not been established by this catalog record.`);
-            for(const caveat of caveats)card.append(el('p',{class:'issue warn',style:'margin:7px 0'},caveat));
+            card.append(el('p',{class:'issue warn',style:'margin:7px 0'},
+                `Not active on ${state.context?.machine_id||'this machine'} or qualified for ${query.reagent_family||'the source liquid'} from ${sourceName} to ${destinationName}.`));
             const details=el('details',{},el('summary',{},'Inspect motion settings, calibration and provenance'));
+            for(const reason of list(candidate.reasons))details.append(el('p',{class:'muted',style:'margin:7px 0'},reason));
+            for(const caveat of caveats)details.append(el('p',{class:'muted',style:'margin:7px 0'},caveat));
             const keys=['w_velocity_ul_s','w_acceleration_ul_s2','post_delay_ms','z_in_velocity_mm_s',
                 'z_in_acceleration_mm_s2','z_out_velocity_mm_s','z_out_acceleration_mm_s2'];
             for(const phase of ['aspirate','dispense']){
@@ -374,8 +368,20 @@ function renderLiquidClassProposals(){
             (candidateIndex===0?group:alternatives).append(card);
         }
         if(alternatives)group.append(alternatives);
+        if(item.summary_reason||list(item.references).length){
+            const evidence=el('details',{},el('summary',{},'Publication context and proposal basis'));
+            if(item.summary_reason)evidence.append(el('p',{class:'muted',style:'margin:7px 0'},item.summary_reason));
+            for(const reference of list(item.references)){
+                const href=safeMethodSourceUrl(reference.source_url);
+                const referenceNote=reference.note||'Published context only; no local numeric setting is qualified by this source.';
+                evidence.append(el('p',{class:'muted',style:'margin:7px 0'},
+                    href?el('a',{href,target:'_blank',rel:'noopener noreferrer'},reference.title||'Published context'):null,
+                    `${href?' · ':''}${referenceNote} ${reference.qualifies_numeric_settings===false?'It does not qualify the class settings shown above.':''}`));
+            }
+            group.append(evidence);
+        }
         group.append(el('p',{class:'muted',style:'margin:10px 0 0'},
-            `Next: confirm the liquid composition, review a class on the intended Bravo, and create a ${query.volume_ul} µL method from ${sourceName} to ${destinationName} with aspirate and dispense heights. Then pin the reviewed method and run validation and strict simulation.`));
+            `To use this class, review it and a ${query.volume_ul} µL method on the intended Bravo, then validate and strictly simulate.`));
         group.append(el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Review liquid classes'));
         panel.append(group);
     }
