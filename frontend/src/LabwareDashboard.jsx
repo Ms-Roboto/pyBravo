@@ -21,6 +21,11 @@ function supportsDeadVolume(entry) {
   return ['microplate', 'filter_plate', 'reservoir', 'tip_wash_station'].includes(baseClass)
 }
 
+function deadVolumeIsMissing(entry) {
+  const value = entry?.well_dimensions_mm?.dead_volume_ul
+  return supportsDeadVolume(entry) && (value === null || value === undefined || value === '')
+}
+
 function deadVolumePatch(volume, status) {
   if (status !== 'placeholder' && status !== 'reviewed') {
     throw new Error('Choose a dead volume review status.')
@@ -161,20 +166,19 @@ function SmallButton({ disabled, onClick, children, variant = 'default' }) {
 }
 
 function DeadVolumeStatus({ entry }) {
-  if (!supportsDeadVolume(entry)) return null
-  const reviewed = entry?.well_dimensions_mm?.dead_volume_status === 'reviewed'
+  if (!deadVolumeIsMissing(entry)) return null
   return (
     <span style={{
       display: 'inline-block',
-      color: reviewed ? '#95de64' : '#ffd666',
-      background: reviewed ? '#1f3b26' : '#463716',
-      border: `1px solid ${reviewed ? '#3d7a48' : '#8a681d'}`,
+      color: '#ffb3b3',
+      background: '#4f1f26',
+      border: '1px solid #a1424f',
       borderRadius: 6,
       padding: '3px 7px',
       fontSize: 12,
       fontWeight: 'bold',
     }}>
-      Dead volume: {reviewed ? 'reviewed' : 'placeholder — needs review'}
+      Dead volume: missing
     </span>
   )
 }
@@ -1056,6 +1060,8 @@ function LabwareDashboard() {
     }
   }
 
+  const deadVolumeMissingInForm = String(wdDeadVolumeUl ?? '').trim() === ''
+
   return (
     <div style={{ padding: 20, maxWidth: 1500, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -1127,7 +1133,7 @@ function LabwareDashboard() {
                       {t.vendor ? ` · ${t.vendor}` : ''}
                       {t.catalog_number ? ` · ${t.catalog_number}` : ''}
                     </div>
-                    {supportsDeadVolume(t) && <div style={{ marginTop: 5 }}><DeadVolumeStatus entry={t} /></div>}
+                    {deadVolumeIsMissing(t) && <div style={{ marginTop: 5 }}><DeadVolumeStatus entry={t} /></div>}
                   </div>
                 ))}
               </div>
@@ -1143,7 +1149,7 @@ function LabwareDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                   <div>
                     <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '1.2em' }}>{selectedType.name}</div>
-                    {supportsDeadVolume(selectedType) && <div style={{ marginTop: 7 }}><DeadVolumeStatus entry={selectedType} /></div>}
+                    {deadVolumeIsMissing(selectedType) && <div style={{ marginTop: 7 }}><DeadVolumeStatus entry={selectedType} /></div>}
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
                     <SmallButton disabled={busy} onClick={renameEntry}>Rename</SmallButton>
@@ -1356,13 +1362,13 @@ function LabwareDashboard() {
                           <input value={wdDiameterMm} onChange={(e) => setWdDiameterMm(e.target.value)} style={input} disabled={busy} />
                         </div>
                         {supportsDeadVolume(selectedType) && (
-                          <div style={{ marginTop: 14, padding: 10, border: '1px solid #8a681d', borderRadius: 8, background: '#262015' }}>
-                            <label htmlFor="dead-volume-status" style={{ ...label, display: 'block', color: '#ffd666' }}>Dead volume review status</label>
+                          <div style={{ marginTop: 14, padding: 10, border: `1px solid ${deadVolumeMissingInForm ? '#a1424f' : '#333'}`, borderRadius: 8, background: deadVolumeMissingInForm ? '#4f1f26' : '#111' }}>
+                            <label htmlFor="dead-volume-status" style={{ ...label, display: 'block', color: deadVolumeMissingInForm ? '#ffb3b3' : '#ddd' }}>Dead volume review status</label>
                             <select id="dead-volume-status" value={wdDeadVolumeStatus} onChange={(e) => setWdDeadVolumeStatus(e.target.value)} style={input} disabled={busy}>
                               <option value="placeholder">Placeholder — needs review</option>
                               <option value="reviewed">Reviewed</option>
                             </select>
-                            <div style={{ color: '#d2c9ac', fontSize: '0.85em', marginTop: 8 }}>
+                            <div style={{ color: deadVolumeMissingInForm ? '#ffb3b3' : '#aaa', fontSize: '0.85em', marginTop: 8 }}>
                               Editing the value returns it to placeholder until reviewed again. Bravo usable residual depends on the tip, liquid, and aspiration method; a reviewed catalog value remains a default, not a qualified method.
                             </div>
                           </div>

@@ -78,17 +78,25 @@ async function run(){
     await page.waitForFunction(()=>document.querySelector('#rack-tip-definition')?.disabled===false);assert.equal(patches.length,3);assert.equal(patches[2].tip_definition_id,'');assert.deepEqual(patches[2].supported_tip_ids,[]);
     assert.equal(await page.getByLabel('Dead volume per well (µL)').count(),0,'A tip box has no dead volume editor');
     await page.getByText('Z liquid plate',{exact:true}).first().click();
-    assert.match(await page.getByText('Dead volume: reviewed').first().innerText(),/reviewed/);
+    assert.equal(await page.getByText(/^Dead volume:/).count(),0,'A numeric dead volume has no status badge');
     await page.getByRole('button',{name:'Pipette/Well Definition'}).click();
     const deadVolume=page.getByLabel('Dead volume per well (µL)');
     const reviewStatus=page.getByLabel('Dead volume review status');
     assert.equal(await deadVolume.inputValue(),'8');assert.equal(await reviewStatus.inputValue(),'reviewed');
     await deadVolume.fill('9');assert.equal(await reviewStatus.inputValue(),'placeholder','Editing a reviewed number requires a new review');
-    await save.click();await page.getByText('Dead volume: placeholder — needs review').first().waitFor();
+    await save.click();await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Save changes')?.disabled===false);
     assert.equal(patches.length,4);assert.equal(patches[3].well_dimensions_mm.dead_volume_ul,9);assert.equal(patches[3].well_dimensions_mm.dead_volume_status,'placeholder');
-    await reviewStatus.selectOption('reviewed');await save.click();await page.getByText('Dead volume: reviewed').first().waitFor();
+    assert.equal(await page.getByText(/^Dead volume:/).count(),0,'An unreviewed numeric value has no status badge');
+    await reviewStatus.selectOption('reviewed');await save.click();await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Save changes')?.disabled===false);
     assert.equal(patches.length,5);assert.equal(patches[4].well_dimensions_mm.dead_volume_status,'reviewed');
-    assert.deepEqual(errors,[]);console.log('Labware metadata browser flow passed (5 mocked saves).');
+    assert.equal(await page.getByText(/^Dead volume:/).count(),0,'A reviewed numeric value has no status badge');
+    await deadVolume.fill('0');await save.click();await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Save changes')?.disabled===false);
+    assert.equal(patches.length,6);assert.equal(patches[5].well_dimensions_mm.dead_volume_ul,0);
+    assert.equal(await page.getByText(/^Dead volume:/).count(),0,'Zero is a present dead volume');
+    await deadVolume.fill('');await save.click();await page.getByText('Dead volume: missing',{exact:true}).first().waitFor();
+    assert.equal(patches.length,7);assert.equal(patches[6].well_dimensions_mm.dead_volume_ul,null);
+    assert.equal(await page.getByText('Dead volume: missing',{exact:true}).count(),2,'Missing dead volume is highlighted in the list and detail header');
+    assert.deepEqual(errors,[]);console.log('Labware metadata browser flow passed (7 mocked saves).');
   }finally{await browser.close();}
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});
