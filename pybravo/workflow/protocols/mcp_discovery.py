@@ -75,6 +75,32 @@ _TOOLS = [
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
                         "openWorldHint": False},
     },
+    {
+        "name": "bravo_propose_liquid_classes",
+        "description": (
+            "Read unverified, cross-profile liquid-class settings for planning in simulation. "
+            "Returns provenance and separate publication context; candidates cannot be pinned or executed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["query"],
+            "properties": {"query": {
+                "type": "object",
+                "required": ["tip_id", "volume_ul"],
+                "properties": {
+                    "tip_id": {"type": "string", "minLength": 1},
+                    "volume_ul": {"type": "number", "exclusiveMinimum": 0},
+                    "reagent_family": {"type": "string"},
+                    "source_labware_id": {"type": "string"},
+                    "destination_labware_id": {"type": "string"},
+                },
+                "additionalProperties": False,
+            }},
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
+                        "openWorldHint": False},
+    },
 ]
 
 
@@ -150,6 +176,8 @@ def dispatch(message: dict[str, Any], fetch: Callable[..., dict[str, Any]] = _fe
         path, payload = "/api/protocols/recipes", None
     elif name == "bravo_lookup_methods" and set(arguments) == {"query"} and isinstance(arguments["query"], dict):
         path, payload = "/api/protocols/methods/lookup", arguments["query"]
+    elif name == "bravo_propose_liquid_classes" and set(arguments) == {"query"} and isinstance(arguments["query"], dict):
+        path, payload = "/api/protocols/liquid-class-proposals", arguments["query"]
     else:
         return _error(request_id, -32602, "Unknown tool or invalid arguments")
 

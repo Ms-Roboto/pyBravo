@@ -17,11 +17,16 @@ def test_mcp_tools_are_read_only_and_proxy_correct_routes():
     listed = dispatch(_rpc("tools/list"))["result"]["tools"]
     assert {tool["name"] for tool in listed} == {
         "bravo_get_capabilities", "bravo_get_methods", "bravo_get_recipes", "bravo_lookup_methods",
+        "bravo_propose_liquid_classes",
     }
     assert all(tool["annotations"]["readOnlyHint"] is True for tool in listed)
     assert all(tool["annotations"]["destructiveHint"] is False for tool in listed)
     lookup = next(tool for tool in listed if tool["name"] == "bravo_lookup_methods")
     assert "dispense_volumes_ul" in lookup["inputSchema"]["properties"]["query"]["properties"]
+    planning = next(tool for tool in listed if tool["name"] == "bravo_propose_liquid_classes")
+    assert planning["inputSchema"]["properties"]["query"]["required"] == ["tip_id", "volume_ul"]
+    assert "reagent_family" in planning["inputSchema"]["properties"]["query"]["properties"]
+    assert "cannot be pinned or executed" in planning["description"]
 
     calls = []
 
@@ -35,6 +40,10 @@ def test_mcp_tools_are_read_only_and_proxy_correct_routes():
         ("bravo_get_recipes", {}),
         ("bravo_lookup_methods", {"query": {"tip_id": "st_10ul", "operation": "distribute",
                                             "volume_ul": 10, "dispense_volumes_ul": [5, 5]}}),
+        ("bravo_propose_liquid_classes", {"query": {
+            "tip_id": "st_10ul", "volume_ul": 5, "reagent_family": "DMSO",
+            "source_labware_id": "labcyte-pp", "destination_labware_id": "labcyte-ldv",
+        }}),
     ]:
         result = dispatch(_rpc("tools/call", {"name": name, "arguments": arguments}), fetch)
         assert result["result"]["content"][0]["type"] == "text"
@@ -45,10 +54,14 @@ def test_mcp_tools_are_read_only_and_proxy_correct_routes():
         ("/api/protocols/recipes", None),
         ("/api/protocols/methods/lookup", {"tip_id": "st_10ul", "operation": "distribute",
                                             "volume_ul": 10, "dispense_volumes_ul": [5, 5]}),
+        ("/api/protocols/liquid-class-proposals", {
+            "tip_id": "st_10ul", "volume_ul": 5, "reagent_family": "DMSO",
+            "source_labware_id": "labcyte-pp", "destination_labware_id": "labcyte-ldv",
+        }),
     ]
     assert dispatch(_rpc("tools/call", {"name": "bravo_get_methods", "arguments": {"write": True}}),
                     fetch)["error"]["code"] == -32602
-    assert len(calls) == 4
+    assert len(calls) == 5
 
 
 def test_stdio_initialization_and_notifications_are_protocol_clean():
