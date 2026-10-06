@@ -53,6 +53,11 @@ async function run(){
     });
     try{
         await page.goto('http://protocol-assistant.test/protocol-assistant');
+        assert.equal(await page.locator('#tab-source').count(),0,'Source is no longer a preparation page');
+        assert.equal(await page.locator('#tab-plan').getAttribute('aria-selected'),'true','Setup opens first');
+        assert.match(await page.locator('#tab-plan').innerText(),/01\s*Setup & interpretation/);
+        assert.match(await page.locator('#tab-review').innerText(),/02\s*Verify & approve/);
+        await page.locator('#source-details > summary').click();
         await page.locator('#protocol-name').fill('Water transfer');
         await page.locator('#protocol-text').fill('Transfer water into the destination plate.\nInspect the plate.');
         await page.locator('#from-text').click();
@@ -72,6 +77,10 @@ async function run(){
         await page.locator('#extract').click();
         await page.locator('[data-path="/steps/0/volume_ul"]').waitFor({state:'visible'});
         await page.waitForFunction(()=>!document.querySelector('[data-path="/steps/0/volume_ul"]').disabled);
+        await page.locator('#steps .citations button').first().click();
+        assert.equal(await page.locator('#tab-plan').getAttribute('aria-selected'),'true','A citation remains in Setup');
+        assert.equal(await page.locator('#source-details').getAttribute('open'),'','A citation opens source evidence');
+        await page.locator('#source-p1').waitFor({state:'visible'});
         assert.equal(await page.locator('#questions .question').count(),2,'Assigned model tipbox still needs explicit confirmation');
         await page.locator('#raw-questions summary').click();
         const confirmTipbox=page.getByRole('button',{name:'Confirm selected tipbox'});
@@ -180,6 +189,18 @@ async function run(){
             'Spent-tip return is offered only with a fresh set per source.');
 
         await page.screenshot({path:'/tmp/protocol-assistant-browser.png',fullPage:true});
+        session={...makeSession('chat-session'),source:{source_id:'chat-source',name:'Designer chat',metadata:{parser:'chat'},paragraphs:[{id:'p1',text:'Transfer water into the destination plate.'},{id:'p2',text:'Inspect the plate.'}]},plan:fresh(plan),setup:fresh(setup)};
+        await page.goto('http://protocol-assistant.test/protocol-assistant?session=chat-session');
+        assert.equal(await page.locator('#tab-plan').getAttribute('aria-selected'),'true','Designer chat sessions open on Setup');
+        assert.equal(await page.locator('#tab-source').count(),0);
+        assert.equal(await page.locator('#source-panel').isVisible(),false,'Source evidence is optional in chat review');
+        await page.locator('#steps .citations button').first().click();
+        assert.equal(await page.locator('#source-details').getAttribute('open'),'');
+        await page.locator('#source-p1').waitFor({state:'visible'});
+        await page.locator('#new-session').click();
+        assert.equal(await page.locator('#tab-plan').getAttribute('aria-selected'),'true');
+        assert.equal(await page.locator('#source-details').getAttribute('open'),'','New document drafts open the optional drawer');
+        assert.equal(await page.locator('#session-status').innerText(),'No protocol loaded');
         assert.deepEqual(errors,[],'UI must not throw browser errors');
         console.log(`Protocol Assistant browser flow passed (${requests.length} mocked API requests).`);
     }catch(error){console.error('Browser errors:',errors);console.error('Notice:',await page.locator('#notice').innerText());await page.screenshot({path:'/tmp/protocol-assistant-failure.png',fullPage:true});throw error;}finally{await browser.close();}

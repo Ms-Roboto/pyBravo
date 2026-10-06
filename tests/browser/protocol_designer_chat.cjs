@@ -74,6 +74,7 @@ function envelope(revision) {
         assert.equal(await page.locator('#protocol-chat-reload').isVisible(),false);
         assert.match(await page.locator('#protocol-chat-questions').innerText(),/How many seconds/);
         assert.equal(await page.locator('#protocol-chat-review').getAttribute('href'),'/protocol-assistant?session=chat1');
+        assert.equal(await page.locator('#protocol-assistant-nav').getAttribute('href'),'/protocol-assistant?session=chat1');
         assert.equal(await page.evaluate(()=>window.designerState.graph._nodes.filter(n=>n.type==='review/ProtocolStep').length),1);
         assert.equal(await page.evaluate(()=>window.designerState.graphCanvas.read_only),true);
         await page.locator('#protocol-chat-message').fill('Wait 2 seconds.');

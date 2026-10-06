@@ -752,7 +752,7 @@ body.protocol-preview-active #viewport-float { display:none; }
     <button class="toolbar-btn" id="btn-execute">Execute</button>
     <div class="toolbar-spacer"></div>
     <button class="toolbar-btn" id="btn-theme-toggle" title="Toggle light and dark mode">Theme: Dark</button>
-    <a href="/protocol-assistant" class="toolbar-nav">Protocol Assistant</a>
+    <a href="/protocol-assistant" class="toolbar-nav" id="protocol-assistant-nav">Protocol Assistant</a>
     <a href="/drafter-dashboard" class="toolbar-nav" title="Drafter telemetry — drafts, edits, citation retention">&#x1F4CA; Drafter</a>
     <a href="/" class="toolbar-nav">Control Panel</a>
     <button class="toolbar-btn" id="btn-quit" style="background: #5a1515; color: #ffb4b4; border-color: #803030;" title="Kill the backend server">Quit</button>
@@ -7949,7 +7949,9 @@ function renderProtocolConversation() {
     document.getElementById('protocol-chat-new').disabled = protocolChat.pending;
     document.getElementById('protocol-chat-reload').disabled = protocolChat.pending;
     const link = document.getElementById('protocol-chat-review'); link.hidden = !envelope?.session?.id;
-    if (envelope?.session?.id) link.href = '/protocol-assistant?session=' + encodeURIComponent(envelope.session.id);
+    const assistantUrl = envelope?.session?.id ? '/protocol-assistant?session=' + encodeURIComponent(envelope.session.id) : '/protocol-assistant';
+    link.href = assistantUrl;
+    document.getElementById('protocol-assistant-nav').href = assistantUrl;
 }
 function adoptProtocolChat(envelope, remember = true) {
     protocolChat.envelope = envelope;
@@ -8154,7 +8156,12 @@ async function init() {
     // Start auto-save loop
     setInterval(scheduleAutoSave, 30000);
     console.log('Designer initialized');
-    await resumeProtocolChat({activate: !requestedWorkflow});
+    const openProtocolChat = new URLSearchParams(window.location.search).get('protocol-chat') === '1';
+    await resumeProtocolChat({activate: openProtocolChat || !requestedWorkflow});
+    if (openProtocolChat) {
+        setProtocolChatOpen(true);
+        document.getElementById('protocol-chat-message').focus();
+    }
 }
 
 init();

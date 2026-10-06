@@ -55,6 +55,9 @@ function sourcePdf() {
     const fixture = sourcePdf();
     try {
         await page.goto(base + '/protocol-assistant');
+        assert.equal(await page.locator('#tab-source').count(), 0, 'Source is an optional drawer, not a preparation page');
+        assert.equal(await page.locator('#tab-plan').getAttribute('aria-selected'), 'true');
+        await page.locator('#source-details > summary').click();
         await page.locator('#protocol-file').setInputFiles({ name: 'Browser acceptance.pdf', mimeType: 'application/pdf', buffer: fixture });
         await page.locator('#ingest').click();
         await page.locator('#original-pdf').waitFor({ state: 'visible' });
