@@ -335,6 +335,130 @@ function renderGuidedSetup(){}
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
 
 
+def test_liquid_class_proposal_is_grouped_explained_and_planning_only(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in (
+        "liquidSourceOrder", "liquidClassProposalQueries", "sharedSourceLiquidMissing",
+        "applySharedSourceLiquidFamily", "liquidClassProposalPath", "liquidClassProposalDecision",
+        "recordLiquidClassProposal", "renderLiquidClassProposals",
+        "refreshLiquidClassProposals", "decide",
+    ):
+        match = re.search(rf"(?:async )?function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+const clone=value=>JSON.parse(JSON.stringify(value));
+function el(tag,attrs={},...children){const node={tag,attrs,children:children.flat(Infinity).filter(x=>x!=null),
+  value:'',disabled:!!attrs.disabled,listeners:{},append(...items){this.children.push(...items);},
+  addEventListener(event,handler){this.listeners[event]=handler;}};return node;}
+function text(node){return typeof node==='string'?node:node==null?'':
+  (node.children||[]).map(text).join(' ');}
+function buttons(node){return node==null||typeof node==='string'?[]:
+  [...(node.tag==='button'?[node]:[]),...(node.children||[]).flatMap(buttons)];}
+function inputs(node){return node==null||typeof node==='string'?[]:
+  [...(node.tag==='input'?[node]:[]),...(node.children||[]).flatMap(inputs)];}
+const panel={hidden:true,children:[],replaceChildren(...items){this.children=items;},
+  append(...items){this.children.push(...items);}};
+function $(id){assert.equal(id,'liquid-class-proposals');return panel;}
+function localLiquidClassGap(){return 'No active class';}
+function proposedMethodRack(){return {id:'tips_source_4'};}
+function methodQuery(){return {tip_id:'st_10ul',volume_ul:5,reagent_family:'DMSO',
+  source_labware_id:'384-pp',destination_labware_id:'1536-ldv'};}
+function safeMethodSourceUrl(value){return value?.startsWith('https://')?value:null;}
+let dirtied=0,lookups=0,notice='';
+function dirty(){dirtied++;}
+function notify(value){notice=value;}
+function renderPlan(){}
+const steps=Array.from({length:8},()=>({kind:'transfer',volume_ul:5}));
+const state={session:{id:'draft',setup:{},plan:{steps,decisions:[]}},
+  context:{machine_id:'SIMULATED',head_type:'HT_384_D_70',context_hash:'catalog',liquid_classes:[]},
+  liquidClassProposals:null,liquidClassProposalKey:null,liquidClassProposalRequest:0,busy:false};
+const candidate={liquid_class_id:'liq-physical',name:'ST10 low volume',
+  source_machine_id:'04-91-62-CF-7B-B0',source_head_type:'HT_384_D_70',source_tip_id:'st_10ul',
+  status:'imported_unverified',execution_ready:false,can_apply_to_plan:false,
+  ranking_reason:'Nearest recorded calibration point, not reagent-qualified',
+  reasons:['Matches exact ST10 tip and 5 µL range'],caveats:[],
+  provenance:{source_type:'local_config',source_path:'config/liquid_classes.yaml',
+    source_digest:'digest-1',note:'Physical class settings, not approved for simulation.'},
+  aspirate:{w_velocity_ul_s:1},dispense:{w_velocity_ul_s:2},
+  source_field_origins:{'aspirate.w_velocity_ul_s':'imported_config',
+    'dispense.w_velocity_ul_s':'imported_config','equation.control_points':'imported_config'},
+  equation:{control_points:[{desired_ul:5,commanded_ul:5.01}]},
+  missing_fields:['DMSO PP-to-LDV method review']};
+async function api(path,options){assert.equal(path,'/liquid-class-proposals');lookups++;
+  const query=JSON.parse(options.body);assert.equal(query.reagent_family,'DMSO');
+  return {summary_reason:'Planning-only cross-profile discovery',
+    planning_liquid_class_candidates:[candidate],
+    references:[{source_url:'https://example.org/dmso',note:'DMSO context only',
+      qualifies_numeric_settings:false}]};}
+"""
+        + "\n".join(functions)
+        + """
+(async()=>{
+  assert.equal(liquidClassProposalQueries().length,1);
+  await refreshLiquidClassProposals();
+  assert.equal(lookups,1,'Eight identical transfers should need one lookup');
+  assert.equal(state.liquidClassProposals.items[0].step_count,8);
+  const content=panel.children.map(text).join(' ');
+  assert.match(content,/Planning candidate only/);
+  assert.match(content,/04-91-62-CF-7B-B0/);
+  assert.match(content,/DMSO suitability/);
+  assert.match(content,/DMSO context only/);
+  assert.match(content,/Nearest recorded calibration point, not reagent-qualified/);
+  assert.match(content,/imported_config/);
+  assert.match(content,/does not qualify the class settings/);
+  assert.match(content,/config\\/liquid_classes.yaml/);
+  assert.equal(state.session.setup.liquid_class,undefined);
+  assert.ok(steps.every(step=>!step.method_ref));
+  const keep=panel.children.flatMap(buttons).find(button=>text(button)==='Keep as candidate');
+  assert.ok(keep);
+  keep.attrs.onclick();
+  assert.equal(dirtied,1);
+  assert.match(notice,/No liquid class or method was applied/);
+  const decision=state.session.plan.decisions[0];
+  assert.match(decision.path,/^\\/planning\\/liquid_class_candidates\\//);
+  assert.equal(decision.value.disposition,'shortlisted');
+  assert.equal(decision.value.source_digest,'digest-1');
+  assert.equal(decision.value.execution_ready,false);
+  assert.equal(state.session.setup.liquid_class,undefined);
+  assert.ok(steps.every(step=>!step.method_ref));
+  const reject=panel.children.flatMap(buttons).find(button=>text(button)==='Reject suggestion');
+  reject.attrs.onclick();
+  assert.equal(state.session.plan.decisions.length,1,'Reject replaces this candidate decision');
+  assert.equal(state.session.plan.decisions[0].value.disposition,'rejected');
+  state.session.plan.materials=[1,2,3,4].map(i=>({id:'source_'+i,role:'liquid',reagent_family:null}));
+  steps.forEach((step,index)=>{step.source='source_'+(Math.floor(index/2)+1);});
+  assert.equal(sharedSourceLiquidMissing(),true);
+  renderLiquidClassProposals();
+  assert.match(panel.children.map(text).join(' '),/What liquid is in the source plates/);
+  const input=panel.children.flatMap(inputs)[0];
+  input.value='DMSO';input.listeners.input();
+  const apply=panel.children.flatMap(buttons).find(button=>text(button)==='Use for all source plates');
+  assert.ok(apply&&!apply.disabled);
+  apply.attrs.onclick();
+  assert.deepEqual(state.session.plan.materials.map(item=>item.reagent_family),['DMSO','DMSO','DMSO','DMSO']);
+  assert.equal(state.session.plan.decisions.filter(item=>item.path.endsWith('/reagent_family')).length,4);
+  assert.equal(state.session.setup.liquid_class,undefined);
+  assert.ok(steps.every(step=>!step.method_ref));
+  const original=state.liquidClassProposals.items[0].query;
+  const different={...original,reagent_family:'aqueous'};
+  recordLiquidClassProposal(candidate,different,'shortlisted');
+  const planning=state.session.plan.decisions.filter(item=>item.path.startsWith('/planning/liquid_class_candidates/'));
+  assert.equal(planning.length,2,'The same class may be evaluated for two distinct liquid queries');
+  assert.equal(liquidClassProposalDecision(candidate,original),'rejected');
+  assert.equal(liquidClassProposalDecision(candidate,different),'shortlisted');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    )
+    script = tmp_path / "liquid-class-proposal.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
 def test_bulk_setup_proposals_only_fill_review_draft_choices(tmp_path):
     html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
     functions = []

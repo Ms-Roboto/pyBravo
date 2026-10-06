@@ -38,7 +38,7 @@
 <div class="panel" id="source-panel" hidden><div class="panel-title"><div><h2>Review the source passages</h2><p class="muted" id="source-description"></p></div><div class="actions" style="margin:0"><a id="original-pdf" class="button small" target="_blank" rel="noopener" hidden>Open original PDF</a><button id="select-all" class="small">Select all</button><button id="select-none" class="small">Clear</button></div></div><div id="source-paragraphs" class="source-list"></div><label class="check"><input type="checkbox" id="source-reviewed"><span>I have checked these passages against the original document and selected the procedure to automate.</span></label><div class="actions end"><button data-go="plan" class="primary">Continue to setup</button></div></div>
 <div class="panel" id="source-extract-panel"><div class="panel-title"><div><h2>Interpret the selected procedure</h2><p class="muted">The local model proposes a structured plan. Missing quantities and experimental choices remain open for review.</p></div></div><label class="field">Experiment context / extraction instructions<textarea id="extraction-instructions" placeholder="For example: use only the plate preparation section; preserve the centrifugation step as a manual handoff."></textarea></label><div class="actions"><button id="extract" class="primary">Interpret with local LLM</button><span class="muted" id="extraction-status"></span></div></div>
 </details>
-<div class="panel" id="setup-panel"><div class="panel-title"><div><h2>Experiment setup</h2><p class="muted" id="instrument-summary">Loading the active instrument catalog…</p><p class="muted" style="font-size:12px">Catalog corrections: <a href="/labware-editor" target="_blank" rel="noopener">labware geometry</a> · <a href="/tip-editor" target="_blank" rel="noopener">tip definitions</a> · <a href="/liquid-class-editor" target="_blank" rel="noopener">liquid classes</a>. Validation uses the catalog dimensions, not the labware name.</p></div><span class="badge" id="model-status">Local model</span></div><div id="guided-setup" class="row-card" hidden></div><details id="setup-recommendations-details"><summary>Detailed capability recommendations</summary><div id="setup-recommendations" class="row-card" hidden></div></details><details id="method-preview-details"><summary>Automatic method proposals and evidence</summary><div id="method-preview" class="row-card" hidden></div></details><details id="setup-advanced"><summary>Edit advanced head, tip, and liquid setup</summary><div class="fields" id="setup-fields"></div><div id="setup-tipbox-choices" class="row-card" style="margin-top:18px"></div><div class="actions"><label class="field" style="min-width:240px">Reusable setup<select id="setup-picker"><option value="">Choose a saved setup</option></select></label><button id="apply-setup">Apply setup</button><button id="prepare-deck">Configure materials</button><button id="suggest-methods">Suggest liquid methods</button><label class="field" style="flex:1;min-width:170px">Save setup as<input id="setup-name" placeholder="A descriptive laboratory setup name"></label><button id="save-setup">Save setup</button></div></details></div>
+<div class="panel" id="setup-panel"><div class="panel-title"><div><h2>Experiment setup</h2><p class="muted" id="instrument-summary">Loading the active instrument catalog…</p><p class="muted" style="font-size:12px">Catalog corrections: <a href="/labware-editor" target="_blank" rel="noopener">labware geometry</a> · <a href="/tip-editor" target="_blank" rel="noopener">tip definitions</a> · <a href="/liquid-class-editor" target="_blank" rel="noopener">liquid classes</a>. Validation uses the catalog dimensions, not the labware name.</p></div><span class="badge" id="model-status">Local model</span></div><div id="liquid-class-proposals" class="row-card" hidden></div><div id="guided-setup" class="row-card" hidden></div><details id="setup-recommendations-details"><summary>Detailed capability recommendations</summary><div id="setup-recommendations" class="row-card" hidden></div></details><details id="method-preview-details"><summary>Automatic method proposals and evidence</summary><div id="method-preview" class="row-card" hidden></div></details><details id="setup-advanced"><summary>Edit advanced head, tip, and liquid setup</summary><div class="fields" id="setup-fields"></div><div id="setup-tipbox-choices" class="row-card" style="margin-top:18px"></div><div class="actions"><label class="field" style="min-width:240px">Reusable setup<select id="setup-picker"><option value="">Choose a saved setup</option></select></label><button id="apply-setup">Apply setup</button><button id="prepare-deck">Configure materials</button><button id="suggest-methods">Suggest liquid methods</button><label class="field" style="flex:1;min-width:170px">Save setup as<input id="setup-name" placeholder="A descriptive laboratory setup name"></label><button id="save-setup">Save setup</button></div></details></div>
 <div id="plan-content" hidden><div id="guided-plan-summary" class="row-card" hidden></div><details id="plan-details"><summary>Edit individual materials, deck positions and transfer steps</summary><div class="panel"><div class="panel-title"><div><h2>Materials &amp; deck assignments</h2><p class="muted">Volumes are per well unless a well-specific override is supplied. Enter 0 µL for an empty destination. For plates sharing a deck position, assign stack levels from bottom 0 upward.</p></div><button id="add-material" class="small">Add material</button></div><div id="materials"></div></div><div class="panel"><div class="panel-title"><div><h2>Review the experimental steps</h2><p class="muted">Edit the interpretation and follow its source links. External operations remain explicit manual instructions.</p></div><button id="add-step" class="small">Add step</button></div><label class="field" style="margin-bottom:16px">Reason for corrections<input id="correction-reason" placeholder="For example, confirmed volume against laboratory SOP v3"></label><div id="steps"></div></div></details><div class="panel" id="questions-panel"><div class="panel-title"><div><h2>Individual questions and exceptions</h2><p class="muted">Use these fields when a plate, well, or tip rack differs from the guided setup. Answers are recorded as scientist decisions.</p></div></div><details id="raw-questions"><summary id="raw-questions-summary">Review individual questions</summary><div id="questions"></div></details></div><div class="actions end"><button data-go="review" class="primary">Review &amp; validate</button></div></div>
 </section>
 <section id="review-view" role="tabpanel" aria-labelledby="tab-review" hidden>
@@ -53,7 +53,7 @@
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {session:null, context:{}, capabilities:null, setups:[], view:'plan', dirty:false, busy:false, poll:null, sourceReviewedKey:null, sourceDetailsSession:null, methodPreview:null, methodPreviewKey:null, methodPreviewRequest:0, setupRecommendations:null, setupRecommendationKey:null, setupRecommendationRequest:0, setupRecommendationTimer:null, guidedDraft:null, guidedDetailsSession:null, issueDetailsKey:null};
+const state = {session:null, context:{}, capabilities:null, setups:[], view:'plan', dirty:false, busy:false, poll:null, sourceReviewedKey:null, sourceDetailsSession:null, methodPreview:null, methodPreviewKey:null, methodPreviewRequest:0, liquidClassProposals:null, liquidClassProposalKey:null, liquidClassProposalRequest:0, sharedSourceLiquidDraft:'', setupRecommendations:null, setupRecommendationKey:null, setupRecommendationRequest:0, setupRecommendationTimer:null, guidedDraft:null, guidedDetailsSession:null, issueDetailsKey:null};
 const clone = value => JSON.parse(JSON.stringify(value));
 // getRandomValues is also available on ordinary laboratory HTTP origins.
 const randomFragment = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), value => value.toString(16).padStart(2, '0')).join('');
@@ -199,6 +199,198 @@ function localLiquidClassGap(query){
     if(rows.some(row=>row.machine_id===context.machine_id&&row.head_type===context.head_type&&
         row.tip_id===query.tip_id))return '';
     return `No local liquid class is available for ${context.machine_id||'this machine'} / ${context.head_type||'this head'} / ${query.tip_id}. A compatible, reviewed liquid method is still needed.`;
+}
+function liquidClassProposalQueries(){
+    const plan=state.session?.plan,queries=new Map();
+    function visit(steps){
+        for(const step of list(steps)){
+            if(step.kind==='repeat'){visit(step.steps);continue;}
+            if(!['transfer','distribute','mix'].includes(step.kind)||step.method_ref)continue;
+            const rack=proposedMethodRack(step),method=methodQuery(step,rack.id);
+            if(!method||!localLiquidClassGap(method))continue;
+            const query={tip_id:method.tip_id,volume_ul:method.volume_ul,
+                reagent_family:method.reagent_family,source_labware_id:method.source_labware_id,
+                destination_labware_id:method.destination_labware_id};
+            const key=JSON.stringify(query),entry=queries.get(key);
+            if(entry)entry.step_count++;
+            else queries.set(key,{query,step_count:1});
+        }
+    }
+    visit(plan?.steps);
+    return [...queries.values()];
+}
+function sharedSourceLiquidMissing(){
+    const plan=state.session?.plan,sourceIds=new Set(liquidSourceOrder(plan?.steps));
+    if(!sourceIds.size)return false;
+    const sources=list(plan?.materials).filter(material=>sourceIds.has(material.id));
+    if(sources.length!==sourceIds.size||sources.some(material=>material.reagent_family))return false;
+    let hasLiquidStep=false,hasOverride=false;
+    function visit(steps){for(const step of list(steps)){
+        if(step.kind==='repeat'){visit(step.steps);continue;}
+        if(['transfer','distribute','mix'].includes(step.kind)){
+            hasLiquidStep=true;if(step.reagent_family)hasOverride=true;
+        }
+    }}
+    visit(plan?.steps);
+    return hasLiquidStep&&!hasOverride;
+}
+function applySharedSourceLiquidFamily(value){
+    const family=String(value||'').trim(),plan=state.session?.plan;
+    if(!family||family.length>120)throw new Error('Enter a source liquid family of at most 120 characters.');
+    if(!sharedSourceLiquidMissing())throw new Error('A source or step already has a liquid family. Review those values individually.');
+    const sourceIds=new Set(liquidSourceOrder(plan.steps));
+    for(const [index,material] of plan.materials.entries())if(sourceIds.has(material.id)){
+        material.reagent_family=family;
+        decide(`/materials/${index}/reagent_family`,family,
+            'Scientist identified this source liquid family for method lookup; class and method suitability still need review.');
+    }
+    state.sharedSourceLiquidDraft='';dirty();renderPlan();
+    notify(`${family} recorded for all source plates and inherited by their transfer steps. Liquid-class candidates are refreshing; no method was approved.`);
+}
+function liquidClassProposalPath(candidate,query){
+    return '/planning/liquid_class_candidates/'+encodeURIComponent(candidate.liquid_class_id)+'/'+
+        encodeURIComponent(JSON.stringify(query));
+}
+function liquidClassProposalDecision(candidate,query){
+    const id=candidate.liquid_class_id;
+    if(!id)return null;
+    const path=liquidClassProposalPath(candidate,query);
+    const current=list(state.session?.plan?.decisions).find(row=>row.path===path);
+    const sourceDigest=candidate.provenance?.source_digest;
+    return current?.value?.source_digest===sourceDigest?current.value?.disposition:null;
+}
+function recordLiquidClassProposal(candidate,query,disposition){
+    if(!state.session?.plan||!candidate?.liquid_class_id||!['shortlisted','rejected'].includes(disposition))return;
+    const sourceDigest=candidate.provenance?.source_digest;
+    const path=liquidClassProposalPath(candidate,query);
+    const value={disposition,liquid_class_id:candidate.liquid_class_id,source_machine_id:candidate.source_machine_id||candidate.machine_id,
+        source_digest:sourceDigest,query,execution_ready:false};
+    decide(path,value,disposition==='shortlisted'?
+        'Scientist kept this cross-profile liquid-class record as a planning candidate only; class and method review are still required.':
+        'Scientist rejected this cross-profile liquid-class planning candidate.');
+    dirty();renderLiquidClassProposals();
+    notify(disposition==='shortlisted'?
+        'Candidate kept for method review. No liquid class or method was applied to the executable draft. Save this decision when ready.':
+        'Candidate rejected. No executable settings changed. Save this decision when ready.');
+}
+function renderLiquidClassProposals(){
+    const panel=$('liquid-class-proposals'),data=state.liquidClassProposals;
+    if(!panel)return;
+    panel.hidden=!data?.items?.length;
+    if(panel.hidden)return;
+    panel.replaceChildren(el('h3',{},'Liquid-class starting points from the knowledge base'),
+        el('p',{class:'muted'},'These are catalog records from another machine profile. They are options to inspect or reject, not approved settings for this active instrument. Keeping one here does not fill the executable liquid-class field or pin a method.'));
+    if(sharedSourceLiquidMissing()){
+        const input=el('input',{type:'text',maxlength:120,placeholder:'For example, DMSO or aqueous buffer',
+            'aria-label':'Liquid family in every source plate'});
+        input.value=state.sharedSourceLiquidDraft||'';
+        const apply=el('button',{type:'button',class:'small',disabled:state.busy||!input.value.trim(),
+            onclick:()=>{try{applySharedSourceLiquidFamily(input.value);}catch(error){notify(error.message,true);}}},
+            'Use for all source plates');
+        input.addEventListener('input',()=>{state.sharedSourceLiquidDraft=input.value;apply.disabled=state.busy||!input.value.trim();});
+        panel.append(el('div',{class:'row-card'},el('label',{class:'field'},
+            'What liquid is in the source plates?',input,
+            el('small',{},'Enter it once for every source plate. Their transfer steps inherit it for method lookup; this does not approve a liquid class.')),
+            el('div',{class:'actions'},apply)));
+    }
+    for(const item of data.items){
+        const query=item.query,label=[`${query.volume_ul} µL`,query.reagent_family||'liquid not identified',
+            `${query.tip_id} tips`,`${item.step_count} step${item.step_count===1?'':'s'}`].join(' · ');
+        const plateName=id=>list(state.context?.labware).find(row=>row.id===id)?.name||id||'unidentified plate';
+        const sourceName=plateName(query.source_labware_id),destinationName=plateName(query.destination_labware_id);
+        const group=el('div',{class:'row-card'},el('strong',{},label));
+        if(item.status==='loading'){group.append(el('p',{class:'muted'},'Checking compatible local class records…'));panel.append(group);continue;}
+        if(item.error){group.append(el('p',{class:'issue error'},'Proposal lookup failed: '+item.error));panel.append(group);continue;}
+        if(item.summary_reason)group.append(el('p',{class:'muted'},item.summary_reason));
+        for(const reference of list(item.references)){
+            const href=safeMethodSourceUrl(reference.source_url);
+            const referenceNote=reference.note||'Published context only; no local numeric setting is qualified by this source.';
+            group.append(el('p',{class:'muted',style:'margin:7px 0'},
+                href?el('a',{href,target:'_blank',rel:'noopener noreferrer'},reference.title||'Published context'):null,
+                `${href?' · ':''}${referenceNote} ${reference.qualifies_numeric_settings===false?'It does not qualify the class settings shown below.':''}`));
+        }
+        const candidates=list(item.candidates);
+        if(!candidates.length){group.append(el('p',{class:'issue warn'},'No matching class record can be proposed for this tip and volume. A reviewed class and method must be added for the active machine.'));
+            group.append(el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Open liquid-class editor'));panel.append(group);continue;}
+        const alternatives=candidates.length>1?el('details',{},
+            el('summary',{},`Show ${Math.min(candidates.length-1,2)} other class option${candidates.length===2?'':'s'}`)):null;
+        for(const [candidateIndex,candidate] of candidates.slice(0,3).entries()){
+            const id=candidate.liquid_class_id,sourceMachine=candidate.source_machine_id||candidate.machine_id||'unknown machine';
+            const sourceHead=candidate.source_head_type||candidate.head_type||'unknown head';
+            const sourceTip=candidate.source_tip_id||candidate.tip_id||'unknown tip';
+            const card=el('div',{class:'row-card',style:'margin:10px 0 0'},
+                el('strong',{},candidate.name||id||'Unnamed class'),
+                el('span',{class:'badge warn',style:'margin-left:8px'},'Planning candidate only'),
+                el('p',{class:'muted',style:'margin:7px 0'},
+                    `Source: ${sourceMachine} / ${sourceHead} / ${sourceTip}. Class ${id||'unknown'}; ${candidate.status||'unverified'}.`));
+            if(candidate.ranking_reason)card.append(el('p',{class:'muted',style:'margin:5px 0'},candidate.ranking_reason));
+            for(const reason of list(candidate.reasons))card.append(el('p',{class:'muted',style:'margin:5px 0'},reason));
+            const caveats=list(candidate.caveats);
+            if(/DMSO/i.test(query.reagent_family||'')&&!caveats.some(value=>/DMSO/i.test(value)))
+                caveats.unshift(`DMSO suitability for this ${query.volume_ul} µL transfer from ${sourceName} to ${destinationName} has not been established by this catalog record.`);
+            for(const caveat of caveats)card.append(el('p',{class:'issue warn',style:'margin:7px 0'},caveat));
+            const details=el('details',{},el('summary',{},'Inspect motion settings, calibration and provenance'));
+            const keys=['w_velocity_ul_s','w_acceleration_ul_s2','post_delay_ms','z_in_velocity_mm_s',
+                'z_in_acceleration_mm_s2','z_out_velocity_mm_s','z_out_acceleration_mm_s2'];
+            for(const phase of ['aspirate','dispense']){
+                const settings=candidate[phase]||{};
+                details.append(el('strong',{style:'display:block;margin-top:8px'},phase==='aspirate'?'Aspirate':'Dispense'));
+                const table=el('table',{},el('tbody',{},...keys.map(key=>el('tr',{},
+                    el('td',{},key.replaceAll('_',' ')),el('td',{class:'mono'},settings[key]??'not recorded'),
+                    el('td',{class:'muted'},candidate.source_field_origins?.[`${phase}.${key}`]||'origin unrecorded')))));
+                details.append(el('div',{class:'table-wrap'},table));
+            }
+            const points=list(candidate.equation?.control_points);
+            details.append(el('p',{class:'muted',style:'margin-top:8px'},
+                `Calibration points (desired → commanded µL): ${points.length?points.map(point=>`${point.desired_ul} → ${point.commanded_ul}`).join(', '):'not recorded'}. Origin: ${candidate.source_field_origins?.['equation.control_points']||'unrecorded'}.`));
+            const provenance=candidate.provenance||{};
+            details.append(el('p',{class:'muted'},
+                `Provenance: ${provenance.source_type||'unknown'} · ${provenance.source_path||'source path unrecorded'} · digest ${provenance.source_digest||'unrecorded'}. ${provenance.note||''}`));
+            if(list(candidate.missing_fields).length)details.append(el('p',{class:'muted'},
+                'Still needed: '+candidate.missing_fields.join('; ')+'.'));
+            card.append(details);
+            const decision=liquidClassProposalDecision(candidate,query);
+            card.append(el('div',{class:'actions'},
+                el('button',{type:'button',class:'small',disabled:state.busy,
+                    onclick:()=>recordLiquidClassProposal(candidate,query,'shortlisted')},
+                    decision==='shortlisted'?'Kept for method review':'Keep as candidate'),
+                el('button',{type:'button',class:'small',disabled:state.busy,
+                    onclick:()=>recordLiquidClassProposal(candidate,query,'rejected')},
+                    decision==='rejected'?'Rejected':'Reject suggestion')));
+            (candidateIndex===0?group:alternatives).append(card);
+        }
+        if(alternatives)group.append(alternatives);
+        group.append(el('p',{class:'muted',style:'margin:10px 0 0'},
+            `Next: confirm the liquid composition, review a class on the intended Bravo, and create a ${query.volume_ul} µL method from ${sourceName} to ${destinationName} with aspirate and dispense heights. Then pin the reviewed method and run validation and strict simulation.`));
+        group.append(el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Review liquid classes'));
+        panel.append(group);
+    }
+    if(data.omitted)panel.append(el('p',{class:'muted'},`${data.omitted} additional distinct liquid conditions were not queried here. Inspect their individual steps.`));
+}
+async function refreshLiquidClassProposals(){
+    const all=liquidClassProposalQueries(),selected=all.slice(0,12);
+    if(!selected.length){state.liquidClassProposalKey=null;state.liquidClassProposals=null;
+        ++state.liquidClassProposalRequest;renderLiquidClassProposals();return;}
+    const key=JSON.stringify([state.session?.id,state.context?.context_hash,state.context?.machine_id,
+        state.context?.head_type,selected]);
+    if(key===state.liquidClassProposalKey)return;
+    state.liquidClassProposalKey=key;
+    const request=++state.liquidClassProposalRequest;
+    const items=selected.map(row=>({...row,status:'loading'}));
+    state.liquidClassProposals={items,omitted:all.length-selected.length};renderLiquidClassProposals();
+    const results=await Promise.all(selected.map(async row=>{
+        try{return await api('/liquid-class-proposals',{method:'POST',body:JSON.stringify(row.query)});}
+        catch(error){return {error:error.message};}
+    }));
+    if(request!==state.liquidClassProposalRequest||key!==state.liquidClassProposalKey)return;
+    for(let index=0;index<items.length;index++){
+        const response=results[index];
+        if(response.error){items[index].status='error';items[index].error=response.error;continue;}
+        items[index].status='ready';items[index].summary_reason=response.summary_reason||'';
+        items[index].references=list(response.references);
+        items[index].candidates=list(response.planning_liquid_class_candidates??response.candidates);
+    }
+    renderLiquidClassProposals();
 }
 function methodNumber(label,value='',help=''){
     const field=el('label',{class:'field'},label),input=el('input',{type:'number',min:0,step:'any'});
@@ -605,7 +797,7 @@ async function suggestMethods(){
     notify(`${applied} method${applied===1?'':'s'} proposed${closest?` (${closest} closest matches require difference review)`:''}; ${unresolved} action${unresolved===1?'':'s'} still need catalog or method information. Save, validate and simulate before approval.`);
 }
 function planSkeleton(){return {schema_version:'1',name:state.session?.name||$('protocol-name').value.trim()||'Untitled protocol',description:'',materials:[],steps:[],decisions:[],questions:[]};}
-function acceptSession(data){const session=data.session??data;if(!session.id)throw new Error('The server did not return a protocol session.');if(state.session?.id!==session.id||state.session?.revision!==session.revision){$('plan-reviewed').checked=false;$('deck-confirmed').checked=false;}state.session=session;state.dirty=false;localStorage.setItem('pybravo-protocol-session',session.id);const url=new URL(location.href);url.searchParams.set('session',session.id);history.replaceState(null,'',url);render();refreshMethodPreview();schedulePoll();}
+function acceptSession(data){const session=data.session??data;if(!session.id)throw new Error('The server did not return a protocol session.');if(state.session?.id!==session.id)state.sharedSourceLiquidDraft='';if(state.session?.id!==session.id||state.session?.revision!==session.revision){$('plan-reviewed').checked=false;$('deck-confirmed').checked=false;}state.session=session;state.dirty=false;localStorage.setItem('pybravo-protocol-session',session.id);const url=new URL(location.href);url.searchParams.set('session',session.id);history.replaceState(null,'',url);render();refreshMethodPreview();schedulePoll();}
 async function save(){
     if(!state.session||!state.dirty)return;
     const invalid=[...document.querySelectorAll('input,textarea,select')].find(input=>{const disabled=input.disabled;input.disabled=false;const valid=input.checkValidity();input.disabled=disabled;return !valid;});
@@ -1117,8 +1309,8 @@ function renderGuidedSetup(){
     host.append(reusePanel);
 
     const classGap=localLiquidClassGap({tip_id:'st_10ul'});
-    if(classGap)host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
-        el('p',{style:'margin:6px 0 0'},`${classGap} The assistant cannot invent the liquid class, pipetting height, or motion settings. If this protocol is for a physical Bravo, load its profile and review a method for the source liquid and PP-to-LDV transfer before strict simulation.`),
+    if(classGap&&!liquidClassProposalQueries().length)host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
+        el('p',{style:'margin:6px 0 0'},`${classGap} Identify the liquid and review a class and PP-to-LDV method on the intended Bravo before strict simulation.`),
         el('a',{href:'/',target:'_blank',rel:'noopener'},'Open Control Panel'),' · ',
         el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Open liquid-class editor')));
     else if(list(state.methodPreview?.items).some(item=>item.status==='needs_curation'))
@@ -1256,7 +1448,7 @@ function renderSetup(){
     $('instrument-summary').textContent=`${active.name??state.context.profile_name??'Active instrument'} · ${typeof head==='object'?head.name??JSON.stringify(head):head}. The active profile is checked during validation.`;
     const model=state.context.model??state.context.llm?.model??'qwen';
     $('model-status').textContent=`${model} · local LLM`;
-    if(!s){$('setup-fields').replaceChildren(el('p',{class:'muted'},'Load a protocol to choose its experiment setup.'));renderGuidedSetup();renderSetupRecommendations();return;}
+    if(!s){$('setup-fields').replaceChildren(el('p',{class:'muted'},'Load a protocol to choose its experiment setup.'));renderGuidedSetup();renderSetupRecommendations();refreshLiquidClassProposals();return;}
     s.setup??={};
     const options=state.capabilities?.setup_options??{};
     const modeLabels={all_barrels:'All barrels',row:'Row',column:'Column',rectangle:'Rectangle',single_barrel:'Single barrel'};
@@ -1315,6 +1507,7 @@ function renderSetup(){
     $('setup-fields').replaceChildren(...fields);
     renderGuidedSetup();
     scheduleSetupRecommendations();
+    refreshLiquidClassProposals();
 }
 function verifiedFullTipCount(material){
     const choice=verifiedTipboxChoices().find(item=>item.labware_id===material.labware_id
