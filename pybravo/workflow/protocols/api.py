@@ -98,6 +98,10 @@ class EditRequest(Payload):
     selected_paragraph_ids: list[str] | None = None
 
 
+class ApplyCatalogDeadVolumesRequest(Payload):
+    revision: int = Field(ge=1)
+
+
 class ExtractRequest(Payload):
     revision: int | None = None
     selected_paragraph_ids: list[str] | None = None
@@ -441,6 +445,41 @@ async def edit_protocol(identity: str, request: EditRequest):
             raise HTTPException(422, str(exc)) from exc
     try:
         return _store.update_session(identity, changes, revision=request.revision)
+    except RevisionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/api/protocols/{identity}/apply-reviewed-dead-volumes")
+async def apply_reviewed_dead_volumes(identity: str, request: ApplyCatalogDeadVolumesRequest):
+    """Fill only missing source residuals from reviewed catalog plate types.
+
+    This records catalog provenance without claiming a scientist decision or
+    confirming starting liquid, deck contents, tip inventory, or method safety.
+    """
+    from .dead_volume import seed_reviewed_source_dead_volumes
+
+    record = _record(identity)
+    if not record.get("plan"):
+        raise HTTPException(409, "Extract or enter a protocol before applying catalog defaults.")
+    context = machine_context(_bravo())
+    candidate = ProtocolPlan.model_validate(record["plan"])
+    seeded = seed_reviewed_source_dead_volumes(candidate, context)
+    if seeded:
+        plan = copy.deepcopy(record["plan"])
+        for row in seeded:
+            index = int(row["path"].split("/")[2])
+            plan["materials"][index]["dead_volume_ul"] = row["value"]
+        metadata = copy.deepcopy(record.get("model") or {})
+        prior = metadata.get("catalog_defaults")
+        metadata["catalog_defaults"] = (prior if isinstance(prior, list) else []) + [
+            {**row, "catalog_context_hash": context.get("context_hash")} for row in seeded
+        ]
+        changes = {"plan": plan, "model": metadata}
+    else:
+        changes = {}
+    try:
+        return _store.update_session(identity, changes, revision=request.revision,
+                                     event="reviewed_catalog_dead_volume_defaults")
     except RevisionConflict as exc:
         raise HTTPException(409, str(exc)) from exc
 

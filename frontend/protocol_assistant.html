@@ -1099,7 +1099,8 @@ function renderGuidedSetup(){
 
     const classGap=localLiquidClassGap({tip_id:'st_10ul'});
     if(classGap)host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
-        el('p',{style:'margin:6px 0 0'},'The rack and plate layout can be proposed, but this instrument has no local ST10 liquid class. The assistant cannot invent the liquid class, tip motion, pipetting height or speed. Review a calibrated ST10 class, then inspect the per-transfer method proposals before strict simulation.'),
+        el('p',{style:'margin:6px 0 0'},`${classGap} The assistant cannot invent the liquid class, pipetting height, or motion settings. If this protocol is for a physical Bravo, load its profile and review a method for the source liquid and PP-to-LDV transfer before strict simulation.`),
+        el('a',{href:'/',target:'_blank',rel:'noopener'},'Open Control Panel'),' · ',
         el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Open liquid-class editor')));
     else if(list(state.methodPreview?.items).some(item=>item.status==='needs_curation'))
         host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),

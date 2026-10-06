@@ -184,6 +184,60 @@ async def test_setup_recommendations_expose_read_only_unverified_runtime_evidenc
 
 
 @pytest.mark.asyncio
+async def test_reviewed_catalog_dead_volume_action_is_revision_checked_and_audited(environment, monkeypatch):
+    context = {"context_hash": "test-catalog-revision", "labware": [
+        {"id": "reviewed-plate", "dead_volume_ul": 6.5, "dead_volume_status": "reviewed"},
+        {"id": "placeholder-plate", "dead_volume_ul": 4.0, "dead_volume_status": "placeholder"},
+        {"id": "destination-plate", "dead_volume_ul": 1.0, "dead_volume_status": "reviewed"},
+    ]}
+    monkeypatch.setattr(api, "machine_context", lambda bravo: context)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+        created = (await client.post("/api/protocols/from-text", json={
+            "text": "Transfer 5 uL from each source to the destination.", "name": "Catalog defaults",
+        })).json()
+        plan = {"name": "Catalog defaults", "materials": [
+            {"id": "source-a", "name": "Reviewed source", "labware_id": "reviewed-plate",
+             "initial_volume_ul": None, "dead_volume_ul": None},
+            {"id": "source-b", "name": "Placeholder source", "labware_id": "placeholder-plate",
+             "initial_volume_ul": None, "dead_volume_ul": None},
+            {"id": "source-c", "name": "Measured source", "labware_id": "reviewed-plate",
+             "initial_volume_ul": 20, "dead_volume_ul": 9},
+            {"id": "destination", "name": "Receive-only", "labware_id": "destination-plate",
+             "initial_volume_ul": None, "dead_volume_ul": None},
+        ], "steps": [
+            {"id": f"move-{source_id}", "kind": "transfer", "source": source_id,
+             "destination": "destination", "volume_ul": 5}
+            for source_id in ("source-a", "source-b", "source-c")
+        ], "decisions": [{"path": "/setup/head_mode", "value": {"subset_type": "all_barrels"},
+                          "reason": "Scientist selected full head", "actor": "scientist"}]}
+        saved_response = await client.patch(f"/api/protocols/{created['id']}", json={
+            "revision": created["revision"], "plan": plan})
+        assert saved_response.status_code == 200, saved_response.text
+        saved = saved_response.json()
+        endpoint = f"/api/protocols/{created['id']}/apply-reviewed-dead-volumes"
+        stale = await client.post(endpoint, json={"revision": created["revision"]})
+        assert stale.status_code == 409
+        response = await client.post(endpoint, json={"revision": saved["revision"]})
+        assert response.status_code == 200, response.text
+        updated = response.json()
+        expected_plan = copy.deepcopy(saved["plan"])
+        expected_plan["materials"][0]["dead_volume_ul"] = 6.5
+        assert updated["plan"] == expected_plan
+        assert updated["setup"] == saved["setup"]
+        assert updated["revision"] == saved["revision"] + 1
+        assert updated["history"][-1]["event"] == "reviewed_catalog_dead_volume_defaults"
+        assert updated["model"]["catalog_defaults"] == [{
+            "path": "/materials/0/dead_volume_ul", "value": 6.5,
+            "labware_id": "reviewed-plate", "source": "reviewed_labware_catalog",
+            "catalog_context_hash": "test-catalog-revision",
+        }]
+        repeated = await client.post(endpoint, json={"revision": updated["revision"]})
+        assert repeated.status_code == 200
+        assert repeated.json()["revision"] == updated["revision"]
+        assert repeated.json()["history"] == updated["history"]
+
+
+@pytest.mark.asyncio
 async def test_edits_invalidate_approval_and_stripped_markers_do_not_bypass_release(environment):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
         session = await simulate_and_approve(client, await session_with_plan(client))
