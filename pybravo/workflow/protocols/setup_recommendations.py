@@ -385,7 +385,7 @@ def _full_head_footprint(
         blocks.append("Select a tip-rack material with an exact catalog rack/tip pair.")
     for rack in tips:
         pair = pairs.get((rack.get("labware_id"), rack.get("tip_definition_id")))
-        if pair is None:
+        if pair is None or pair.get("execution_ready") is not True:
             blocks.append(f"Tip rack {rack.get('id') or '(unnamed)'} needs an exact active-head catalog rack/tip pair.")
         elif pair.get("required_head_mode") not in (None, "all_barrels"):
             blocks.append(f"Tip rack {rack.get('id') or '(unnamed)'} requires {pair['required_head_mode']} head mode.")
@@ -492,10 +492,10 @@ def _full_head_footprint(
 def _destinations_empty_for_each_source(
     liquid_steps: list[dict[str, Any]], materials: Mapping[str, dict[str, Any]],
     manifest: Mapping[str, Any], head: HeadType | None, full_head: bool | None,
-) -> tuple[bool | None, list[dict[str, Any]]]:
+) -> tuple[bool | None, bool | None, list[dict[str, Any]]]:
     """An empty plate can still hold earlier sources when quadrants overlap."""
     if full_head is not True or head is None:
-        return None, []
+        return None, None, []
     transfers = [step for step in liquid_steps if step.get("kind") == "transfer"]
     for step in liquid_steps:
         if step.get("kind") == "distribute":
@@ -504,19 +504,26 @@ def _destinations_empty_for_each_source(
                               "_path": f"{step['_path']}/dispenses/{index}"}
                              for index, item in enumerate(_rows(step.get("dispenses"))))
     if not transfers:
-        return None, []
+        return None, None, []
     labware = {row.get("id"): row for row in _rows(manifest.get("labware")) if row.get("id")}
     mode = normalize_head_mode(head, "all_barrels", "back_left")
     occupied: dict[str, list[tuple[str, set[tuple[int, int]]]]] = {}
     evidence: list[dict[str, Any]] = []
+    recorded_empty = True
+    missing_initial_volume = False
     for step in transfers:
         destination_id = step.get("destination")
         material = materials.get(destination_id)
         definition = labware.get(material.get("labware_id")) if material else None
-        if (material is None or definition is None or material.get("initial_volume_ul") != 0
-                or any(value != 0 for value in _data(material.get("well_volumes_ul")).values())):
-            return False, [{"source": "plan", "destination": destination_id,
-                            "reason": "Destination initial volumes are not all recorded as zero."}]
+        if material is None or definition is None:
+            return None, None, []
+        initial_volume = material.get("initial_volume_ul")
+        if initial_volume is None:
+            missing_initial_volume = True
+        elif initial_volume != 0:
+            recorded_empty = False
+        if any(value != 0 for value in _data(material.get("well_volumes_ul")).values()):
+            recorded_empty = False
         try:
             anchor = well_cell(step.get("destination_anchor") or "")
             cells = set(plate_footprint_wells(
@@ -525,19 +532,26 @@ def _destinations_empty_for_each_source(
                 *anchor,
             ))
         except (ValueError, TypeError):
-            return None, []
+            return None, None, []
         if not cells:
-            return None, []
+            return None, None, []
         for prior_source, prior_cells in occupied.get(destination_id, []):
             if prior_source != step.get("source") and prior_cells & cells:
-                return False, [{"source": "destination_footprint_overlap", "destination": destination_id,
-                                "first_source": prior_source, "later_source": step.get("source"),
-                                "overlapping_wells": len(prior_cells & cells)}]
+                return False, False, [{"source": "destination_footprint_overlap", "destination": destination_id,
+                                       "first_source": prior_source, "later_source": step.get("source"),
+                                       "overlapping_wells": len(prior_cells & cells)}]
         occupied.setdefault(destination_id, []).append((step.get("source"), cells))
         evidence.append({"source": "plan_and_catalog", "path": step["_path"] + "/destination_anchor",
                          "destination": destination_id, "source_material_id": step.get("source"),
-                         "addressed_wells": len(cells), "initial_volume_ul": 0})
-    return True, evidence
+                         "addressed_wells": len(cells), "initial_volume_ul": initial_volume,
+                         "initial_volume_recorded": initial_volume is not None})
+    if not recorded_empty:
+        evidence.append({"source": "plan", "reason": "At least one destination records nonzero starting liquid."})
+        return False, True, evidence
+    if missing_initial_volume:
+        evidence.append({"source": "plan", "reason": "Destination starting volumes are not yet recorded; physical emptiness is unconfirmed."})
+        return None, True, evidence
+    return True, True, evidence
 
 
 def _authorized_reuse(plan: Mapping[str, Any], setup: Mapping[str, Any]) -> tuple[bool | None, dict[str, Any] | None]:
@@ -548,6 +562,33 @@ def _authorized_reuse(plan: Mapping[str, Any], setup: Mapping[str, Any]) -> tupl
         return None, None
     return authorized, {"source": "scientist_decision", "path": "/setup/same_source_reuse_authorized",
                         "value": authorized, "plan_fingerprint": setup_plan_fingerprint(dict(plan))}
+
+
+def _cited_quadrant_scope(
+    liquid_steps: list[dict[str, Any]], materials: Mapping[str, dict[str, Any]],
+    manifest: Mapping[str, Any], source: Mapping[str, Any],
+) -> tuple[bool, list[str], str]:
+    """Recognize a recipe only from text actually cited by the liquid steps."""
+    paragraphs = {row.get("id") or row.get("paragraph_id"): str(row.get("text") or "")
+                  for row in _rows(source.get("paragraphs"))}
+    paragraph_ids = list(dict.fromkeys(identity for step in liquid_steps
+                                       for identity in step.get("source_paragraph_ids") or []
+                                       if isinstance(identity, str) and identity in paragraphs))
+    cited_text = " ".join(paragraphs[identity] for identity in paragraph_ids)
+    labware = {row.get("id"): row for row in _rows(manifest.get("labware")) if row.get("id")}
+    return _four_source_quadrant_scope(liquid_steps, materials, labware, cited_text), paragraph_ids, cited_text
+
+
+def _explicit_fresh_tip_requirement(cited_text: str) -> bool:
+    """An explicit per-transfer tip request overrides a reuse recipe candidate."""
+    return bool(re.search(
+        r"\b(?:do\s+not|don't|never|no)\s+(?:\w+\s+){0,3}reuse\b"
+        r"|\b(?:fresh|new|separate)\s+tips?\s+(?:for|before|between)\s+"
+        r"(?:each|every|both|the\s+two)\s+(?:destination|transfer)"
+        r"|\b(?:change|replace|discard)\s+tips?\s+(?:between|after)\s+"
+        r"(?:each|every|both|the\s+two)\s+(?:destination|transfer)",
+        cited_text, re.IGNORECASE,
+    ))
 
 
 def _rack_order(
@@ -614,7 +655,7 @@ def _rack_order(
     evidence: list[dict[str, Any]] = []
     for source_id, rack in zip(sources, ordered_racks):
         pair = pairs.get((rack.get("labware_id"), rack.get("tip_definition_id")))
-        if pair is None:
+        if pair is None or pair.get("execution_ready") is not True:
             blocks.append(f"{rack.get('id') or '(unnamed rack)'} has no exact verified rack/tip pair for this head.")
             continue
         source_steps = [step for step in transfers if step.get("source") == source_id]
@@ -688,10 +729,29 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
     head = _head(manifest)
     full_head, head_evidence, head_blocks = _full_head_footprint(liquid_steps, materials, manifest, head, source, plan)
     rack_ids, rack_blocks, rack_evidence = _rack_order(liquid_steps, materials, manifest, has_repeat, plan)
+    tip_choices = {(row.get("labware_id"), row.get("tip_definition_id")): row
+                   for row in _rows(manifest.get("tipbox_choices"))}
+    st10_384_racks = rack_ids is not None and all(
+        (rack := materials.get(rack_id, {})).get("tip_definition_id") == "st_10ul"
+        and (choice := tip_choices.get((rack.get("labware_id"), rack.get("tip_definition_id")), {})).get("rows") == 16
+        and choice.get("cols") == 24
+        and choice.get("execution_ready") is True
+        for rack_id in rack_ids
+    )
     authorized, authorization_evidence = _authorized_reuse(plan, setup)
-    empty_destinations, destination_evidence = _destinations_empty_for_each_source(
+    empty_destinations, destination_disjoint, destination_evidence = _destinations_empty_for_each_source(
         liquid_steps, materials, manifest, head, full_head,
     )
+    four_source_scope, scope_paragraph_ids, cited_scope_text = _cited_quadrant_scope(
+        liquid_steps, materials, manifest, source,
+    )
+    five_ul_pairings = four_source_scope and all(
+        len(source_steps := [step for step in liquid_steps if step.get("source") == source_id]) == 2
+        and all(_positive(step.get("volume_ul")) and math.isclose(step["volume_ul"], 5.0, abs_tol=1e-9)
+                for step in source_steps)
+        for source_id in {step.get("source") for step in liquid_steps}
+    )
+    explicit_fresh_tips = _explicit_fresh_tip_requirement(cited_scope_text)
     source_ids = list(dict.fromkeys(step.get("source") for step in liquid_steps
                                     if step.get("kind") in {"transfer", "distribute"}))
     catalog_labware = {row.get("id"): row for row in _rows(manifest.get("labware")) if row.get("id")}
@@ -704,6 +764,17 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
 
     addressed_ids = list(dict.fromkeys(material_id for step in liquid_steps
                                        for material_id in addressed_materials(step)))
+    destination_ids = list(dict.fromkeys(
+        destination for step in liquid_steps if step.get("kind") in {"transfer", "distribute"}
+        for destination in ([step.get("destination")] if step.get("kind") == "transfer" else
+                            [item.get("destination") for item in _rows(step.get("dispenses"))])
+    ))
+    no_recorded_destination_liquid = bool(destination_ids) and all(
+        destination in materials
+        and materials[destination].get("initial_volume_ul") in (None, 0)
+        and all(value == 0 for value in _data(materials[destination].get("well_volumes_ul")).values())
+        for destination in destination_ids
+    )
     addressed_depths = [catalog_labware.get(materials.get(mid, {}).get("labware_id"), {}).get("well_depth_mm")
                         for mid in addressed_ids]
     minimum_depth = min(addressed_depths) if addressed_depths and all(_positive(depth) for depth in addressed_depths) else None
@@ -720,7 +791,13 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
         "full_head_footprint": full_head,
         "source_count": len(source_ids),
         "dedicated_tip_rack_per_source": rack_ids is not None,
+        "st10_384_dedicated_racks": st10_384_racks,
         "destination_initially_empty": empty_destinations,
+        "destination_footprints_disjoint": destination_disjoint,
+        "no_recorded_destination_liquid": no_recorded_destination_liquid,
+        "four_source_quadrant_recipe": four_source_scope,
+        "four_source_five_ul_pairings": five_ul_pairings,
+        "same_source_reuse_prohibited": authorized is False or explicit_fresh_tips,
         "same_source_reuse_authorized": authorized,
         "tip_strategy": setup.get("tip_strategy"),
         "waste_material_present": waste_present,
@@ -729,34 +806,58 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
     evidence_by_fact = {
         "full_head_footprint": head_evidence,
         "dedicated_tip_rack_per_source": rack_evidence,
+        "st10_384_dedicated_racks": rack_evidence,
         "same_source_reuse_authorized": [authorization_evidence] if authorization_evidence else [],
         "destination_initially_empty": destination_evidence,
+        "destination_footprints_disjoint": destination_evidence,
+        "no_recorded_destination_liquid": [
+            {"source": "plan", "destination_material_id": destination,
+             "recorded_initial_volume_ul": materials[destination].get("initial_volume_ul"),
+             "missing_starting_volume_is_not_empty_confirmation": True}
+            for destination in destination_ids if destination in materials
+        ],
+        "four_source_quadrant_recipe": ([{
+            "source": "cited_protocol_text", "paragraph_ids": scope_paragraph_ids,
+            "recipe_id": "four_384_to_1536_quadrants", "recipe_version": "1.0.0",
+            "source_count": 4, "destination_count": 2,
+        }] if four_source_scope else []),
+        "four_source_five_ul_pairings": ([{
+            "source": "plan_transfer_volumes", "per_source_transfer_count": 2,
+            "per_transfer_volume_ul": 5,
+        }] if five_ul_pairings else []),
     }
     recommendations: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     suggested_paths: set[str] = set()
     unresolved_paths: set[str] = set()
 
-    for rule in _rows(manifest.get("setup_decision_rules")):
+    rules = _rows(manifest.get("setup_decision_rules"))
+
+    def eligible(rule: Mapping[str, Any]) -> tuple[str, list[Mapping[str, Any]]] | None:
         path = rule.get("decision")
         conditions = _data(rule.get("when")).get("all")
         if not isinstance(path, str) or not path.startswith("/setup/") or not isinstance(conditions, list):
-            continue
+            return None
         # A pinned method supplies phase-specific classes and heights. Keep
         # protocol-wide fields only for drafts that still contain legacy
         # liquid steps, so recommendations do not ask for redundant settings.
         if not legacy_liquid_steps and path in {"/setup/liquid_class", "/setup/distance_from_bottom_mm"}:
-            continue
+            return None
         if not all(isinstance(condition, Mapping) and _condition_matches(condition, facts)
                    for condition in conditions):
-            continue
+            return None
         if not _missing(_set_up_value(setup, path)):
-            continue
+            return None
+        return path, conditions
+
+    def rule_value(rule: Mapping[str, Any]) -> Any:
         raw_value = rule.get("recommendation")
         if isinstance(raw_value, Mapping) and raw_value.get("resolver") == "source_ordered_verified_tip_rack_ids":
-            value = rack_ids
-        else:
-            value = raw_value
+            return rack_ids
+        return raw_value
+
+    def rule_result(rule: Mapping[str, Any], path: str,
+                    conditions: list[Mapping[str, Any]]) -> dict[str, Any]:
         result = {
             "path": path, "rule_id": rule.get("id"),
             "rationale": rule.get("rationale", ""),
@@ -777,30 +878,54 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
             result["provenance"] = result["provenance"] + [
                 "scientist_decision" if structured else "affirmative_cited_protocol_text"
             ]
-        if value is None:
-            if path not in unresolved_paths:
-                if path == "/setup/distance_from_bottom_mm":
-                    bounds = {"minimum_inclusive_mm": 0,
-                              "maximum_exclusive_mm": minimum_depth}
-                    reason = result["rationale"]
-                    if minimum_depth is not None:
-                        reason += f" Catalog geometry requires 0 ≤ height < {minimum_depth:g} mm."
-                    result = {**result, "bounds": bounds,
-                              "evidence": result["evidence"] + [
-                                  {"source": "catalog", "material_id": mid,
-                                   "labware_id": materials.get(mid, {}).get("labware_id"),
-                                   "well_depth_mm": depth}
-                                  for mid, depth in zip(addressed_ids, addressed_depths)
-                              ]}
-                else:
-                    reason = result["rationale"]
-                unresolved.append({**result, "reason": reason})
-                unresolved_paths.add(path)
+        return result
+
+    # Evaluate rules to a fixed point. A tip strategy proposed for review is
+    # allowed to unlock its matching rack order and disposal proposal in this
+    # *same response*; none of these values become saved setup or a scientist
+    # decision here. Unresolved questions are evaluated only after closure.
+    for _ in range(len(rules) + 1):
+        changed = False
+        for rule in rules:
+            match = eligible(rule)
+            if match is None:
+                continue
+            path, conditions = match
+            if path in suggested_paths:
+                continue
+            value = rule_value(rule)
+            if value is None:
+                continue
+            recommendations.append({**rule_result(rule, path, conditions), "value": value})
+            suggested_paths.add(path)
+            if path == "/setup/tip_strategy":
+                facts["tip_strategy"] = value
+            changed = True
+        if not changed:
+            break
+
+    for rule in rules:
+        match = eligible(rule)
+        if match is None:
             continue
-        if path in suggested_paths:
+        path, conditions = match
+        if path in suggested_paths or path in unresolved_paths or rule_value(rule) is not None:
             continue
-        recommendations.append({**result, "value": value})
-        suggested_paths.add(path)
+        result = rule_result(rule, path, conditions)
+        reason = result["rationale"]
+        if path == "/setup/distance_from_bottom_mm":
+            bounds = {"minimum_inclusive_mm": 0, "maximum_exclusive_mm": minimum_depth}
+            if minimum_depth is not None:
+                reason += f" Catalog geometry requires 0 ≤ height < {minimum_depth:g} mm."
+            result = {**result, "bounds": bounds,
+                      "evidence": result["evidence"] + [
+                          {"source": "catalog", "material_id": mid,
+                           "labware_id": materials.get(mid, {}).get("labware_id"),
+                           "well_depth_mm": depth}
+                          for mid, depth in zip(addressed_ids, addressed_depths)
+                      ]}
+        unresolved.append({**result, "reason": reason})
+        unresolved_paths.add(path)
 
     blocked: list[dict[str, Any]] = []
     if liquid_steps and head_blocks:
@@ -847,6 +972,45 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
                            "required_evidence": ["Configured waste material with deck position, or approved return to each source rack."],
                            "evidence_level": "scientist_input", "requires_confirmation": True,
                            "provenance": ["pybravo.workflow.protocols.validation"], "evidence": []})
+    if four_source_scope:
+        # The recipe determines consumed volume, but the well's starting and
+        # dead volumes are measured experimental facts. State the computable
+        # lower bound without filling either field or certifying a source load.
+        for source_id in source_ids:
+            source_steps = [step for step in liquid_steps if step.get("source") == source_id]
+            volumes = [step.get("volume_ul") for step in source_steps]
+            if len(volumes) != 2 or not all(_positive(volume) for volume in volumes):
+                continue
+            source_material = materials.get(source_id, {})
+            if source_material.get("initial_volume_ul") is not None and source_material.get("dead_volume_ul") is not None:
+                continue
+            index = next((position for position, row in enumerate(material_rows)
+                          if row.get("id") == source_id), None)
+            if index is None:
+                continue
+            transferable = float(sum(volumes))
+            dead = source_material.get("dead_volume_ul")
+            minimum_initial = transferable + dead if isinstance(dead, (int, float)) and not isinstance(dead, bool) else None
+            catalog_row = catalog_labware.get(source_material.get("labware_id"), {})
+            unresolved.append({
+                "path": f"/materials/{index}/initial_volume_ul", "rule_id": "quadrant_source_volume_budget",
+                "reason": (f"Each well of {source_id} supplies {volumes[0]:g} + {volumes[1]:g} = "
+                           f"{transferable:g} µL. Confirm its measured starting volume and dead volume; "
+                           f"starting volume must be at least {transferable:g} µL above dead volume."),
+                "minimum_transferable_volume_ul": transferable,
+                "minimum_initial_volume_ul_if_dead_known": minimum_initial,
+                "catalog_well_capacity_ul": catalog_row.get("well_volume_ul"),
+                "required_evidence": ["Measured or scientist-confirmed per-well starting volume.",
+                                      "Dead volume for the selected source plate, tip, and aspiration method."],
+                "evidence_level": "derived", "requires_confirmation": True,
+                "provenance": ["config/protocol_recipes.yaml#four_384_to_1536_quadrants",
+                               "cited_protocol_text", "plan_transfer_volumes", "catalog_labware"],
+                "evidence": [{"source": "plan", "source_material_id": source_id,
+                              "step_paths": [step["_path"] for step in source_steps],
+                              "per_well_dispenses_ul": volumes,
+                              "source_paragraph_ids": scope_paragraph_ids,
+                              "catalog_labware_id": source_material.get("labware_id")}],
+            })
     # Inventory is physical run state, never a catalog or model inference.
     tipbox_by_slot = {row["slot"]: row for row in runtime_advisory["tipbox_inventory"]}
     for index, row in enumerate(material_rows):

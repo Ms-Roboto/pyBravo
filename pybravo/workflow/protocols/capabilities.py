@@ -415,6 +415,29 @@ def _setup_decision_rules(head: HeadType | None) -> list[dict[str, Any]]:
              "Sufficient inspected fresh-tip footprints for every liquid step."],
         ),
         rule(
+            "tip_strategy_quadrant_conditional", "/setup/tip_strategy",
+            [liquid_step, predicate("four_source_quadrant_recipe", True),
+             predicate("four_source_five_ul_pairings", True),
+             predicate("full_head_footprint", True),
+             predicate("dedicated_tip_rack_per_source", True),
+             predicate("st10_384_dedicated_racks", True),
+             predicate("destination_footprints_disjoint", True),
+             predicate("no_recorded_destination_liquid", True),
+             predicate("same_source_reuse_prohibited", False)],
+            "fresh_each_source", "heuristic",
+            "The four-source quadrant recipe can isolate sources with one dedicated ST tip set per source. "
+            "This is a conditional draft choice: confirm both destinations start empty, each dispense avoids "
+            "contact with destination liquid, and the same source's tip set may serve both plates. "
+            "Two 5 µL dispenses exactly fill a nominal ST10 tip, leaving no allowance for residual liquid "
+            "or an air gap. Keep two separate 5 µL aspirations unless a reviewed method proves a shared "
+            "aspiration safe. A contamination assessment is still required before execution.",
+            ["config/protocol_recipes.yaml#four_384_to_1536_quadrants", "cited_protocol_text",
+             "active_head_catalog_pair"],
+            ["Scientist confirms both destination plates start empty and records their starting volumes.",
+             "Selected dispense method avoids destination-liquid contact or has a reviewed carryover policy.",
+             "Scientist records a same-source tip-reuse contamination assessment and confirms physical racks."],
+        ),
+        rule(
             "tip_rack_order_by_source", "/setup/tip_rack_ids",
             [liquid_step, predicate("source_count", 2, "gte"),
              predicate("dedicated_tip_rack_per_source", True),
@@ -621,6 +644,25 @@ def compact_capability_options(manifest: dict) -> dict:
         "lowers_to": row["lowers_to"],
     } for row in manifest.get("assistant_operations", [])]
     setup = manifest.get("setup_options") or {}
+
+    def compact_rule(row: dict) -> dict:
+        result = {key: row[key] for key in (
+            "id", "decision", "when", "recommendation", "evidence_level", "rationale",
+            "required_evidence", "bounds") if key in row}
+        # The full, citable reasoning stays in the published manifest and the
+        # deterministic resolver. Give the small local model only the decision
+        # cue; repeating every qualification in its prompt exceeds its budget.
+        if row.get("recommendation") is not None:
+            result["rationale"] = row.get("rationale", "").split(". ", 1)[0].rstrip(".") + "."
+            result["required_evidence"] = list(row.get("required_evidence") or [])[:1]
+        if row.get("id") == "tip_strategy_quadrant_conditional":
+            result["rationale"] = (
+                "Conditional draft for four 384 sources and two empty 1536 destinations: dedicate one "
+                "ST10 tip set per source, assess noncontact reuse, and keep separate 5 µL aspirations "
+                "until a reviewed method supports sharing."
+            )
+        return result
+
     return {
         "schema_version": manifest.get("schema_version"),
         "context_hash": manifest.get("context_hash"),
@@ -638,10 +680,7 @@ def compact_capability_options(manifest: dict) -> dict:
                 "id", "required_fields", "requires_confirmation", "compatible_tip_pair_check_required")
                 if key in item} for item in setup.get("head_modes", [])],
         },
-        "setup_decision_rules": [{key: row[key] for key in (
-            "id", "decision", "when", "recommendation", "evidence_level", "rationale",
-            "required_evidence", "bounds") if key in row}
-            for row in manifest.get("setup_decision_rules", [])],
+        "setup_decision_rules": [compact_rule(row) for row in manifest.get("setup_decision_rules", [])],
         "transfer_patterns": [{key: row[key] for key in (
             "id", "source_labware_wells", "destination_labware_wells", "source_anchor", "destination_anchors")
             if key in row} for row in manifest.get("transfer_patterns", [])],

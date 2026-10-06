@@ -13,3 +13,18 @@ def test_protocol_skills_are_selected_by_task():
         "protocol-interpretation", "deck-and-tips", "liquid-methods",
     ]
     assert all(body and "---" not in body for _, body in pipetting)
+
+    plural_hardware = selected_skills(ingest_text("Place four plates and four tipboxes on the deck."))
+    assert [name for name, _ in plural_hardware] == ["protocol-interpretation", "deck-and-tips"]
+
+
+def test_quadrant_skills_keep_tip_reuse_distinct_from_aspiration():
+    skills = dict(selected_skills(ingest_text(
+        "Transfer 5 uL from each of four 384 Labcyte PP source plates into the "
+        "quadrants of two 1536 Labcyte LDV destination plates using ST10 tips."
+    )))
+    assert "at least 10 µL usable volume per source well" in skills["protocol-interpretation"]
+    assert "Tip reuse and shared aspiration are separate decisions" in skills["liquid-methods"]
+    assert "one 10 µL aspiration" in skills["liquid-methods"]
+    assert "one distinct ST10 rack per source" in skills["deck-and-tips"]
+    assert "source 1→A1, 2→A2, 3→B1, 4→B2" in skills["deck-and-tips"]

@@ -14,7 +14,7 @@ from .ingest import IngestedProtocol
 
 _ROOT = Path(__file__).resolve().parent / "skills"
 _TRIGGERS = {
-    "deck-and-tips": re.compile(r"\b(deck|slot|stack|tip|rack|box|waste|plate)\b", re.I),
+    "deck-and-tips": re.compile(r"\b(?:deck|slots?|stacks?|tips?|tipboxes?|racks?|boxes?|waste|plates?|heads?|labware)\b", re.I),
     "liquid-methods": re.compile(r"\b(transfer|aspirat|dispens|mix|aliquot|reagent|liquid|buffer|solution)\w*\b", re.I),
 }
 

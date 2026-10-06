@@ -7,10 +7,21 @@ recipes:
     title: Four 384-well sources into 1536-well quadrants
     triggers: ["384", "1536", "quadrant"]
     trigger_match: all
-    intent: Keep four sources distinct; map each source to the same disjoint quadrant on each named destination.
+    intent: >-
+      Keep four sources stacked in one deck position, four source-dedicated ST10
+      racks, and two destinations distinct. Stage each top source in a work position,
+      then move it to a processed stack. Propose source 1/A1, 2/A2, 3/B1, 4/B2
+      on each destination, subject to source-identity and stack-order confirmation.
+      Match named Labcyte PP/LDV plates to verified catalog geometry but confirm
+      physical plates and rack inventory. Each source well supplies 5 uL to each destination:
+      require at least 10 uL usable per well plus dead volume and method overage. A tip
+      set may be reused across initially empty destination wells only under a reviewed
+      contamination policy; nominal ST10 capacity alone does not justify one 10 uL
+      aspiration for two dispenses. Prefer separate aspirations until a qualified
+      method establishes effective capacity including residual and air gap.
     operations: [destack_plate, transfer, stack_plate]
     source_path: docs/bravo-capability-manifest.md
-    review_points: [source_stack_order, quadrant_mapping, dedicated_tip_supply, split_aspiration_capacity]
+    review_points: [source_identity_and_stack_order, source_to_rack_to_quadrant_mapping, physical_tip_inventory, source_well_usable_and_dead_volume, per_source_tip_reuse_policy, shared_aspiration_effective_capacity, catalog_plate_identity, loaded_deck_confirmation]
   - id: serial_dilution
     version: 1.0.0
     status: synthetic_pattern

@@ -489,7 +489,7 @@
       "required": ["fact", "op", "value"],
       "properties": {
         "fact": {
-          "enum": ["liquid_step_count", "full_head_footprint", "source_count", "dedicated_tip_rack_per_source", "destination_initially_empty", "same_source_reuse_authorized", "tip_strategy", "waste_material_present"]
+          "enum": ["liquid_step_count", "full_head_footprint", "source_count", "dedicated_tip_rack_per_source", "st10_384_dedicated_racks", "destination_initially_empty", "destination_footprints_disjoint", "no_recorded_destination_liquid", "four_source_quadrant_recipe", "four_source_five_ul_pairings", "same_source_reuse_prohibited", "same_source_reuse_authorized", "tip_strategy", "waste_material_present"]
         },
         "op": { "enum": ["eq", "gte", "in"] },
         "value": {

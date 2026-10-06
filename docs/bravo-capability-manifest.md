@@ -104,9 +104,14 @@ The plan-fact vocabulary is deliberately narrower than natural language:
 | `full_head_footprint` | Cited all-wells instructions or a narrowly matched four-source quadrant plan support a full-head proposal on verified grids. A plate's well count or anchor alone is insufficient; free-text evidence remains a heuristic until the scientist confirms this exact plan. |
 | `source_count` | Distinct source materials addressed by liquid steps, in first-use order. |
 | `dedicated_tip_rack_per_source` | The plan has one distinct tip material per source, and each selected rack–tip pair is exact and catalog-compatible with the active head. This does not establish actual tip inventory. |
+| `st10_384_dedicated_racks` | Every source has an exact, execution-ready 384 ST10 rack–tip catalog pair. |
 | `destination_initially_empty` | Every destination well addressed by the proposed reuse pattern has a recorded initial volume of zero, and source footprints on each destination do not overlap. Unknown volumes or overlapping source footprints do not satisfy this fact. |
+| `destination_footprints_disjoint` | Different sources address separate destination wells under the proposed full-head mapping. This does not establish that those wells start empty. |
+| `no_recorded_destination_liquid` | The draft records no nonzero starting liquid in either destination. A missing volume is still unknown, not confirmation of emptiness. |
+| `four_source_quadrant_recipe`, `four_source_five_ul_pairings` | Cited source text and the exact plan describe four 384 sources, two 1536 destinations, eight quadrant transfers, and two 5 µL transfers per source. |
+| `same_source_reuse_prohibited` | A scientist decision or explicit instruction requires fresh tips between the two destinations. |
 | `same_source_reuse_authorized` | A scientist decision bound to the current plan allows a dedicated set to dispense from one source into the planned destinations. Empty destination plates by themselves do not grant authorization. |
-| `tip_strategy` | A saved or otherwise explicitly selected strategy; a model's unreviewed guess is not evidence. |
+| `tip_strategy` | A saved choice or an earlier advisory proposal in the same resolver response. Cascaded proposals remain unconfirmed until the scientist reviews them. |
 | `waste_material_present` | The plan contains an on-deck material with role `waste`; an unplaced catalog entry does not count. |
 | `minimum_addressed_well_depth_mm` | Minimum positive catalog depth among all addressed plates, when all depths are known. Used only as an exclusive upper bound on pipetting height. |
 
@@ -125,11 +130,20 @@ An explicit scientist mapping is derived evidence. A rack ID containing the
 exact source ID is a heuristic proposal that requires confirmation. Material
 list order and fuzzy name similarity do not establish a link.
 
-The source-dedicated tip rule suggests `fresh_each_source` only when the
+The source-dedicated tip rule suggests `fresh_each_source` when the
 scientist explicitly permits same-source reuse, each source has its own
-compatible rack, and addressed destinations are recorded empty. It never
-authors `tip_reuse_reason`. A separate scientist-input rule leaves that
-contamination assessment open. If the scientist explicitly rejects reuse,
+compatible rack, and addressed destinations are recorded empty. A second,
+narrow rule offers the same strategy as a **conditional draft** for the cited
+four-source 384-to-two-1536 ST10 pattern, even when destination starting
+volumes have not yet been recorded. It requires the scientist to confirm that
+both destinations start empty and that the dispense method avoids unacceptable
+carryover. Two 5 µL dispenses fill the nominal 10 µL tip capacity, so this
+proposal retains two separate aspirations unless a reviewed method establishes
+enough effective capacity for a shared aspiration. Neither rule authors
+`tip_reuse_reason`; the contamination assessment remains open. The resolver
+may use a proposed strategy to offer a rack order and disposal choice in the
+same response, but it does not save any of them. If the scientist explicitly
+rejects reuse,
 `fresh_each_step` is a possible strategy subject to enough fresh tips. With
 source-dedicated racks and no waste material, the return rule may suggest the
 literal `return_to_source_rack`, provided used tips return to their original

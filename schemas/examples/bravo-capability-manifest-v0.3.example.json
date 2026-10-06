@@ -1266,6 +1266,73 @@
       ]
     },
     {
+      "id": "tip_strategy_quadrant_conditional",
+      "decision": "/setup/tip_strategy",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          },
+          {
+            "fact": "four_source_quadrant_recipe",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "four_source_five_ul_pairings",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "full_head_footprint",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "dedicated_tip_rack_per_source",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "st10_384_dedicated_racks",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "destination_footprints_disjoint",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "no_recorded_destination_liquid",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "same_source_reuse_prohibited",
+            "op": "eq",
+            "value": false
+          }
+        ]
+      },
+      "recommendation": "fresh_each_source",
+      "evidence_level": "heuristic",
+      "requires_confirmation": true,
+      "rationale": "The four-source quadrant recipe can isolate sources with one dedicated ST tip set per source. This is a conditional draft choice: confirm both destinations start empty, each dispense avoids contact with destination liquid, and the same source's tip set may serve both plates. Two 5 µL dispenses exactly fill a nominal ST10 tip, leaving no allowance for residual liquid or an air gap. Keep two separate 5 µL aspirations unless a reviewed method proves a shared aspiration safe. A contamination assessment is still required before execution.",
+      "provenance": [
+        "config/protocol_recipes.yaml#four_384_to_1536_quadrants",
+        "cited_protocol_text",
+        "active_head_catalog_pair"
+      ],
+      "required_evidence": [
+        "Scientist confirms both destination plates start empty and records their starting volumes.",
+        "Selected dispense method avoids destination-liquid contact or has a reviewed carryover policy.",
+        "Scientist records a same-source tip-reuse contamination assessment and confirms physical racks."
+      ]
+    },
+    {
       "id": "tip_rack_order_by_source",
       "decision": "/setup/tip_rack_ids",
       "when": {

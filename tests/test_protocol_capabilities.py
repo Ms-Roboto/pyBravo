@@ -134,6 +134,10 @@ def test_compact_options_fit_small_local_model_budget_without_catalog_duplicatio
     assert compact["setup_decision_rules"]
     assert all("provenance" not in row and row.get("rationale") and row.get("required_evidence")
                for row in compact["setup_decision_rules"])
+    quadrant = next(row for row in compact["setup_decision_rules"]
+                    if row["id"] == "tip_strategy_quadrant_conditional")
+    assert "Conditional draft" in quadrant["rationale"]
+    assert "separate 5 µL aspirations" in quadrant["rationale"]
 
 
 def test_compact_setup_options_distinguish_literal_disposal_from_material_reference():

@@ -76,9 +76,12 @@ def test_full_quadrant_plan_yields_rule_backed_setup_proposals_and_scientist_inp
         "/setup/head_mode": {"subset_type": "all_barrels", "subset_config": "back_left",
                              "row_count": None, "column_count": None},
         "/setup/tip_strategy": "fresh_each_source",
+        "/setup/tip_rack_ids": ["tips_source_2", "tips_source_1"],
+        "/setup/tip_disposal_id": "return_to_source_rack",
     }
     assert {row["rule_id"] for row in result["recommendations"]} == {
         "head_mode_full_footprint", "tip_strategy_dedicated_source",
+        "tip_rack_order_by_source", "tip_disposal_return_to_source",
     }
     assert all(row["requires_confirmation"] and row["provenance"] for row in result["recommendations"])
     assert {row["path"] for row in result["unresolved"]} >= {
@@ -88,7 +91,8 @@ def test_full_quadrant_plan_yields_rule_backed_setup_proposals_and_scientist_inp
     assert result["blocked"] == []
     assert (plan, setup, manifest) == before
 
-    # A proposed strategy does not become a fact until the draft accepts it.
+    # A cascade is review-only; it has not changed setup or confirmed a rack.
+    assert setup == {}
     setup["tip_strategy"] = "fresh_each_source"
     next_result = recommend_setup(plan, setup, manifest)
     assert _values(next_result)["/setup/tip_rack_ids"] == ["tips_source_2", "tips_source_1"]
@@ -265,14 +269,56 @@ def _four_source_fixture() -> tuple[dict, dict, dict]:
 
 def test_exact_four_source_two_destination_quadrant_request_is_reviewable_heuristic():
     plan, setup, manifest = _four_source_fixture()
+    for material in plan["materials"]:
+        if material["id"].startswith("destination_"):
+            material["initial_volume_ul"] = None
     result = recommend_setup(plan, setup, manifest, source={"paragraphs": [{
         "id": "p1", "text": "I have 4 384 well plates and want to transfer 5 ul from each plate "
         "into the 4 quadrants of two 1536 plates."
     }]})
     head = next(row for row in result["recommendations"] if row["path"] == "/setup/head_mode")
-    assert head["value"]["subset_type"] == "all_barrels"
+    assert head["value"] == {"subset_type": "all_barrels", "subset_config": "back_left",
+                             "row_count": None, "column_count": None}
     assert head["evidence_level"] == "heuristic"
+    values = _values(result)
+    assert values["/setup/tip_strategy"] == "fresh_each_source"
+    assert values["/setup/tip_rack_ids"] == [
+        "tips_source_4", "tips_source_3", "tips_source_2", "tips_source_1",
+    ]
+    assert values["/setup/tip_disposal_id"] == "return_to_source_rack"
+    strategy = next(row for row in result["recommendations"] if row["path"] == "/setup/tip_strategy")
+    assert strategy["rule_id"] == "tip_strategy_quadrant_conditional"
+    assert strategy["requires_confirmation"] is True
+    assert "conditional" in strategy["rationale"]
+    assert "two separate 5 µL aspirations" in strategy["rationale"]
+    assert any(item["source"] == "cited_protocol_text" for item in strategy["evidence"])
+    assert any(item.get("missing_starting_volume_is_not_empty_confirmation")
+               for item in strategy["evidence"])
+    assert "/setup/tip_reuse_reason" in {item["path"] for item in result["unresolved"]}
+    volume_questions = [item for item in result["unresolved"]
+                        if item.get("rule_id") == "quadrant_source_volume_budget"]
+    assert len(volume_questions) == 4
+    assert all(item["minimum_transferable_volume_ul"] == 10 for item in volume_questions)
+    assert all(item["minimum_initial_volume_ul_if_dead_known"] is None for item in volume_questions)
+    assert all(material.get("dead_volume_ul") is None for material in plan["materials"]
+               if material["id"].startswith("source_"))
+    assert setup == {}
+
+
+def test_quadrant_tip_reuse_candidate_abstains_on_known_destination_liquid_or_fresh_tip_instruction():
+    plan, setup, manifest = _four_source_fixture()
+    cited = {"paragraphs": [{"id": "p1", "text": "I have 4 384 well plates and transfer 5 ul "
+              "from each plate into the 4 quadrants of two 1536 plates."}]}
+    plan["materials"][2]["initial_volume_ul"] = 2
+    result = recommend_setup(plan, setup, manifest, source=cited)
     assert "/setup/tip_strategy" not in _values(result)
+    assert "/setup/tip_rack_ids" not in _values(result)
+
+    plan["materials"][2]["initial_volume_ul"] = 0
+    cited["paragraphs"][0]["text"] += " Use fresh tips for each transfer."
+    result = recommend_setup(plan, setup, manifest, source=cited)
+    assert "/setup/tip_strategy" not in _values(result)
+    assert "/setup/tip_rack_ids" not in _values(result)
 
 
 def test_four_source_scope_abstains_on_negated_or_hypothetical_transfer():

@@ -43,6 +43,7 @@ function dirty(){dirtyCalls++;}
 function renderSetupRecommendations(){}
 function renderPlan(){}
 function renderSetup(){}
+function refreshMethodPreview(){}
 function notify(){}
 function clearTimeout(){}
 function setTimeout(callback){pending.push(callback);return pending.length;}
@@ -78,7 +79,7 @@ async function api(path,options){assert.equal(path,'/setup-recommendations');
 def test_method_lookup_uses_distribute_aliquots_and_records_offered_methods(tmp_path):
     html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
     functions = []
-    for name in ("methodQuery", "recordMethodSelection", "safeMethodSourceUrl"):
+    for name in ("methodQueryMissing", "methodQuery", "recordMethodSelection", "safeMethodSourceUrl"):
         match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
         assert match, name
         functions.append(match[0])
@@ -93,7 +94,7 @@ const state={session:{setup:{head_mode:{subset_type:'all_barrels'}},plan:{materi
   {id:'source',labware_id:'384-plate',reagent_family:'aqueous'},
   {id:'target-a',labware_id:'1536-plate'},
   {id:'target-b',labware_id:'1536-plate'},
-  {id:'tips',labware_id:'384-st-box',tip_definition_id:'st10'}
+  {id:'tips',role:'tips',labware_id:'384-st-box',tip_definition_id:'st10'}
 ]}}};
 """
         + "\n".join(functions)
@@ -239,7 +240,9 @@ async function api(path){assert.equal(path,'/methods/lookup');lookups++;
   return {issues:[],candidates:[{method_id:'water-st10',match_kind:'exact',execution_ready:true,
     mismatches:[]}]};}
 function methodQuery(){return {operation:'transfer',tip_id:'st10',volume_ul:5};}
-function suggestedMethodRack(){return 'tips';}
+function proposedMethodRack(){return {id:'tips',basis:'selected setup rack'};}
+function methodQueryMissing(){return [];}
+function localLiquidClassGap(){return '';}
 const state={session:{id:'s1',setup:{},plan:{materials:[],steps:[
   {id:'a',kind:'transfer',description:'Copy A'},
   {id:'b',kind:'transfer',description:'Copy B'}]}},
@@ -264,6 +267,150 @@ const state={session:{id:'s1',setup:{},plan:{materials:[],steps:[
     )
     script = tmp_path / "method-preview.cjs"
     script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_source_coded_tip_racks_enable_read_only_method_lookup_and_show_class_gap(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in (
+        "methodQueryMissing", "methodQuery", "proposedMethodRack", "suggestedMethodRack",
+        "localLiquidClassGap", "liquidSourceOrder", "renderMethodPreview", "refreshMethodPreview",
+    ):
+        match = re.search(rf"(?:async )?function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+function el(tag,attrs,...children){return {tag,attrs,children:children.flat(Infinity)};}
+function text(node){return node==null?'':typeof node==='string'?node:node.children?.map(text).join(' ')||'';}
+const panel={hidden:true,children:[],replaceChildren(...nodes){this.children=nodes;},
+  append(...nodes){this.children.push(...nodes);}};
+function $(id){assert.equal(id,'method-preview');return panel;}
+const materials=[
+  ...[1,2,3,4].map(i=>({id:'source_'+i,role:'liquid',labware_id:'384-labcyte'})),
+  ...[1,2].map(i=>({id:'destination_'+i,role:'liquid',labware_id:'1536-ldv'})),
+  ...[4,3,2,1].map(i=>({id:'tips_source_'+i,role:'tips',labware_id:'384-st-rack',
+    tip_definition_id:'st_10ul'}))];
+const steps=[4,3,2,1].flatMap(i=>[1,2].map(j=>({kind:'transfer',source:'source_'+i,
+  destination:'destination_'+j,volume_ul:5,source_anchor:'A1',
+  destination_anchor:['A1','A2','B1','B2'][i-1]})));
+const state={session:{id:'s1',setup:{},plan:{materials,steps}},
+  context:{machine_id:'SIMULATED',head_type:'HT_384_D_70',liquid_classes:[]},
+  capabilities:{context_hash:'catalog'},methodsRegistry:{digest:'registry'},
+  methodPreview:null,methodPreviewKey:null,methodPreviewRequest:0,dirty:false};
+let lookups=0;
+async function api(path){assert.equal(path,'/methods/lookup');lookups++;return {issues:[],candidates:[]};}
+"""
+        + "\n".join(functions)
+        + """
+(async()=>{
+  assert.equal(suggestedMethodRack(steps[0]),'tips_source_4');
+  assert.equal(suggestedMethodRack(steps[7]),'tips_source_1');
+  assert.deepEqual(methodQueryMissing(steps[0],'tips_source_4'),[]);
+  assert.equal(methodQuery(steps[0],'tips_source_4').volume_ul,5);
+  await refreshMethodPreview();
+  assert.equal(lookups,1,'Identical catalog queries should be shared across eight actions');
+  assert.equal(state.methodPreview.items.length,8);
+  assert.ok(state.methodPreview.items.every(item=>item.status==='needs_curation'));
+  assert.ok(state.methodPreview.items.every(item=>item.message.includes('No local liquid class')));
+  assert.match(panel.children.map(text).join(' '),/physical load unconfirmed/);
+  assert.ok(steps.every(step=>!step.method_ref));
+  materials[5].labware_id=null;
+  assert.deepEqual(methodQueryMissing(steps[1],'tips_source_4'),['destination labware']);
+  state.session.setup.tip_rack_ids=['tips_source_4'];
+  assert.equal(suggestedMethodRack(steps[0]),'',
+    'A partial explicit setup order must not be overwritten by source-coded inference');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    )
+    script = tmp_path / "source-coded-method-preview.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_bulk_setup_proposals_only_fill_review_draft_choices(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in ("currentSetupRecommendations", "applyKnowledgeBackedProposals"):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+const clone=value=>JSON.parse(JSON.stringify(value));
+const state={session:{id:'s1',plan:{materials:[
+  {id:'source',deck_slot:null,initial_volume_ul:null},
+  {id:'tips',deck_slot:4,available_tips:null}]},setup:{},selected_paragraph_ids:['p1']},
+  capabilities:{context_hash:'catalog'},busy:false};
+const recommendations=[
+  {path:'/setup/head_mode',value:{subset_type:'all_barrels',subset_config:'back_left'},rule_id:'head'},
+  {path:'/setup/tip_strategy',value:'fresh_each_source',rule_id:'strategy'},
+  {path:'/setup/tip_rack_ids',value:['tips'],rule_id:'racks'},
+  {path:'/materials/0/deck_slot',value:9,rule_id:'deck'},
+  {path:'/materials/1/deck_slot',value:2,rule_id:'deck-conflict'},
+  {path:'/materials/0/initial_volume_ul',value:100,rule_id:'unsupported'},
+  {path:'/materials/1/available_tips',value:'full',rule_id:'physical'},
+  {path:'/setup/liquid_class',value:'generic',rule_id:'method'},
+  {path:'/setup/distance_from_bottom_mm',value:1,rule_id:'height'}];
+state.setupRecommendations={context_hash:'catalog',recommendations};
+state.setupRecommendationKey=JSON.stringify(['s1',state.session.plan,state.session.setup,['p1'],'catalog']);
+function recommendationRoot(path){return path.startsWith('/materials/')?state.session.plan:state.session;}
+function pointerGet(root,path){return path.split('/').slice(1).reduce((row,key)=>row?.[key],root);}
+function pointerSet(root,path,value){const keys=path.split('/').slice(1);let row=root;
+  for(const key of keys.slice(0,-1))row=row[key]??=(/^\\d+$/.test(key)?[]:{});
+  row[keys.at(-1)]=value;}
+const decisions=[];
+function decide(path,value,reason){decisions.push({path,value,reason});}
+let dirtied=0;
+function dirty(){dirtied++;}
+function renderPlan(){}
+function renderSetup(){}
+function renderReview(){}
+let notice='';
+function notify(message){notice=message;}
+"""
+        + "\n".join(functions)
+        + """
+applyKnowledgeBackedProposals();
+assert.equal(dirtied,1);
+assert.equal(state.session.setup.head_mode.subset_type,'all_barrels');
+assert.equal(state.session.setup.tip_strategy,'fresh_each_source');
+assert.deepEqual(state.session.setup.tip_rack_ids,['tips']);
+assert.equal(state.session.plan.materials[0].deck_slot,9);
+assert.equal(state.session.plan.materials[1].deck_slot,4);
+assert.equal(state.session.plan.materials[0].initial_volume_ul,null);
+assert.equal(state.session.plan.materials[1].available_tips,null);
+assert.equal(state.session.setup.liquid_class,undefined);
+assert.equal(state.session.setup.distance_from_bottom_mm,undefined);
+assert.equal(decisions.length,4);
+assert.ok(decisions.every(row=>row.reason.includes('physical deck and tip inventory remain unconfirmed')));
+assert.ok(notice.includes('4 knowledge-backed setup/deck proposals'));
+"""
+    )
+    script = tmp_path / "bulk-setup-proposals.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_invalid_validation_does_not_present_partial_counts_as_executable(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    match = re.search(r"function validationSummaryText\([^\n]*\)\{[\s\S]*?\n\}", html)
+    assert match
+    script = tmp_path / "validation-summary.cjs"
+    script.write_text(
+        "const assert=require('node:assert/strict');\n"
+        + match[0]
+        + "\n"
+        + "const partial=validationSummaryText({ok:false,summary:{channels:0,tips_required:0,compiled_operations:8}});\n"
+        + "assert.match(partial,/Validation is incomplete/);\n"
+        + "assert.doesNotMatch(partial,/0 channels|8 compiled operations/);\n"
+        + "assert.match(validationSummaryText({ok:true,summary:{channels:384,tips_required:1536,compiled_operations:32}}),/384 channels.*1536 tips required.*32 compiled operations/);\n"
+    )
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
 
 

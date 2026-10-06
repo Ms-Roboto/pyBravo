@@ -90,6 +90,32 @@ function operationOptions(){
         Object.entries(labels).map(([value,label])=>({value,label}));
 }
 function materialOptions(role=null){return [{value:'',label:'Select material…'},...list(state.session?.plan?.materials).filter(item=>!role||item.role===role).map(item=>({value:item.id,label:`${item.name||item.id} (${item.id})`}))];}
+function methodQueryMissing(step,rackId){
+    const materials=new Map(list(state.session?.plan?.materials).map(item=>[item.id,item]));
+    const sourceId=step.kind==='mix'?step.material:step.source,source=materials.get(sourceId),rack=materials.get(rackId);
+    const missing=[];
+    if(!sourceId||!source)missing.push('source material reference');
+    else if(!source.labware_id)missing.push(`source ${sourceId} labware`);
+    if(step.kind==='distribute'){
+        if(!list(step.dispenses).length)missing.push('at least one destination dispense');
+        for(const [index,dispense] of list(step.dispenses).entries()){
+            if(!materials.get(dispense.destination)?.labware_id)missing.push(`dispense ${index+1} destination labware`);
+            if(!Number.isFinite(Number(dispense.volume_ul))||Number(dispense.volume_ul)<=0)missing.push(`dispense ${index+1} positive volume`);
+        }
+        const types=[...new Set(list(step.dispenses).map(item=>materials.get(item.destination)?.labware_id).filter(Boolean))];
+        if(types.length>1)missing.push('one shared destination labware type for this distribution');
+    }else{
+        if(step.kind!=='mix'&&!materials.get(step.destination)?.labware_id)missing.push('destination labware');
+        if(!Number.isFinite(Number(step.volume_ul))||Number(step.volume_ul)<=0)missing.push('positive volume per channel');
+    }
+    if(!rackId)missing.push('a unique source-to-tip-rack pairing for lookup');
+    else if(!rack||rack.role!=='tips')missing.push(`tip rack ${rackId} in the plan`);
+    else{
+        if(!rack.labware_id)missing.push(`tip rack ${rackId} catalog labware`);
+        if(!rack.tip_definition_id)missing.push(`tip rack ${rackId} tip definition`);
+    }
+    return missing;
+}
 function methodQuery(step,rackId){
     const plan=state.session?.plan,setup=state.session?.setup??{};
     const materials=new Map(list(plan?.materials).map(item=>[item.id,item]));
@@ -99,8 +125,7 @@ function methodQuery(step,rackId){
         step.kind==='mix'?[source]:[materials.get(step.destination)];
     const targetTypes=[...new Set(targets.map(item=>item?.labware_id).filter(Boolean))];
     const volume=step.kind==='distribute'?list(step.dispenses).reduce((sum,item)=>sum+Number(item.volume_ul||0),0):Number(step.volume_ul);
-    if(!source?.labware_id||!rack?.labware_id||!rack?.tip_definition_id||!volume||
-        (step.kind!=='mix'&&(!targets.length||targetTypes.length!==1||targets.some(item=>!item?.labware_id))))return null;
+    if(methodQueryMissing(step,rackId).length)return null;
     const full=setup.head_mode?.subset_type==='all_barrels';
     return {operation:step.kind,tip_id:rack.tip_definition_id,tipbox_id:rack.labware_id,
         source_labware_id:source.labware_id,destination_labware_id:step.kind==='mix'?null:targetTypes[0],
@@ -109,14 +134,41 @@ function methodQuery(step,rackId){
         source_anchor:full?(step.kind==='mix'?step.anchor:step.source_anchor):null,
         destination_anchor:full&&step.kind==='transfer'?step.destination_anchor:null};
 }
-function suggestedMethodRack(step){
-    const plan=state.session?.plan,setup=state.session?.setup??{},racks=list(setup.tip_rack_ids);
-    if(racks.length===1)return racks[0];
-    if(setup.tip_strategy==='fresh_each_source'){
-        const sources=[...new Set(list(plan?.steps).filter(item=>['transfer','distribute'].includes(item.kind)).map(item=>item.source))];
-        if(racks.length===sources.length)return racks[sources.indexOf(step.source)]||'';
+function proposedMethodRack(step){
+    const plan=state.session?.plan,setup=state.session?.setup??{},materials=list(plan?.materials);
+    const source=step.kind==='mix'?step.material:step.source;
+    const sources=liquidSourceOrder(plan?.steps),racks=materials.filter(item=>item.role==='tips');
+    const selected=list(setup.tip_rack_ids),ordered=setup.tip_strategy==='fresh_each_source'&&selected.length===sources.length
+        &&new Set(selected).size===sources.length&&selected.every(id=>racks.some(rack=>rack.id===id))
+        ?selected:[];
+    if(ordered.length&&sources.includes(source))return {id:ordered[sources.indexOf(source)],basis:'selected setup rack order'};
+    if(selected.length===1&&sources.length===1)return {id:selected[0],basis:'selected setup rack'};
+    if(selected.length)return {id:'',basis:''};
+    const recommendation=state.setupRecommendations?.context_hash===state.capabilities?.context_hash
+        ?list(state.setupRecommendations?.recommendations).find(row=>row.path==='/setup/tip_rack_ids'):null;
+    const proposed=list(recommendation?.value);
+    if(proposed.length===sources.length&&new Set(proposed).size===sources.length&&
+        proposed.every(id=>racks.some(rack=>rack.id===id))&&sources.includes(source))
+        return {id:proposed[sources.indexOf(source)],basis:'catalog-backed draft pairing'};
+    // Source-coded IDs are only a lookup hint. They never populate setup or
+    // assert that a physical rack or fresh tips are present on the deck.
+    if(!sources.length||sources.length!==racks.length||!sources.includes(source)||
+        list(plan?.steps).some(item=>item.kind==='repeat'||item.kind==='mix'))return {id:'',basis:''};
+    const grouped=list(plan?.steps).filter(item=>['transfer','distribute'].includes(item.kind)).map(item=>item.source);
+    if(grouped.some((sourceId,index)=>index>0&&sourceId!==grouped[index-1]&&grouped.slice(0,index).includes(sourceId)))
+        return {id:'',basis:''};
+    const mapped=[];
+    for(const sourceId of sources){
+        const exact=new RegExp('(^|[^A-Za-z0-9])'+String(sourceId).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'($|[^A-Za-z0-9])','i');
+        const matches=racks.filter(rack=>exact.test(String(rack.id||'')));
+        if(matches.length!==1)return {id:'',basis:''};
+        mapped.push(matches[0].id);
     }
-    return '';
+    if(new Set(mapped).size!==sources.length)return {id:'',basis:''};
+    return {id:mapped[sources.indexOf(source)],basis:'source-coded draft rack ID'};
+}
+function suggestedMethodRack(step){
+    return proposedMethodRack(step).id;
 }
 function methodClassChoices(registry,query){
     return list(state.context.liquid_classes).map(row=>{
@@ -126,6 +178,14 @@ function methodClassChoices(registry,query){
         return id&&ref&&row.machine_id===state.context.machine_id&&row.head_type===state.context.head_type&&row.tip_id===query.tip_id?
             {id,row,ref}:null;
     }).filter(Boolean);
+}
+function localLiquidClassGap(query){
+    const context=state.context??{};
+    if(!query?.tip_id)return '';
+    const rows=list(context.liquid_classes);
+    if(rows.some(row=>row.machine_id===context.machine_id&&row.head_type===context.head_type&&
+        row.tip_id===query.tip_id))return '';
+    return `No local liquid class is available for ${context.machine_id||'this machine'} / ${context.head_type||'this head'} / ${query.tip_id}. A compatible, reviewed liquid method is still needed.`;
 }
 function methodNumber(label,value='',help=''){
     const field=el('label',{class:'field'},label),input=el('input',{type:'number',min:0,step:'any'});
@@ -367,18 +427,24 @@ function renderMethodSelection(step,path){
     const rackField=el('label',{class:'field',style:'max-width:360px;margin-top:10px'},'Tip rack for lookup');
     const rackSelect=el('select',{},el('option',{value:''},'Select the rack used for this action'),
         ...racks.map(item=>el('option',{value:item.id},item.name||item.id)));
-    rackSelect.value=suggestedMethodRack(step);
+    const rackProposal=proposedMethodRack(step);
+    rackSelect.value=rackProposal.id;
     rackField.append(rackSelect);
+    if(rackProposal.id&&rackProposal.basis!=='selected setup rack order'&&rackProposal.basis!=='selected setup rack')
+        rackField.append(el('small',{},`Using ${rackProposal.basis} for lookup only. Confirm the rack and actual fresh tips before validation.`));
     const result=el('div',{class:'muted',style:'margin-top:10px;font-size:12px'});
     const button=el('button',{class:'small',onclick:async()=>{
         const query=methodQuery(step,rackSelect.value);
-        if(!query){result.textContent='Complete the source, destination, volume, reagent material and selected tip rack before lookup.';return;}
+        if(!query){result.textContent='Lookup needs: '+methodQueryMissing(step,rackSelect.value).join('; ')+'.';return;}
         button.disabled=true;result.textContent='Checking applicable methods…';
         try{
             const response=await api('/methods/lookup',{method:'POST',body:JSON.stringify(query)});
             result.replaceChildren();
             const curationHost=el('div',{class:'method-curation-host'});
             for(const issue of list(response.issues))result.append(el('p',{class:'issue error'},issue.reason||issue.field));
+            const classGap=localLiquidClassGap(query);
+            if(classGap&&!list(response.candidates).some(item=>item.execution_ready))
+                result.append(el('p',{class:'issue warn'},classGap));
             if(response.shared_aspiration_feasible===false)result.append(el('p',{class:'issue warn'},
                 'The combined volume exceeds one tip/head stroke. Separate aspirate and dispense pairs are needed; validation and simulation will check the reviewed method and capacity.'));
             for(const candidate of list(response.candidates).slice(0,6)){
@@ -412,7 +478,9 @@ function renderMethodSelection(step,path){
                 result.append(card);
             }
             if(list(response.candidates).length)result.append(curationHost);
-            if(!list(response.issues).length&&!list(response.candidates).length)result.textContent='No compatible method is recorded for this active setup.';
+            if(!list(response.issues).length&&!list(response.candidates).length){
+                result.append(el('p',{class:'issue warn'},'No compatible method is recorded for this active setup.'));
+            }
         }catch(error){result.textContent=error.message;}finally{button.disabled=false;}
     }},'Find applicable methods');
     panel.append(rackField,el('div',{class:'actions'},button),result);
@@ -425,7 +493,7 @@ function renderMethodPreview(){
     if(!plan)return;
     panel.replaceChildren(el('h3',{},'Automatic method proposals'),
         el('p',{class:'muted',style:'font-size:12px'},
-            'Read-only lookup of the saved plan. No method is pinned here; review each step or use Suggest liquid methods to apply proposals.'));
+            'Read-only lookup of the saved plan and any uniquely proposed source-to-rack pairing. This does not confirm what is physically loaded or pin a method. Review a step or use Suggest liquid methods to apply ready proposals.'));
     const preview=state.methodPreview;
     if(!preview||preview.status==='loading'){
         panel.append(el('p',{class:'muted'},'Checking complete liquid steps against the active method registry…'));
@@ -436,18 +504,24 @@ function renderMethodPreview(){
     for(const item of preview.items){
         const label=`${item.path} · ${item.description||item.kind}`;
         const explanation=item.status==='pinned'?`Pinned ${item.method_id}; inspect its per-step settings below.`:
-            item.status==='incomplete'?'Needs source, destination, volume, and a selected tip rack before lookup.':
+            item.status==='incomplete'?`Lookup needs: ${item.message}.`:
             item.status==='error'?`Lookup unavailable: ${item.message}`:
-            item.status==='needs_curation'?`Needs a reviewed method. ${item.message||'No execution-ready candidate is recorded.'}`:
+            item.status==='needs_curation'?`Needs a reviewed method.${item.method_id?' Reference candidate '+item.method_id+'.':''} ${item.message||'No execution-ready candidate is recorded.'}`:
             `Review candidate ${item.method_id} (${item.match_kind==='exact'?'exact applicability':'closest compatible'}). ${item.message||''}`;
-        panel.append(el('p',{style:'margin:7px 0'},el('strong',{},label),` — ${explanation}`));
+        panel.append(el('p',{style:'margin:7px 0'},el('strong',{},label),` — ${explanation}`,
+            item.rack_basis&&item.status!=='pinned'?` Lookup rack: ${item.rack_id} (${item.rack_basis}; physical load unconfirmed).`:''));
+        if(list(item.missing_fields).length)panel.append(el('details',{},
+            el('summary',{},`Show ${item.missing_fields.length} incomplete method fields`),
+            el('p',{class:'muted',style:'font-size:12px;overflow-wrap:anywhere'},item.missing_fields.join('; '))));
     }
 }
 async function refreshMethodPreview(){
     const plan=state.session?.plan;
     if(!plan){state.methodPreview=null;state.methodPreviewKey=null;renderMethodPreview();return;}
     const key=JSON.stringify([state.session.id,plan.steps,plan.materials,state.session.setup,
-        state.capabilities?.context_hash,state.methodsRegistry?.digest]);
+        state.capabilities?.context_hash,state.methodsRegistry?.digest,
+        state.setupRecommendations?.context_hash===state.capabilities?.context_hash
+            ?list(state.setupRecommendations?.recommendations).filter(row=>row.path==='/setup/tip_rack_ids'):[]]);
     if(key===state.methodPreviewKey)return;
     state.methodPreviewKey=key;
     const request=++state.methodPreviewRequest,items=[];
@@ -458,8 +532,9 @@ async function refreshMethodPreview(){
             if(!['transfer','distribute','mix'].includes(step.kind))continue;
             const item={path,description:step.description,kind:step.kind};
             if(step.method_ref){items.push({...item,status:'pinned',method_id:step.method_ref.method_id});continue;}
-            const query=methodQuery(step,suggestedMethodRack(step));
-            items.push(query?{...item,status:'pending',query}:{...item,status:'incomplete'});
+            const rack=proposedMethodRack(step),query=methodQuery(step,rack.id);
+            items.push(query?{...item,status:'pending',query,rack_id:rack.id,rack_basis:rack.basis}:
+                {...item,status:'incomplete',message:methodQueryMissing(step,rack.id).join('; '),rack_id:rack.id,rack_basis:rack.basis});
         }
     }
     visit(plan.steps,'/steps');
@@ -475,14 +550,18 @@ async function refreshMethodPreview(){
     for(const item of items){
         if(!item.query)continue;
         const response=await requests.get(JSON.stringify(item.query));
+        const classGap=localLiquidClassGap(item.query);
         delete item.query;
         if(response.error){item.status='error';item.message=response.error.message;continue;}
         const report=response.value,candidate=list(report.candidates).find(row=>row.execution_ready);
         if(list(report.issues).length){item.status='needs_curation';item.message=list(report.issues).map(row=>row.reason||row.field).join('; ');}
         else if(candidate){item.status='candidate';item.method_id=candidate.method_id;item.match_kind=candidate.match_kind;
             item.message=list(candidate.mismatches).length?`Differences: ${candidate.mismatches.map(row=>row.field).join(', ')}.`:'';}
-        else{item.status='needs_curation';item.message=list(report.candidates).length?
-            'Only incomplete reference or imported records are available.':'No compatible method is recorded.';}
+        else{item.status='needs_curation';item.method_id=list(report.candidates)[0]?.method_id;
+            const reference=list(report.candidates)[0];
+            item.missing_fields=list(reference?.missing_fields);
+            item.message=[reference?`Closest record is ${reference.status}; ${item.missing_fields.length} method fields need review.`:
+                'No compatible method is recorded.',classGap].filter(Boolean).join(' ');}
     }
     state.methodPreview={status:'ready',items};renderMethodPreview();
 }
@@ -581,7 +660,7 @@ function liquidSourceOrder(steps){
     const order = [];
     function visit(items){
         for(const step of list(items)){
-            const source = step.kind==='transfer' ? step.source : step.kind==='mix' ? step.material : null;
+            const source = ['transfer','distribute'].includes(step.kind) ? step.source : step.kind==='mix' ? step.material : null;
             if(source && !seen.has(source)){seen.add(source);order.push(source);}
             if(step.kind==='repeat')visit(step.steps);
         }
@@ -682,6 +761,30 @@ function renderRuntimeSnapshot(snapshot){
         `${item.software_occupied_count??'?'} occupied${item.well_count?' of '+item.well_count:''} wells`).join('; ')+'.'));
     return panel;
 }
+function currentSetupRecommendations(){
+    const session=state.session;
+    if(!session?.plan||!state.capabilities)return null;
+    const key=JSON.stringify([session.id,session.plan,session.setup,session.selected_paragraph_ids,state.capabilities.context_hash]);
+    return key===state.setupRecommendationKey&&state.setupRecommendations?.context_hash===state.capabilities.context_hash
+        ?state.setupRecommendations:null;
+}
+function applyKnowledgeBackedProposals(){
+    const data=currentSetupRecommendations();
+    if(!data||state.busy||!state.session?.plan)return;
+    const setupPaths=new Set(['/setup/head_mode','/setup/tip_strategy','/setup/tip_rack_ids',
+        '/setup/tip_disposal_id']);
+    let applied=0;
+    for(const row of list(data.recommendations)){
+        if(!setupPaths.has(row.path)&&!/^\/materials\/\d+\/deck_slot$/.test(row.path))continue;
+        const root=recommendationRoot(row.path),current=pointerGet(root,row.path);
+        if((current!=null&&current!=='')||row.value==null)continue;
+        pointerSet(root,row.path,clone(row.value));
+        decide(row.path,row.value,`Accepted knowledge rule ${row.rule_id} as a review-draft proposal; physical deck and tip inventory remain unconfirmed`);
+        applied++;
+    }
+    if(applied){dirty();renderPlan();renderSetup();renderReview();}
+    notify(`${applied} knowledge-backed setup/deck proposal${applied===1?'':'s'} added to the draft. Save, confirm what is physically loaded, then validate and simulate.`);
+}
 function renderSetupRecommendations(){
     const panel=$('setup-recommendations');
     if(!state.session?.plan||!state.capabilities){panel.hidden=true;return;}
@@ -692,6 +795,11 @@ function renderSetupRecommendations(){
     if(data.context_hash!==state.capabilities.context_hash){panel.append(el('p',{class:'muted'},'Instrument options changed. Refreshing the catalog before showing recommendations…'));return;}
     panel.append(el('p',{class:'muted',style:'font-size:12px'},'These are review-draft choices. Applying one does not validate or approve the experiment.'));
     panel.append(renderRuntimeSnapshot(data.runtime_snapshot));
+    const safeRows=list(data.recommendations).filter(row=>
+        ['/setup/head_mode','/setup/tip_strategy','/setup/tip_rack_ids','/setup/tip_disposal_id'].includes(row.path)
+        ||/^\/materials\/\d+\/deck_slot$/.test(row.path));
+    if(safeRows.length)panel.append(el('button',{class:'small',disabled:state.busy||!currentSetupRecommendations(),
+        onclick:applyKnowledgeBackedProposals},'Apply knowledge-backed setup proposals'));
     const deckRows=list(data.recommendations).filter(row=>/^\/materials\/\d+\/deck_slot$/.test(row.path));
     if(deckRows.length)panel.append(el('button',{class:'small',onclick:()=>{
         if(state.busy||!state.session?.plan)return;
@@ -783,6 +891,7 @@ function scheduleSetupRecommendations(){
             state.setupRecommendations={error:error.message};
         }
         renderSetupRecommendations();
+        refreshMethodPreview();
     },180);
 }
 function renderSetup(){
@@ -1028,7 +1137,13 @@ function renderValidationIssue(issue){
     }
     return detail;
 }
-function renderReview(){const s=state.session,plan=s?.plan;const summary=s?.validation?.summary;$('validation-summary').textContent=summary?`${summary.channels??0} channels · ${summary.tips_required??0} tips required · ${summary.compiled_operations??0} compiled operations · ${summary.manual_checkpoints??0} manual handoffs${Object.keys(summary.reagent_consumption_ul??{}).length?' · Reagent use: '+Object.entries(summary.reagent_consumption_ul).map(([id,volume])=>id+' '+volume+' µL').join(', '):''}`:'';$('validation-status').textContent=s?.validation?(s.validation.ok?'Passed':'Needs attention'):'Not validated';$('simulation-status').textContent=({running:'Running…',passed:'Passed',failed:'Failed'})[s?.simulation?.status]||'Not simulated';$('approval-status').textContent=s?.approval?'Approved':'Needs review';for(const id of ['validation-status','simulation-status','approval-status'])$(id).style.color='';if(s?.validation?.ok)$('validation-status').style.color='var(--green)';if(s?.simulation?.status==='passed')$('simulation-status').style.color='var(--green)';if(s?.simulation?.status==='failed')$('simulation-status').style.color='var(--red)';if(s?.approval)$('approval-status').style.color='var(--green)';const issues=s?.validation?.issues??s?.issues??[];const hasMethodDifferences=list(issues).some(issue=>['method_mismatch','distribute_calibration_fallback'].includes(issue.code));$('method-differences-label').hidden=!hasMethodDifferences;if(!hasMethodDifferences)$('method-differences').checked=false;$('issues').replaceChildren(...list(issues).map(renderValidationIssue));$('simulation-details').hidden=!s?.simulation;$('simulation-events').textContent=list(s?.simulation?.events).map(event=>typeof event==='string'?event:JSON.stringify(event)).join('\n')+(s?.simulation?.error?'\n'+s.simulation.error:'');const materials=list(plan?.materials);renderDeckRunSheet(materials);const table=el('table',{},el('thead',{},el('tr',{},...['Material','Starting supply','Dead volume / tips'].map(text=>el('th',{},text)))));table.append(el('tbody',{},...materials.map(item=>el('tr',{},el('td',{},item.name||item.id,el('small',{},materialDeckLabel(item))),el('td',{},item.role==='liquid'?`${item.initial_volume_ul??'Unspecified'} µL per well`:item.role==='tips'?item.tip_definition_id||'Tip type unspecified':'Waste',Object.keys(item.well_volumes_ul??{}).length?el('small',{},'Well overrides: '+Object.entries(item.well_volumes_ul).map(([well,v])=>`${well} ${v} µL`).join(', ')):null),el('td',{},item.role==='liquid'?`${item.dead_volume_ul??'Unspecified'} µL per well`:item.role==='tips'?tipInventoryLabel(item):'—')))));$('supplies').replaceChildren(materials.length?el('div',{class:'table-wrap'},table):el('p',{class:'muted'},plan?'This protocol does not use deck materials.':'Materials will appear after interpretation.'));$('run-steps').replaceChildren(plan?runList(list(plan.steps)):el('p',{class:'muted'},'No steps yet.'));const approval=s?.approval;$('approval-record').textContent=approval?`Approved by ${approval.scientist||'scientist'} · ${approval.created_at||approval.approved_at||''} · ${approval.qualification||''}${approval.notes?' · '+approval.notes:''}`:'';const history=list(s?.history??s?.revisions);$('history').replaceChildren(...history.map(item=>el('div',{class:'history-row'},el('strong',{},`${item.action||item.event||'Revision'} ${item.revision??''}`),' ',el('time',{},item.created_at||item.timestamp||item.time||''),item.summary?el('p',{},item.summary):null,el('details',{},el('summary',{},'Record details'),el('pre',{},JSON.stringify(item,null,2))))),...list(plan?.decisions).map(item=>el('div',{class:'history-row'},el('strong',{},item.path),' → '+textValue(item.value),el('p',{class:'muted'},item.reason||'Scientist decision'))));if(!$('history').childElementCount)$('history').append(el('p',{class:'muted'},'Saved revisions and scientist corrections will appear here.'));}
+function validationSummaryText(validation){
+    const summary=validation?.summary;
+    if(!summary)return '';
+    if(!validation.ok)return 'Validation is incomplete. Channel count, tip requirement and executable operation count will be calculated after the blocking issues are resolved.';
+    return `${summary.channels??0} channels · ${summary.tips_required??0} tips required · ${summary.compiled_operations??0} compiled operations · ${summary.manual_checkpoints??0} manual handoffs${Object.keys(summary.reagent_consumption_ul??{}).length?' · Reagent use: '+Object.entries(summary.reagent_consumption_ul).map(([id,volume])=>id+' '+volume+' µL').join(', '):''}`;
+}
+function renderReview(){const s=state.session,plan=s?.plan;$('validation-summary').textContent=validationSummaryText(s?.validation);$('validation-status').textContent=s?.validation?(s.validation.ok?'Passed':'Needs attention'):'Not validated';$('simulation-status').textContent=({running:'Running…',passed:'Passed',failed:'Failed'})[s?.simulation?.status]||'Not simulated';$('approval-status').textContent=s?.approval?'Approved':'Needs review';for(const id of ['validation-status','simulation-status','approval-status'])$(id).style.color='';if(s?.validation?.ok)$('validation-status').style.color='var(--green)';if(s?.simulation?.status==='passed')$('simulation-status').style.color='var(--green)';if(s?.simulation?.status==='failed')$('simulation-status').style.color='var(--red)';if(s?.approval)$('approval-status').style.color='var(--green)';const issues=s?.validation?.issues??s?.issues??[];const hasMethodDifferences=list(issues).some(issue=>['method_mismatch','distribute_calibration_fallback'].includes(issue.code));$('method-differences-label').hidden=!hasMethodDifferences;if(!hasMethodDifferences)$('method-differences').checked=false;$('issues').replaceChildren(...list(issues).map(renderValidationIssue));$('simulation-details').hidden=!s?.simulation;$('simulation-events').textContent=list(s?.simulation?.events).map(event=>typeof event==='string'?event:JSON.stringify(event)).join('\n')+(s?.simulation?.error?'\n'+s.simulation.error:'');const materials=list(plan?.materials);renderDeckRunSheet(materials);const table=el('table',{},el('thead',{},el('tr',{},...['Material','Starting supply','Dead volume / tips'].map(text=>el('th',{},text)))));table.append(el('tbody',{},...materials.map(item=>el('tr',{},el('td',{},item.name||item.id,el('small',{},materialDeckLabel(item))),el('td',{},item.role==='liquid'?`${item.initial_volume_ul??'Unspecified'} µL per well`:item.role==='tips'?item.tip_definition_id||'Tip type unspecified':'Waste',Object.keys(item.well_volumes_ul??{}).length?el('small',{},'Well overrides: '+Object.entries(item.well_volumes_ul).map(([well,v])=>`${well} ${v} µL`).join(', ')):null),el('td',{},item.role==='liquid'?`${item.dead_volume_ul??'Unspecified'} µL per well`:item.role==='tips'?tipInventoryLabel(item):'—')))));$('supplies').replaceChildren(materials.length?el('div',{class:'table-wrap'},table):el('p',{class:'muted'},plan?'This protocol does not use deck materials.':'Materials will appear after interpretation.'));$('run-steps').replaceChildren(plan?runList(list(plan.steps)):el('p',{class:'muted'},'No steps yet.'));const approval=s?.approval;$('approval-record').textContent=approval?`Approved by ${approval.scientist||'scientist'} · ${approval.created_at||approval.approved_at||''} · ${approval.qualification||''}${approval.notes?' · '+approval.notes:''}`:'';const history=list(s?.history??s?.revisions);$('history').replaceChildren(...history.map(item=>el('div',{class:'history-row'},el('strong',{},`${item.action||item.event||'Revision'} ${item.revision??''}`),' ',el('time',{},item.created_at||item.timestamp||item.time||''),item.summary?el('p',{},item.summary):null,el('details',{},el('summary',{},'Record details'),el('pre',{},JSON.stringify(item,null,2))))),...list(plan?.decisions).map(item=>el('div',{class:'history-row'},el('strong',{},item.path),' → '+textValue(item.value),el('p',{class:'muted'},item.reason||'Scientist decision'))));if(!$('history').childElementCount)$('history').append(el('p',{class:'muted'},'Saved revisions and scientist corrections will appear here.'));}
 function runList(steps){return el('ol',{class:'step-list'},...steps.map(step=>{const parts={distribute:`Aspirate ${list(step.dispenses).reduce((sum,target)=>sum+Number(target.volume_ul||0),0)} µL per channel from ${step.source??'?'} / ${step.source_anchor??'?'}; then ${list(step.dispenses).map(target=>'dispense '+(target.volume_ul??'?')+' µL into '+(target.destination??'?')+' / '+(target.destination_anchor??'?')).join('; ')}.`,transfer:`Aspirate ${step.volume_ul??'?'} µL per channel from ${step.source??'?'} / ${step.source_anchor??'?'}; then dispense ${step.volume_ul??'?'} µL into ${step.destination??'?'} / ${step.destination_anchor??'?'}.`,mix:`Mix ${step.material??'?'} / ${step.anchor??'?'}: ${step.cycles??'?'} cycles of ${step.volume_ul??'?'} µL.`,manual:`Manual handoff: ${step.message||step.description||'Instruction required'}`,wait:`Wait ${step.duration_s??'?'} seconds.`,move_plate:`Move ${step.material??'?'} to position ${step.destination_slot??'?'}.`,destack_plate:'Destack '+(step.material??'?')+' to empty position '+(step.destination_slot??'?')+'.',stack_plate:'Stack '+(step.material??'?')+' onto position '+(step.destination_slot??'?')+'.',repeat:`Repeat ${step.repeat??'?'} times.`};return el('li',{},parts[step.kind]||step.description,step.description?el('small',{},step.description):null,step.kind==='repeat'?runList(list(step.steps)):null);}));}
 function gates(){const s=state.session;const plan=!!s?.plan;const busy=state.busy;const running=s?.simulation?.status==='running';$('session-status').textContent=s?`Revision ${s.revision??1}${state.dirty?' · unsaved':s.approval?' · approved':' · draft'}`:'No protocol loaded';$('session-status').className='badge'+(s?.approval&&!state.dirty?' good':'');$('save-status').textContent=state.dirty?'Unsaved changes. Saving invalidates previous checks and approval.':s?`All changes saved · session ${s.id}`:'No session';$('save').disabled=busy||!state.dirty;$('reload').disabled=busy||!s;$('extract').disabled=busy||!s||!list(s.selected_paragraph_ids).length||!$('source-reviewed').checked;$('validate').disabled=busy||!plan;$('simulate').disabled=busy||!s?.validation?.ok||state.dirty||running;$('approve').disabled=busy||state.dirty||!s?.validation?.ok||s?.simulation?.status!=='passed'||!$('plan-reviewed').checked||!$('deck-confirmed').checked||!$('scientist').value.trim()||!$('approval-notes').value.trim()||(!$('method-differences-label').hidden&&!$('method-differences').checked);$('export').disabled=busy||state.dirty||!s?.approval;$('publish').disabled=busy||state.dirty||!s?.approval||!$('publish-name').value.trim();$('apply-setup').disabled=busy||!s||!$('setup-picker').value;$('save-setup').disabled=busy||!s||!$('setup-name').value.trim();if($('add-compatible-tipbox'))$('add-compatible-tipbox').disabled=busy||!s||!$('setup-tipbox-select').value;$('prepare-deck').disabled=busy||!s;$('suggest-methods').disabled=busy||!plan;$('add-material').disabled=busy||!s;$('add-step').disabled=busy||!plan;$('from-text').disabled=busy||!$('protocol-text').value.trim();$('ingest').disabled=busy||!$('protocol-file').files.length;freezeBusyControls();}
 function schedulePoll(){clearTimeout(state.poll);if(state.session?.simulation?.status==='running'){const sessionId=state.session.id;state.poll=setTimeout(async()=>{try{const data=await api('/'+encodeURIComponent(sessionId));if(state.session?.id!==sessionId)return;const next=data.session??data;if(state.dirty){state.session.simulation=next.simulation;renderReview();gates();schedulePoll();}else acceptSession(next);}catch(error){notify('Simulation status could not be refreshed: '+error.message,true);schedulePoll();}},1200);}}
