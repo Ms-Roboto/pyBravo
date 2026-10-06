@@ -789,6 +789,8 @@ def _recognized_quadrant_plan(
         expected = _recognized_quadrant_plan(earlier, prior_context, answers=None, feedback=None)
         if expected is None:
             return None
+        from .dead_volume import seed_reviewed_source_dead_volumes
+        seed_reviewed_source_dead_volumes(expected, context)
         tipbox_issues, recommendations = _check_tipbox_guidance(expected, earlier, prior_context)
         if tipbox_issues:
             return None
@@ -900,7 +902,8 @@ def _recognized_quadrant_plan(
             {"id": "draft:plate-types", "path": "/materials/0/labware_id",
              "prompt": "Confirm that the proposed catalog 384 and 1536 plate types match the physical plates."},
             {"id": "draft:starting-volume", "path": "/materials/0/initial_volume_ul",
-             "prompt": "Confirm starting and dead volume for every source well; each source supplies 5 uL to each of two destinations."},
+             "prompt": ("Confirm starting volume for every source well; each source supplies 5 uL to each of two destinations. "
+                        "Review the source plate's catalog dead-volume estimate in the draft.")},
             {"id": "draft:liquid-class", "path": "/setup/liquid_class",
              "prompt": "Choose and confirm a validated 5 uL ST10 liquid class for this source and destination geometry."},
             {"id": "draft:head-mode", "path": "/setup/head_mode",
@@ -1075,6 +1078,8 @@ async def extract_protocol_plan(
         issues.extend(tipbox_issues)
         if issues:
             raise ProtocolGroundingError("The catalog-backed quadrant draft failed validation: " + "; ".join(issues[:8]))
+        from .dead_volume import seed_reviewed_source_dead_volumes
+        catalog_defaults = seed_reviewed_source_dead_volumes(recognized, supplied_context)
         _add_tipbox_confirmation_questions(recognized, recommendations)
         _add_isolated_source_setup_questions(recognized, source)
         logger.info("protocol_catalog_quadrant_draft", source_id=source.source_id,
@@ -1086,6 +1091,7 @@ async def extract_protocol_plan(
             "source_id": source.source_id,
             "source_paragraph_ids": [paragraph.id for paragraph in source.paragraphs],
             "catalog_recommendations": recommendations,
+            "catalog_defaults": catalog_defaults,
         })
     user_payload: dict[str, Any] = {"source": source.model_dump(), "context": _model_context(supplied_context), "answers": answers or {}}
     from .recipes import relevant_recipe_hints
@@ -1124,6 +1130,8 @@ async def extract_protocol_plan(
             tipbox_issues, recommendations = _check_tipbox_guidance(plan, source, supplied_context)
             issues.extend(tipbox_issues)
             if not issues:
+                from .dead_volume import seed_reviewed_source_dead_volumes
+                catalog_defaults = seed_reviewed_source_dead_volumes(plan, supplied_context)
                 _add_tipbox_confirmation_questions(plan, recommendations)
                 _add_isolated_source_setup_questions(plan, source)
                 return ExtractionResult(plan=plan, metadata={
@@ -1132,6 +1140,7 @@ async def extract_protocol_plan(
                     "recipe_hints": [recipe["id"] for recipe in recipe_hints],
                     "source_id": source.source_id, "source_paragraph_ids": [p.id for p in source.paragraphs],
                     "catalog_recommendations": recommendations,
+                    "catalog_defaults": catalog_defaults,
                 })
         if attempt == cfg.repair_attempts:
             raise ProtocolGroundingError("The extracted plan still has grounding/schema errors: " + "; ".join(issues[:8]))

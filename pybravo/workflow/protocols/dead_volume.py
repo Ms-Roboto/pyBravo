@@ -20,6 +20,51 @@ def catalog_dead_volume(definition: Mapping[str, Any] | None) -> tuple[float, st
     return float(value), status
 
 
+def seed_reviewed_source_dead_volumes(plan: Any, context: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Fill missing aspirated-source residual estimates from reviewed plate types.
+
+    This is catalog-backed planning data, not a scientist decision or proof of
+    physical liquid supply. Unreviewed placeholders and existing plan values
+    are left untouched. The returned rows identify every inserted value.
+    """
+    definitions: dict[str, Mapping[str, Any]] = {}
+    duplicates: set[str] = set()
+    for row in context.get("labware") or []:
+        if not isinstance(row, Mapping) or not isinstance(row.get("id"), str):
+            continue
+        identity = row["id"]
+        if identity in definitions:
+            duplicates.add(identity)
+        else:
+            definitions[identity] = row
+
+    aspirated_ids: set[str] = set()
+
+    def collect(steps: Any) -> None:
+        for step in steps or []:
+            if step.kind in {"transfer", "distribute"} and step.source:
+                aspirated_ids.add(step.source)
+            elif step.kind == "mix" and step.material:
+                aspirated_ids.add(step.material)
+            collect(step.steps)
+
+    collect(plan.steps)
+    seeded: list[dict[str, Any]] = []
+    for index, material in enumerate(plan.materials):
+        if (material.role != "liquid" or material.id not in aspirated_ids
+                or material.dead_volume_ul is not None or not material.labware_id
+                or material.labware_id in duplicates):
+            continue
+        catalog_value = catalog_dead_volume(definitions.get(material.labware_id))
+        if catalog_value is None or catalog_value[1] != "reviewed":
+            continue
+        material.dead_volume_ul = catalog_value[0]
+        seeded.append({"path": f"/materials/{index}/dead_volume_ul",
+                       "value": catalog_value[0], "labware_id": material.labware_id,
+                       "source": "reviewed_labware_catalog"})
+    return seeded
+
+
 def scientist_confirmed_dead_volume(decisions: Any, index: int, material_id: str,
                                     labware_id: str, value: float) -> bool:
     """Require an explicit confirmation bound to the current material and plate."""

@@ -138,6 +138,42 @@ async def test_extraction_keeps_unknowns_and_manual_steps(monkeypatch):
     assert "Unknown values MUST remain null" in captured[0][0]["content"]
 
 
+async def test_model_draft_uses_reviewed_catalog_source_residual_without_claiming_supply(monkeypatch):
+    source = ingest_text("Transfer 5 uL from the source plate into the destination plate.")
+    paragraph_id = source.paragraphs[0].id
+    payload = {
+        "name": "One transfer",
+        "materials": [
+            {"id": "source", "name": "Source plate", "labware_id": "source-plate"},
+            {"id": "destination", "name": "Destination plate", "labware_id": "destination-plate"},
+        ],
+        "steps": [{"id": "move", "kind": "transfer", "source": "source",
+                   "destination": "destination", "source_anchor": "A1",
+                   "destination_anchor": "A1", "volume_ul": 5,
+                   "source_paragraph_ids": [paragraph_id],
+                   "source_values": [{"field": "volume_ul", "value": 5, "unit": "uL",
+                                      "paragraph_id": paragraph_id}]}],
+        "decisions": [],
+    }
+
+    async def complete(*args, **kwargs):
+        return StructuredResponse(payload, {"model": "qwen"})
+
+    monkeypatch.setattr(llm, "structured_json", complete)
+    result = await extract_protocol_plan(source, context={"labware": [
+        {"id": "source-plate", "dead_volume_ul": 6.5, "dead_volume_status": "reviewed"},
+        {"id": "destination-plate", "dead_volume_ul": 1.0, "dead_volume_status": "reviewed"},
+    ]})
+    assert result.plan.materials[0].dead_volume_ul == 6.5
+    assert result.plan.materials[1].dead_volume_ul is None
+    assert all(material.initial_volume_ul is None for material in result.plan.materials)
+    assert result.plan.decisions == []
+    assert result.metadata["catalog_defaults"] == [{
+        "path": "/materials/0/dead_volume_ul", "value": 6.5,
+        "labware_id": "source-plate", "source": "reviewed_labware_catalog",
+    }]
+
+
 async def test_model_receives_capability_options_without_controller_configuration(monkeypatch):
     source = ingest_text("Manually inspect the plate.")
     captured = {}
@@ -697,6 +733,32 @@ async def test_named_labcyte_quadrant_request_uses_verified_catalog_without_mode
     assert {material.labware_id for material in result.plan.materials[:4]} == {"pp-384"}
     assert {material.labware_id for material in result.plan.materials[4:6]} == {"ldv-1536"}
     assert all(step.source_paragraph_ids == [source.paragraphs[0].id] for step in result.plan.steps)
+
+
+async def test_named_quadrant_draft_seeds_reviewed_source_dead_volume_only(monkeypatch):
+    source = ingest_text(
+        "I have 4 384 well plates labcyte pp plates and I want to transfer 5ul from each plate "
+        "into the 4 quadrants of two 1536 plates labcyte ldv plates. i can't have any cross "
+        "contamination. Please help me layout the deck and write the protocol to do the transfer."
+    )
+    context = _catalog_quadrant_context()
+    context["labware"][0].update(name="384 Labcyte PP0200 PP sq flt", dead_volume_ul=6.5,
+                                 dead_volume_status="reviewed")
+    context["labware"][1].update(name="1536 Labcyte LP-0400 LDV", dead_volume_ul=1.0,
+                                 dead_volume_status="reviewed")
+
+    async def model_must_not_be_called(*args, **kwargs):
+        raise AssertionError("The named catalog-backed request should not call the model")
+
+    monkeypatch.setattr(llm, "structured_json", model_must_not_be_called)
+    result = await extract_protocol_plan(source, context=context)
+    assert [material.dead_volume_ul for material in result.plan.materials[:4]] == [6.5] * 4
+    assert [material.dead_volume_ul for material in result.plan.materials[4:6]] == [None, None]
+    assert all(material.initial_volume_ul is None for material in result.plan.materials[:6])
+    assert result.plan.decisions == []
+    assert [row["path"] for row in result.metadata["catalog_defaults"]] == [
+        f"/materials/{index}/dead_volume_ul" for index in range(4)
+    ]
 
 
 @pytest.mark.parametrize("catalog_change", ["ambiguous_source", "undersized_destination"])
