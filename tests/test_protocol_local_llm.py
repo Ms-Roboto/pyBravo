@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from pybravo.workflow.protocols import llm
-from pybravo.workflow.protocols.ingest import ingest_text
+from pybravo.workflow.protocols.ingest import SourceParagraph, ingest_text
 from pybravo.workflow.protocols.llm import (
     LocalLLMConfig,
     ProtocolGroundingError,
@@ -675,6 +675,93 @@ async def test_exact_four_source_quadrant_request_uses_catalog_template_without_
         "/setup/tip_strategy", "/setup/tip_rack_ids", "/setup/tip_reuse_reason",
         "/setup/tip_disposal_id", "/setup/liquid_class",
     }
+
+
+async def test_named_labcyte_quadrant_request_uses_verified_catalog_without_model(monkeypatch):
+    source = ingest_text(
+        "I have 4 384 well plates labcyte pp plates and I want to transfer 5ul from each plate "
+        "into the 4 quadrants of two 1536 plates labcyte ldv plates. i can't have any cross "
+        "contamination. Please help me layout the deck and write the protocol to do the transfer."
+    )
+    context = _catalog_quadrant_context()
+    context["labware"][0].update(name="384 Labcyte PP0200 PP sq flt", id="pp-384")
+    context["labware"][1].update(name="1536 Labcyte LP-0400 LDV", id="ldv-1536")
+    context["labware"].append({**context["labware"][0], "id": "other-384", "name": "384 Other PP plate"})
+
+    async def model_must_not_be_called(*args, **kwargs):
+        raise AssertionError("A unique named plate should use the catalog-backed draft")
+
+    monkeypatch.setattr(llm, "structured_json", model_must_not_be_called)
+    result = await extract_protocol_plan(source, context=context)
+    assert result.metadata["provider"] == "catalog_template"
+    assert {material.labware_id for material in result.plan.materials[:4]} == {"pp-384"}
+    assert {material.labware_id for material in result.plan.materials[4:6]} == {"ldv-1536"}
+    assert all(step.source_paragraph_ids == [source.paragraphs[0].id] for step in result.plan.steps)
+
+
+@pytest.mark.parametrize("catalog_change", ["ambiguous_source", "undersized_destination"])
+async def test_named_labcyte_quadrant_template_rejects_ambiguous_or_undersized_catalog(
+    monkeypatch, catalog_change,
+):
+    source = ingest_text(
+        "I have 4 384 well plates labcyte pp plates and I want to transfer 5ul from each plate "
+        "into the 4 quadrants of two 1536 plates labcyte ldv plates. i can't have any cross "
+        "contamination. Please help me layout the deck and write the protocol to do the transfer."
+    )
+    context = _catalog_quadrant_context()
+    context["labware"][0]["name"] = "384 Labcyte PP0200 PP sq flt"
+    context["labware"][1]["name"] = "1536 Labcyte LP-0400 LDV"
+    if catalog_change == "ambiguous_source":
+        context["labware"].append({**context["labware"][0], "id": "another-labcyte-pp"})
+    else:
+        context["labware"][1]["well_volume_ul"] = 4.9
+    calls = []
+
+    async def model_called(*args, **kwargs):
+        calls.append(True)
+        raise llm.ProtocolResponseError("catalog template declined")
+
+    monkeypatch.setattr(llm, "structured_json", model_called)
+    with pytest.raises(llm.ProtocolResponseError, match="catalog template declined"):
+        await extract_protocol_plan(source, context=context, config=LocalLLMConfig(repair_attempts=0))
+    assert calls == [True]
+
+
+async def test_named_labcyte_quadrant_resend_replaces_only_unchanged_template(monkeypatch):
+    first = ingest_text(
+        "I have 4 384 well plates and I want to transfer 5ul from each plate "
+        "into the 4 quadrants of two 1536 plates. i can't have any cross "
+        "contamination. Please help me layout the deck and write the protocol to do the transfer."
+    )
+    context = _catalog_quadrant_context()
+    context["labware"][0].update(name="384 Labcyte PP0200 PP sq flt")
+    context["labware"][1].update(name="1536 Labcyte LP-0400 LDV")
+    previous = (await extract_protocol_plan(first, context=context)).plan
+    second = first.model_copy(deep=True)
+    second.metadata["parser"] = "chat"
+    second.paragraphs.append(SourceParagraph(
+        id="new-user-message", kind="chat_message", text=(
+            "I have 4 384 well plates labcyte pp plates and I want to transfer 5ul from each plate "
+            "into the 4 quadrants of two 1536 plates labcyte ldv plates. i can't have any cross "
+            "contamination. Please help me layout the deck and write the protocol to do the transfer."
+        ),
+    ))
+
+    async def model_must_not_be_called(*args, **kwargs):
+        raise AssertionError("Equivalent chat resend should not call the local model")
+
+    monkeypatch.setattr(llm, "structured_json", model_must_not_be_called)
+    result = await extract_protocol_plan(second, context={**context, "current_plan": previous.model_dump()})
+    assert result.metadata["provider"] == "catalog_template"
+    assert all(step.source_paragraph_ids == ["new-user-message"] for step in result.plan.steps)
+    assert all(step.source_values[0].paragraph_id == "new-user-message"
+               for step in result.plan.steps if step.kind == "transfer")
+
+    edited = previous.model_copy(deep=True)
+    edited.steps[0].description = "Scientist-edited staging instruction"
+    with pytest.raises(AssertionError, match="Equivalent chat resend"):
+        await extract_protocol_plan(second, context={**context, "current_plan": edited.model_dump()},
+                                    config=LocalLLMConfig(repair_attempts=0))
 
 
 async def test_quadrant_template_requires_unique_catalog_and_exact_request(monkeypatch):

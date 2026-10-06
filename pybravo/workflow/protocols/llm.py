@@ -762,24 +762,53 @@ def _recognized_quadrant_plan(
 
     This narrow path avoids a long model generation for the exact four-source,
     two-destination workflow. It only uses catalog entries with unique verified
-    geometry and leaves all inventory and experimental setup for review.
-    Any extra instruction, later correction, or ambiguous catalog falls through
-    to the local model.
+    geometry and leaves all inventory and experimental setup for review. A
+    repeated, more specific chat request may replace an unchanged earlier
+    catalog draft, but never a scientist-edited plan or an additional action.
     """
     from .models import ProtocolPlan
 
-    if len(source.paragraphs) != 1 or answers or feedback or context.get("current_plan"):
+    if len(source.paragraphs) not in {1, 2} or answers or feedback:
         return None
-    request = re.sub(r"\s+", " ", source.paragraphs[0].text.strip().lower())
+    if len(source.paragraphs) == 1:
+        if context.get("current_plan"):
+            return None
+    else:
+        # Only a chat continuation of the same complete request may take this
+        # path. Rebuild the first draft and compare all reviewable plan fields;
+        # a changed material, step, question, or decision must use the model so
+        # the scientist's earlier work is not silently replaced.
+        if source.metadata.get("parser") != "chat" or not isinstance(context.get("current_plan"), dict):
+            return None
+        earlier = source.model_copy(update={"paragraphs": source.paragraphs[:1]})
+        prior_context = {**context, "current_plan": None}
+        expected = _recognized_quadrant_plan(earlier, prior_context, answers=None, feedback=None)
+        if expected is None:
+            return None
+        tipbox_issues, recommendations = _check_tipbox_guidance(expected, earlier, prior_context)
+        if tipbox_issues:
+            return None
+        _add_tipbox_confirmation_questions(expected, recommendations)
+        _add_isolated_source_setup_questions(expected, earlier)
+        try:
+            previous = ProtocolPlan.model_validate(context["current_plan"])
+        except ValueError:
+            return None
+        if previous != expected:
+            return None
+    request = re.sub(r"\s+", " ", source.paragraphs[-1].text.strip().lower())
     pattern = (
-        r"i have (?:4|four) 384(?:[- ]well)? plates and i want to transfer "
+        r"i have (?:4|four) 384(?:[- ]well)? plates"
+        r"(?P<source_plate> labcyte pp(?:[- ]?0200)? plates)? and i want to transfer "
         r"5\s*(?:ul|µl|μl) from each plate into the (?:4|four) quadrants of "
-        r"(?:2|two) 1536(?:[- ]well)? plates[.!?]? "
+        r"(?:2|two) 1536(?:[- ]well)? plates"
+        r"(?P<destination_plate> labcyte (?:lp[- ]?0400 )?ldv plates)?[.!?]? "
         r"i can(?:not|'?t) have any cross[- ]contamination[.!?]? "
         r"please help me (?:layout|lay out) the deck and write the protocol "
         r"to do the transfer[.!?]?"
     )
-    if not re.fullmatch(pattern, request):
+    match = re.fullmatch(pattern, request)
+    if match is None:
         return None
     if not str(context.get("head_type") or "").startswith("HT_384_") or context.get("has_gripper") is not True:
         return None
@@ -794,6 +823,15 @@ def _recognized_quadrant_plan(
 
     sources = plates(384, 16, 24, 4.5, 10)
     destinations = plates(1536, 32, 48, 2.25, 5)
+    # Explicit plate descriptions are constraints, never hints to substitute
+    # another plate. Only a unique catalog match with verified geometry may
+    # enter this no-model path; ambiguous or incomplete catalogs fall through.
+    if match.group("source_plate"):
+        sources = [row for row in sources if re.search(r"\blabcyte\b", str(row.get("name") or ""), re.I)
+                   and re.search(r"\bpp(?:[- ]?0200)?\b", str(row.get("name") or ""), re.I)]
+    if match.group("destination_plate"):
+        destinations = [row for row in destinations if re.search(r"\blabcyte\b", str(row.get("name") or ""), re.I)
+                        and re.search(r"\bldv\b", str(row.get("name") or ""), re.I)]
     tip_pairs = [row for row in context.get("tipbox_choices") or [] if isinstance(row, dict)
                  and row.get("tip_definition_id") == "st_10ul"
                  and row.get("wells") == 384 and row.get("rows") == 16 and row.get("cols") == 24
@@ -802,7 +840,7 @@ def _recognized_quadrant_plan(
     if len(sources) != 1 or len(destinations) != 1 or len(tip_pairs) != 1:
         return None
     source_labware, destination_labware, tip_pair = sources[0], destinations[0], tip_pairs[0]
-    citation = source.paragraphs[0].id
+    citation = source.paragraphs[-1].id
     materials: list[dict[str, Any]] = [
         {"id": f"source_{number}", "name": f"384 source plate {number} (proposed bottom-to-top order)",
          "role": "liquid", "labware_id": source_labware["id"], "deck_slot": 9,
