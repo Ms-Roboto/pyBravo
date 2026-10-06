@@ -339,7 +339,7 @@ def test_liquid_class_proposal_is_grouped_explained_and_planning_only(tmp_path):
     html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
     functions = []
     for name in (
-        "liquidSourceOrder", "liquidClassProposalQueries", "sharedSourceLiquidMissing",
+        "liquidSourceOrder", "sharedProposalTipRack", "liquidClassProposalQueries", "sharedSourceLiquidMissing",
         "applySharedSourceLiquidFamily", "liquidClassProposalPath", "liquidClassProposalDecision",
         "recordLiquidClassProposal", "renderLiquidClassProposals",
         "refreshLiquidClassProposals", "decide",
@@ -374,8 +374,10 @@ function dirty(){dirtied++;}
 function notify(value){notice=value;}
 function renderPlan(){}
 const steps=Array.from({length:8},()=>({kind:'transfer',volume_ul:5}));
-const state={session:{id:'draft',setup:{},plan:{steps,decisions:[]}},
-  context:{machine_id:'SIMULATED',head_type:'HT_384_D_70',context_hash:'catalog',liquid_classes:[]},
+const state={session:{id:'draft',setup:{},plan:{steps,decisions:[],materials:[
+  {id:'tips_source_4',role:'tips',labware_id:'384-st-rack',tip_definition_id:'st_10ul'}]}},
+  context:{machine_id:'SIMULATED',head_type:'HT_384_D_70',context_hash:'catalog',liquid_classes:[],
+    tipbox_choices:[{labware_id:'384-st-rack',tip_definition_id:'st_10ul',execution_ready:true}]},
   liquidClassProposals:null,liquidClassProposalKey:null,liquidClassProposalRequest:0,busy:false};
 const candidate={liquid_class_id:'liq-physical',name:'ST10 low volume',
   source_machine_id:'04-91-62-CF-7B-B0',source_head_type:'HT_384_D_70',source_tip_id:'st_10ul',
@@ -455,6 +457,57 @@ async function api(path,options){assert.equal(path,'/liquid-class-proposals');lo
 """
     )
     script = tmp_path / "liquid-class-proposal.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_liquid_class_proposal_uses_common_tip_identity_before_tip_policy_is_confirmed(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in (
+        "methodQueryMissing", "methodQuery", "proposedMethodRack",
+        "sharedProposalTipRack", "liquidClassProposalQueries", "localLiquidClassGap",
+        "liquidSourceOrder",
+    ):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+const sources=[1,2,3,4].map(i=>({id:'source_'+i,role:'liquid',
+  labware_id:'384-labcyte-pp',reagent_family:'DMSO'}));
+const destinations=[1,2].map(i=>({id:'destination_'+i,role:'liquid',labware_id:'1536-labcyte-ldv'}));
+const racks=[4,3,2,1].map(i=>({id:'tips_source_'+i,role:'tips',
+  labware_id:'384-st-box',tip_definition_id:'st_10ul'}));
+const steps=[4,3,2,1].flatMap(i=>[1,2].map(j=>({kind:'transfer',source:'source_'+i,
+  destination:'destination_'+j,volume_ul:5,source_anchor:'A1',destination_anchor:'A1'})));
+const selected=racks.map(rack=>rack.id);
+const state={session:{id:'draft',setup:{tip_rack_ids:selected,tip_strategy:null,
+  head_mode:{subset_type:'all_barrels'}},plan:{materials:[...sources,...destinations,...racks],steps}},
+  context:{machine_id:'SIMULATED',head_type:'HT_384_D_70',liquid_classes:[],
+    tipbox_choices:[{labware_id:'384-st-box',tip_definition_id:'st_10ul',execution_ready:true}]},
+  setupRecommendations:null,capabilities:null};
+"""
+        + "\n".join(functions)
+        + """
+assert.equal(proposedMethodRack(steps[0]).id,'',
+  'Method lookup still needs a source-to-rack policy');
+assert.equal(sharedProposalTipRack(),'tips_source_4');
+const queries=liquidClassProposalQueries();
+assert.equal(queries.length,1,'One common tip/box should yield one planning query for eight transfers');
+assert.equal(queries[0].step_count,8);
+assert.deepEqual(queries[0].query,{tip_id:'st_10ul',volume_ul:5,reagent_family:'DMSO',
+  source_labware_id:'384-labcyte-pp',destination_labware_id:'1536-labcyte-ldv'});
+assert.equal(state.session.setup.tip_strategy,null);
+assert.ok(steps.every(step=>!step.method_ref));
+racks[3].tip_definition_id='st_30ul';
+assert.equal(sharedProposalTipRack(),null,'Ambiguous rack tips cannot drive a class proposal');
+assert.deepEqual(liquidClassProposalQueries(),[]);
+"""
+    )
+    script = tmp_path / "unconfirmed-tip-policy-class-proposal.cjs"
     script.write_text(source)
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
 

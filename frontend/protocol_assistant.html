@@ -200,13 +200,27 @@ function localLiquidClassGap(query){
         row.tip_id===query.tip_id))return '';
     return `No local liquid class is available for ${context.machine_id||'this machine'} / ${context.head_type||'this head'} / ${query.tip_id}. A compatible, reviewed liquid method is still needed.`;
 }
+function sharedProposalTipRack(){
+    const materials=list(state.session?.plan?.materials),racks=materials.filter(item=>item.role==='tips');
+    const selected=list(state.session?.setup?.tip_rack_ids);
+    const candidates=selected.length?selected.map(id=>racks.find(rack=>rack.id===id)):racks;
+    if(!candidates.length||candidates.some(rack=>!rack?.labware_id||!rack.tip_definition_id))return null;
+    const first=candidates[0];
+    if(candidates.some(rack=>rack.labware_id!==first.labware_id||rack.tip_definition_id!==first.tip_definition_id))return null;
+    if(!list(state.context?.tipbox_choices).some(choice=>choice.execution_ready===true&&
+        choice.labware_id===first.labware_id&&choice.tip_definition_id===first.tip_definition_id))return null;
+    // This identity is only a search key. It does not choose a source-to-rack
+    // order, claim fresh tips are loaded, or authorize tip reuse.
+    return first.id;
+}
 function liquidClassProposalQueries(){
-    const plan=state.session?.plan,queries=new Map();
+    const plan=state.session?.plan,queries=new Map(),rackId=sharedProposalTipRack();
+    if(!rackId)return [];
     function visit(steps){
         for(const step of list(steps)){
             if(step.kind==='repeat'){visit(step.steps);continue;}
             if(!['transfer','distribute','mix'].includes(step.kind)||step.method_ref)continue;
-            const rack=proposedMethodRack(step),method=methodQuery(step,rack.id);
+            const method=methodQuery(step,rackId);
             if(!method||!localLiquidClassGap(method))continue;
             const query={tip_id:method.tip_id,volume_ul:method.volume_ul,
                 reagent_family:method.reagent_family,source_labware_id:method.source_labware_id,
@@ -1309,10 +1323,17 @@ function renderGuidedSetup(){
     host.append(reusePanel);
 
     const classGap=localLiquidClassGap({tip_id:'st_10ul'});
-    if(classGap&&!liquidClassProposalQueries().length)host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
-        el('p',{style:'margin:6px 0 0'},`${classGap} Identify the liquid and review a class and PP-to-LDV method on the intended Bravo before strict simulation.`),
-        el('a',{href:'/',target:'_blank',rel:'noopener'},'Open Control Panel'),' · ',
-        el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Open liquid-class editor')));
+    if(classGap){
+        const proposed=liquidClassProposalQueries().length>0;
+        host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
+            el('p',{style:'margin:6px 0 0'},proposed?
+                `${classGap} Inspect the planning-only class options above. A scientist must still review the source-liquid method and heights on the intended Bravo before strict simulation.`:
+                `${classGap} Identify the liquid and review a class and method on the intended Bravo before strict simulation.`),
+            proposed?el('a',{href:'#liquid-class-proposals'},'Review class starting points'):null,
+            proposed?' · ':null,
+            el('a',{href:'/',target:'_blank',rel:'noopener'},'Open Control Panel'),' · ',
+            el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Open liquid-class editor')));
+    }
     else if(list(state.methodPreview?.items).some(item=>item.status==='needs_curation'))
         host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
             el('p',{style:'margin:6px 0 0'},'A local liquid class exists, but no reviewed method covers all eight transfers. Open automatic method proposals to inspect the gaps.')));
