@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,7 @@ function renderSetupRecommendations(){}
 function renderPlan(){}
 function renderSetup(){}
 function refreshMethodPreview(){}
+function renderGuidedSetup(){}
 function notify(){}
 function clearTimeout(){}
 function setTimeout(callback){pending.push(callback);return pending.length;}
@@ -171,7 +173,7 @@ async function api(){return {candidates:[{method_id:'reviewed-water',revision:'p
 
 def test_review_shows_method_differences_fallback_strokes_and_software_deck_state(tmp_path):
     html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
-    assert "list(issues).map(renderValidationIssue)" in html
+    assert "rows.map(renderValidationIssue)" in html
     assert "panel.append(renderRuntimeSnapshot(data.runtime_snapshot))" in html
     functions = []
     for name in ("reviewMethodValue", "renderValidationIssue", "renderRuntimeSnapshot"):
@@ -243,6 +245,7 @@ function methodQuery(){return {operation:'transfer',tip_id:'st10',volume_ul:5};}
 function proposedMethodRack(){return {id:'tips',basis:'selected setup rack'};}
 function methodQueryMissing(){return [];}
 function localLiquidClassGap(){return '';}
+function renderGuidedSetup(){}
 const state={session:{id:'s1',setup:{},plan:{materials:[],steps:[
   {id:'a',kind:'transfer',description:'Copy A'},
   {id:'b',kind:'transfer',description:'Copy B'}]}},
@@ -303,6 +306,7 @@ const state={session:{id:'s1',setup:{},plan:{materials,steps}},
   methodPreview:null,methodPreviewKey:null,methodPreviewRequest:0,dirty:false};
 let lookups=0;
 async function api(path){assert.equal(path,'/methods/lookup');lookups++;return {issues:[],candidates:[]};}
+function renderGuidedSetup(){}
 """
         + "\n".join(functions)
         + """
@@ -334,7 +338,7 @@ async function api(path){assert.equal(path,'/methods/lookup');lookups++;return {
 def test_bulk_setup_proposals_only_fill_review_draft_choices(tmp_path):
     html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
     functions = []
-    for name in ("currentSetupRecommendations", "applyKnowledgeBackedProposals"):
+    for name in ("currentSetupRecommendations", "sameSourceReuseDecision", "applyKnowledgeBackedProposals"):
         match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
         assert match, name
         functions.append(match[0])
@@ -343,7 +347,7 @@ def test_bulk_setup_proposals_only_fill_review_draft_choices(tmp_path):
 const assert=require('node:assert/strict');
 const list=value=>Array.isArray(value)?value:[];
 const clone=value=>JSON.parse(JSON.stringify(value));
-const state={session:{id:'s1',plan:{materials:[
+const state={session:{id:'s1',plan:{decisions:[],materials:[
   {id:'source',deck_slot:null,initial_volume_ul:null},
   {id:'tips',deck_slot:4,available_tips:null}]},setup:{},selected_paragraph_ids:['p1']},
   capabilities:{context_hash:'catalog'},busy:false};
@@ -357,7 +361,7 @@ const recommendations=[
   {path:'/materials/1/available_tips',value:'full',rule_id:'physical'},
   {path:'/setup/liquid_class',value:'generic',rule_id:'method'},
   {path:'/setup/distance_from_bottom_mm',value:1,rule_id:'height'}];
-state.setupRecommendations={context_hash:'catalog',recommendations};
+state.setupRecommendations={context_hash:'catalog',plan_fingerprint:'fp',recommendations};
 state.setupRecommendationKey=JSON.stringify(['s1',state.session.plan,state.session.setup,['p1'],'catalog']);
 function recommendationRoot(path){return path.startsWith('/materials/')?state.session.plan:state.session;}
 function pointerGet(root,path){return path.split('/').slice(1).reduce((row,key)=>row?.[key],root);}
@@ -379,7 +383,7 @@ function notify(message){notice=message;}
 applyKnowledgeBackedProposals();
 assert.equal(dirtied,1);
 assert.equal(state.session.setup.head_mode.subset_type,'all_barrels');
-assert.equal(state.session.setup.tip_strategy,'fresh_each_source');
+assert.equal(state.session.setup.tip_strategy,undefined,'reuse requires its own scientist assessment');
 assert.deepEqual(state.session.setup.tip_rack_ids,['tips']);
 assert.equal(state.session.plan.materials[0].deck_slot,9);
 assert.equal(state.session.plan.materials[1].deck_slot,4);
@@ -387,9 +391,15 @@ assert.equal(state.session.plan.materials[0].initial_volume_ul,null);
 assert.equal(state.session.plan.materials[1].available_tips,null);
 assert.equal(state.session.setup.liquid_class,undefined);
 assert.equal(state.session.setup.distance_from_bottom_mm,undefined);
-assert.equal(decisions.length,4);
+assert.equal(decisions.length,3);
 assert.ok(decisions.every(row=>row.reason.includes('physical deck and tip inventory remain unconfirmed')));
-assert.ok(notice.includes('4 knowledge-backed setup/deck proposals'));
+assert.ok(notice.includes('3 knowledge-backed setup/deck proposals'));
+state.session.plan.decisions.push({path:'/setup/same_source_reuse_authorized',actor:'scientist',
+  value:{authorized:true,plan_fingerprint:'fp'}});
+state.setupRecommendationKey=JSON.stringify(['s1',state.session.plan,state.session.setup,['p1'],'catalog']);
+applyKnowledgeBackedProposals();
+assert.equal(state.session.setup.tip_strategy,'fresh_each_source');
+assert.equal(decisions.length,4);
 """
     )
     script = tmp_path / "bulk-setup-proposals.cjs"
@@ -411,6 +421,213 @@ def test_invalid_validation_does_not_present_partial_counts_as_executable(tmp_pa
         + "assert.doesNotMatch(partial,/0 channels|8 compiled operations/);\n"
         + "assert.match(validationSummaryText({ok:true,summary:{channels:384,tips_required:1536,compiled_operations:32}}),/384 channels.*1536 tips required.*32 compiled operations/);\n"
     )
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_guided_quadrant_answers_require_exact_mapping_and_explicit_facts(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in (
+        "liquidSourceOrder", "proposedMethodRack", "currentSetupRecommendations",
+        "guidedQuadrantSetup", "guidedPhysicalLayout", "applyGuidedSourceVolumes",
+        "applyGuidedEmptyDestinations", "applyGuidedFullRacks", "applyGuidedTipReuse",
+    ):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+const materials=[
+  ...[1,2,3,4].map(i=>({id:'source_'+i,role:'liquid',labware_id:'384',deck_slot:9,
+    stack_order:i-1,initial_volume_ul:null,dead_volume_ul:null,well_volumes_ul:{}})),
+  ...[1,2].map((i)=>({id:'destination_'+i,role:'liquid',labware_id:'1536',
+    deck_slot:i===1?5:8,initial_volume_ul:null,well_volumes_ul:{}})),
+  ...[4,3,2,1].map((i,index)=>({id:'tips_source_'+i,role:'tips',labware_id:'st-box',
+    tip_definition_id:'st_10ul',deck_slot:index+1,available_tips:null}))];
+const anchors={1:'A1',2:'A2',3:'B1',4:'B2'};
+const steps=[4,3,2,1].flatMap(i=>[1,2].map(j=>({kind:'transfer',source:'source_'+i,
+  destination:'destination_'+j,source_anchor:'A1',destination_anchor:anchors[i],volume_ul:5})));
+const state={session:{id:'s',plan:{materials,steps,decisions:[]},setup:{},selected_paragraph_ids:['p']},
+  context:{labware:[{id:'384',wells:384},{id:'1536',wells:1536}]},
+  capabilities:{context_hash:'catalog'},setupRecommendations:null,setupRecommendationKey:null};
+function verifiedTipboxChoices(){return [{labware_id:'st-box',tip_definition_id:'st_10ul',
+  wells:384,tip_length_mm:20,tip_capacity_ul:10}];}
+function decide(path,value,reason){state.session.plan.decisions.push({path,value,reason,actor:'scientist'});}
+let dirtied=0;
+function dirty(){dirtied++;}
+function renderPlan(){}
+function notify(){}
+"""
+        + "\n".join(functions)
+        + """
+assert.ok(guidedQuadrantSetup());
+assert.equal(guidedPhysicalLayout(guidedQuadrantSetup()).ok,true);
+state.session.setup.tip_rack_ids=['tips_source_4','tips_source_3','tips_source_2','tips_source_1'];
+assert.equal(guidedPhysicalLayout(guidedQuadrantSetup()).ok,true,
+  'Selecting the proposed rack order must not hide its source pairing');
+state.session.setup.tip_rack_ids=['tips_source_3','tips_source_4','tips_source_2','tips_source_1'];
+assert.equal(guidedPhysicalLayout(guidedQuadrantSetup()).ok,false,
+  'A rack order that changes source ownership must require individual review');
+state.session.setup.tip_rack_ids=['tips_source_4','tips_source_3','tips_source_2','tips_source_1'];
+steps[1].destination_anchor='B1';
+steps[3].destination_anchor='B2';
+assert.equal(guidedQuadrantSetup(),null,
+  'Each destination may have all four quadrants yet swap two source mappings');
+steps[1].destination_anchor='B2';steps[3].destination_anchor='B1';
+assert.ok(guidedQuadrantSetup());
+assert.throws(()=>applyGuidedSourceVolumes(20,2,false),/Confirm/);
+applyGuidedSourceVolumes(20,2,true);
+assert.ok(materials.slice(0,4).every(row=>row.initial_volume_ul===20&&row.dead_volume_ul===2));
+assert.throws(()=>applyGuidedSourceVolumes(20,11,true),/at least 10 µL/);
+materials[0].well_volumes_ul={A1:25};
+assert.throws(()=>applyGuidedSourceVolumes(20,2,true),/individual source well/);
+materials[0].well_volumes_ul={};
+assert.throws(()=>applyGuidedEmptyDestinations(false),/Confirm/);
+applyGuidedEmptyDestinations(true);
+assert.ok(materials.slice(4,6).every(row=>row.initial_volume_ul===0));
+materials[6].available_tips=['A1'];
+assert.equal(guidedPhysicalLayout(guidedQuadrantSetup()).ok,false);
+assert.throws(()=>applyGuidedFullRacks(true),/partial tip inventory/);
+materials[6].available_tips=null;
+applyGuidedFullRacks(true);
+assert.ok(materials.slice(6).every(row=>row.available_tips==='full'));
+assert.equal(state.session.plan.decisions.filter(row=>row.path.endsWith('/available_tips')).length,4);
+state.setupRecommendations={context_hash:'catalog',plan_fingerprint:'fingerprint',recommendations:[]};
+state.setupRecommendationKey=JSON.stringify(['s',state.session.plan,state.session.setup,['p'],'catalog']);
+applyGuidedTipReuse(true);
+assert.equal(state.session.setup.tip_strategy,'fresh_each_source');
+assert.match(state.session.setup.tip_reuse_reason,/without contacting liquid/);
+assert.ok(state.session.plan.decisions.some(row=>row.path==='/setup/same_source_reuse_authorized'&&
+  row.value.plan_fingerprint==='fingerprint'));
+state.session.setup.tip_reuse_reason='Custom conflicting assessment';
+state.setupRecommendationKey=JSON.stringify(['s',state.session.plan,state.session.setup,['p'],'catalog']);
+assert.throws(()=>applyGuidedTipReuse(true),/different tip-reuse assessment/);
+assert.ok(dirtied>=4);
+"""
+    )
+    script = tmp_path / "guided-quadrant.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_guided_details_keep_individual_editors_and_questions_in_plan():
+    class Structure(HTMLParser):
+        void = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+            self.parents = {}
+            self.review_action = None
+
+        def handle_starttag(self, tag, attrs):
+            attributes = dict(attrs)
+            if attributes.get("id"):
+                self.parents[attributes["id"]] = {identity for _, identity in self.stack if identity}
+            if tag == "button" and attributes.get("data-go") == "review":
+                self.review_action = {identity for _, identity in self.stack if identity}
+            if tag not in self.void:
+                self.stack.append((tag, attributes.get("id")))
+
+        def handle_endtag(self, tag):
+            assert self.stack and self.stack[-1][0] == tag
+            self.stack.pop()
+
+    parsed = Structure()
+    parsed.feed((ROOT / "frontend" / "protocol_assistant.html").read_text())
+    assert not parsed.stack
+    for identity in ("materials", "steps", "raw-questions", "questions"):
+        assert "plan-content" in parsed.parents[identity]
+    assert "plan-details" in parsed.parents["materials"]
+    assert "plan-details" in parsed.parents["steps"]
+    assert "questions-panel" in parsed.parents["raw-questions"]
+    assert "raw-questions" in parsed.parents["questions"]
+    assert "plan-content" in parsed.review_action
+
+
+def test_guided_readiness_groups_repeated_checks_but_keeps_details(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in ("readinessIssueGroup", "renderValidationIssues"):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+function el(tag,attrs,...children){return {tag,attrs,children:children.flat(Infinity)};}
+function text(node){return node==null?'':typeof node==='string'?node:node.children?.map(text).join(' ')||'';}
+function renderValidationIssue(issue){return el('p',{},issue.message);}
+const nodes={
+  issues:{children:[],replaceChildren(...items){this.children=items;}},
+  'issues-details':{hidden:false,open:true},
+  'blocking-summary':{children:[],replaceChildren(...items){this.children=items;}},
+  'issues-summary':{textContent:''}};
+function $(id){return nodes[id];}
+function guidedQuadrantSetup(){return {};}
+const state={session:{id:'s',revision:2},dirty:false,issueDetailsKey:null};
+"""
+        + "\n".join(functions)
+        + """
+const issues=[
+  {path:'/materials/0/initial_volume_ul',message:'Source one volume missing',severity:'error'},
+  {path:'/materials/1/initial_volume_ul',message:'Source two volume missing',severity:'error'},
+  {path:'/materials/6/available_tips',message:'Rack tips not inspected',severity:'error'},
+  {path:'/setup/liquid_class',message:'No reviewed liquid method',severity:'error'}];
+renderValidationIssues(issues);
+assert.equal(nodes.issues.children.length,4);
+assert.equal(nodes['issues-details'].open,false,'Guided pattern collapses raw checks');
+assert.ok(nodes['blocking-summary'].children.map(text).join(' ').includes('Confirm plate starting and dead volumes (2)'));
+assert.ok(nodes['blocking-summary'].children.map(text).join(' ').includes('Inspect fresh-tip inventory (1)'));
+assert.match(nodes['issues-summary'].textContent,/4/);
+nodes['issues-details'].open=true;
+renderValidationIssues(issues);
+assert.equal(nodes['issues-details'].open,true,'User-expanded details stay open');
+assert.ok(nodes.issues.children.some(node=>text(node)==='Rack tips not inspected'));
+"""
+    )
+    script = tmp_path / "readiness-groups.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_guided_answers_hide_stale_saved_validation_questions(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in ("questionAnsweredInDraft", "allQuestions"):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+function tipboxConfirmation(){return null;}
+function sameSourceReuseDecision(){return false;}
+function currentSetupRecommendations(){return null;}
+function pointerGet(root,path){return path.split('/').slice(1).reduce((row,key)=>row?.[key],root);}
+const initial={path:'/materials/0/initial_volume_ul',prompt:'Starting volume'};
+const tips={path:'/materials/1/available_tips',prompt:'Fresh tip inventory'};
+const liquid={path:'/setup/liquid_class',prompt:'Liquid class'};
+const state={dirty:true,session:{setup:{},plan:{materials:[
+  {initial_volume_ul:20},{available_tips:'full'}],questions:[initial,liquid],decisions:[
+  {path:initial.path,value:20,actor:'scientist'},
+  {path:tips.path,value:'full',actor:'scientist'}]},
+  validation:{questions:[initial,tips,liquid]}}};
+"""
+        + "\n".join(functions)
+        + """
+assert.deepEqual(allQuestions().map(row=>row.path),['/setup/liquid_class']);
+state.dirty=false;
+assert.deepEqual(allQuestions().map(row=>row.path),[
+  '/setup/liquid_class','/materials/0/initial_volume_ul','/materials/1/available_tips']);
+"""
+    )
+    script = tmp_path / "stale-guided-questions.cjs"
+    script.write_text(source)
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
 
 

@@ -266,6 +266,10 @@ Do NOT create a separate material for water or a reagent when it is
 already held by a named source plate; put its sourced reagent identity and
 reagent family on that material when the scientist supplied them. Do not infer
 viscosity or a reagent family from the assay name alone.
+If the scientist explicitly says a named destination plate starts empty, set
+that material's initial_volume_ul to 0. Leave it null otherwise. A plate used
+only for receiving liquid does not need a dead_volume_ul; a source or mix
+vessel does. Never turn a missing starting volume into zero.
 If one source material holds different reagents for different actions, use the
 sourced step-level reagent identity and family override for the relevant step.
 A material's human name and logical ID can be known while its catalog

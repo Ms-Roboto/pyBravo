@@ -305,6 +305,10 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
     if not expanded:
         result.issue("empty_protocol", "/steps", "A protocol must contain at least one step.")
     liquid_steps = [s for s, _ in expanded if s.kind in {"transfer", "distribute", "mix"}]
+    aspirated_material_ids = {
+        step.material if step.kind == "mix" else step.source
+        for step in liquid_steps
+    }
     labware = _catalog(context, "labware")
     tips = _catalog(context, "tip_definitions")
     materials: dict[str, Any] = {}
@@ -356,6 +360,13 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                 result.issue("catalog_geometry", path + "/labware_id", "Liquid labware needs catalog rows, columns and positive well capacity.")
                 continue
             for field_name in ("initial_volume_ul", "dead_volume_ul"):
+                # Dead volume constrains aspiration. A receive-only plate has
+                # no such use, so an absent value is not a scientific question
+                # or a reason to invent zero. If it later becomes a source or
+                # mix vessel, the requirement applies automatically.
+                if (field_name == "dead_volume_ul" and material.id not in aspirated_material_ids
+                        and material.dead_volume_ul is None):
+                    continue
                 if not _positive(getattr(material, field_name), zero=True):
                     result.issue("missing_volume", f"{path}/{field_name}", f"{field_name} must be explicitly supplied and nonnegative.", f"What is the per-well {field_name} for {material.name} (uL)?")
             initial = material.initial_volume_ul if _positive(material.initial_volume_ul, zero=True) else 0.0

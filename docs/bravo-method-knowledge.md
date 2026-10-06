@@ -21,6 +21,14 @@ to use it. A protocol revision pins the method and catalog digest used for
 review. The compiler, strict simulation, and scientist approval remain
 separate checks.
 
+Volume accounting asks for a measured or scientist-confirmed starting volume
+on each liquid plate. Dead volume is required only where the protocol
+aspirates, including a plate later reused as a source or mixed in place. A
+receive-only destination has no aspiration dead-volume parameter to guess.
+For two 5 µL transfers from every source well, the known withdrawal is 10 µL
+per well; starting volume must also cover that source's dead volume and any
+reviewed method overage.
+
 The public JSON Schemas are the
 [method record](../schemas/bravo-method-record-v1.schema.json),
 [typed lookup query](../schemas/bravo-method-query-v1.schema.json), and

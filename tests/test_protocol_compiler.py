@@ -58,6 +58,22 @@ def test_deterministic_compile_has_only_connected_allowlisted_nodes_and_sources(
     assert summary["final_volumes_ul"]["samples"]["H12"] == 20.0
 
 
+def test_dead_volume_is_required_only_when_a_plate_is_aspirated():
+    plan, setup, context, sources = protocol_fixture()
+    plan["materials"][1]["dead_volume_ul"] = None
+    assert validate_plan(plan, setup, context, sources=sources)["valid"]
+    assert compile_plan(plan, setup, context, sources=sources)["protocol"]["run_sheet"]["final_volumes_ul"]["samples"]["H12"] == 20.0
+
+    plan["steps"].append({"id": "aspirate-receiver", "kind": "transfer", "source": "samples",
+                          "destination": "buffer", "source_anchor": "A1", "destination_anchor": "A1",
+                          "volume_ul": 5.0, "source_paragraph_ids": ["p1"],
+                          "source_values": [{"field": "volume_ul", "value": 5.0, "unit": "uL",
+                                             "paragraph_id": "p1"}]})
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert any(issue["path"] == "/materials/1/dead_volume_ul" and issue["code"] == "missing_volume"
+               for issue in report["issues"])
+
+
 def test_distribute_uses_one_aspiration_and_ordered_distinct_dispenses():
     plan, setup, context, sources = protocol_fixture()
     plan["materials"].append({"id": "samples-2", "name": "Second empty plate", "labware_id": "plate",
