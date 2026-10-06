@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node is required for front
 def run_js(tmp_path, checks):
     source = (ROOT / "frontend/src/LabwareDashboard.jsx").read_text()
     functions = []
-    for name in ("uniq", "supportsDeadVolume", "deadVolumePatch", "rackMetadataPatch", "tipCompatibilitySummary"):
+    for name in ("uniq", "supportsDeadVolume", "deadVolumePatch", "rackMetadataPatch"):
         match = re.search(rf"function {name}\([^\n]*\) \{{[\s\S]*?\n\}}", source)
         assert match, name
         functions.append(match[0])
@@ -31,8 +31,6 @@ const tips=[{tip_id:'st10',compatible_heads:['HT_384_D_70']},{tip_id:'st30',comp
 const entry={wells:384,tip_definition_id:'',supported_tip_ids:[]};
 assert.deepEqual(rackMetadataPatch(entry,{rows:'16',cols:'24',tipId:'st10',supportedTipIds:['st10','st30']},tips,true),
     {rows:16,cols:24,tip_definition_id:'st10',supported_tip_ids:['st10','st30']});
-assert.equal(tipCompatibilitySummary(tips[0]),'HT_384_D_70');
-assert.equal(tipCompatibilitySummary(tips[1]),'No compatible head IDs recorded');
 assert.deepEqual(entry,{wells:384,tip_definition_id:'',supported_tip_ids:[]});
 """)
 

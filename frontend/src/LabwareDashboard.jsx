@@ -70,11 +70,6 @@ function rackMetadataPatch(entry, values, tips, catalogLoaded) {
   return { rows, cols, tip_definition_id: tipId, supported_tip_ids: supported }
 }
 
-function tipCompatibilitySummary(tip) {
-  const heads = Array.isArray(tip?.compatible_heads) ? tip.compatible_heads.filter(head => typeof head === 'string' && head) : []
-  return heads.length ? uniq(heads).join(', ') : 'No compatible head IDs recorded'
-}
-
 function TabButton({ active, onClick, children }) {
   return (
     <button
@@ -630,7 +625,6 @@ function LabwareDashboard() {
   const [tipDefinitionId, setTipDefinitionId] = useState('')
   const [supportedTipIds, setSupportedTipIds] = useState([])
   const missingTipIds = uniq([tipDefinitionId, ...supportedTipIds].filter(id => id && !tipDefinitions.some(tip => tip.tip_id === id)))
-  const selectedTipDefinitions = tipDefinitions.filter(tip => tip.tip_id === tipDefinitionId || supportedTipIds.includes(tip.tip_id))
 
   // -------- Image tab state (upload) --------
   const [imageFile, setImageFile] = useState(null)
@@ -1428,7 +1422,7 @@ function LabwareDashboard() {
 
                         <div style={{ border: '1px solid #333', borderRadius: 12, padding: 14, background: '#111' }}>
                           <div style={{ color: '#fff', fontWeight: 'bold', marginBottom: 10 }}>Catalog Tip Definitions</div>
-                          <div style={{ color: '#aaa', fontSize: '0.85em', marginBottom: 12 }}>Select the tips this rack is documented to support. Head IDs below come from the tip catalog; rack geometry must also match.</div>
+                          <div style={{ color: '#aaa', fontSize: '0.85em', marginBottom: 12 }}>Select the tips this rack is documented to support. Rack geometry must also match.</div>
                           {tipCatalogError && <div role="status" style={{ color: '#faad14', marginBottom: 10 }}>{tipCatalogError}. Refresh to retry; existing tip links are preserved.</div>}
                           {!tipCatalogLoaded && !tipCatalogError && <div role="status" style={{ color: '#aaa', marginBottom: 10 }}>Loading tip catalog…</div>}
                           <label htmlFor="rack-tip-definition" style={{ ...label, display: 'block' }}>Primary tip definition</label>
@@ -1447,12 +1441,6 @@ function LabwareDashboard() {
                               </label>
                             ))}
                           </fieldset>
-                          <div aria-label="Compatible head IDs" style={{ color: '#bbb', fontSize: '0.85em', overflowWrap: 'anywhere' }}>
-                            <div style={{ fontWeight: 'bold', marginBottom: 6 }}>Compatible head IDs by selected tip</div>
-                            {selectedTipDefinitions.map(tip => <div key={tip.tip_id} style={{ marginBottom: 6 }}>{tip.tip_id}: {tipCompatibilitySummary(tip)}</div>)}
-                            {!tipDefinitionId && !supportedTipIds.length && <div>No tip definitions selected.</div>}
-                            {missingTipIds.map(id => <div key={id}>{id}: compatibility unavailable</div>)}
-                          </div>
                         </div>
 
                         <div style={{ border: '1px solid #333', borderRadius: 12, padding: 14, background: '#111' }}>

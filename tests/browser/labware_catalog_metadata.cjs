@@ -53,6 +53,8 @@ async function run(){
     const primary=page.getByLabel('Primary tip definition'),rows=page.getByLabel('Rows',{exact:true}),cols=page.getByLabel('Columns',{exact:true});
     const save=page.getByRole('button',{name:'Save changes',exact:true});
     await page.waitForFunction(()=>document.querySelector('#rack-tip-definition')?.disabled===false);
+    assert.equal(await page.getByText('Compatible head IDs by selected tip',{exact:true}).count(),0);
+    assert.equal(await page.getByLabel('Compatible head IDs',{exact:true}).count(),0);
     assert.equal(await primary.inputValue(),'');assert.equal(await rows.inputValue(),'');assert.equal(await cols.inputValue(),'');
     assert.equal(await page.getByRole('checkbox',{checked:true}).count(),0,'No links inferred from rack name or capacity');
     await rows.fill('16');await cols.fill('12');await save.click();
@@ -64,14 +66,16 @@ async function run(){
     await page.waitForFunction(()=>document.querySelector('#rack-tip-definition')?.disabled===false);
     assert.equal(patches.length,1);assert.equal(patches[0].tip_definition_id,'st10');assert.deepEqual(patches[0].supported_tip_ids,['st30','st10']);
     assert.equal(patches[0].well_dimensions_mm.rows,16);assert.equal(patches[0].well_dimensions_mm.cols,24);assert.equal(patches[0].well_dimensions_mm.custom_note,'keep');
-    const summary=await page.getByLabel('Compatible head IDs',{exact:true}).innerText();assert.match(summary,/HT_384_D_70, HT_16_D_ST/);assert.match(summary,/No compatible head IDs recorded/);assert.doesNotMatch(summary,/HT_96_D_200/);
+    assert.equal(await page.getByLabel('Compatible head IDs',{exact:true}).count(),0,'Selecting tips does not reveal head IDs');
+    assert.equal(await page.getByText(/HT_384_D_70|HT_16_D_ST|No compatible head IDs recorded/).count(),0);
     await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#rack-tip-definition')?.disabled===false);assert.equal(await primary.inputValue(),'st10');assert.equal(await cols.inputValue(),'24');
     await page.screenshot({path:'/tmp/labware-catalog-metadata.png',fullPage:true});
     failTips=true;await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.getByRole('status').filter({hasText:'Tip catalog unavailable'}).waitFor();
     assert.equal(await primary.isDisabled(),true);await save.click();await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Save changes')?.disabled===false);
     assert.equal(patches.length,2);assert.equal(patches[1].tip_definition_id,'st10');assert.deepEqual(patches[1].supported_tip_ids,['st30','st10']);
     failTips=false;entry={...entry,tip_definition_id:'removed',supported_tip_ids:['removed']};await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#rack-tip-definition')?.value==='removed'&&document.querySelector('#rack-tip-definition')?.disabled===false);
-    assert.match(await page.getByLabel('Compatible head IDs',{exact:true}).innerText(),/removed: compatibility unavailable/);
+    assert.equal(await page.getByLabel('Compatible head IDs',{exact:true}).count(),0);
+    assert.equal(await page.getByText('removed: compatibility unavailable',{exact:true}).count(),0);
     await save.click();await page.getByText('Choose or remove tip IDs missing from the catalog: removed.',{exact:true}).waitFor();assert.equal(patches.length,2);
     await primary.selectOption('');await page.getByRole('checkbox',{name:'removed — missing from catalog',exact:true}).click();
     assert.equal(await page.getByRole('checkbox',{name:'removed — missing from catalog',exact:true}).count(),0);await save.click();
