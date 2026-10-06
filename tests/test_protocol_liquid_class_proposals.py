@@ -114,6 +114,26 @@ def test_no_cross_profile_proposal_on_physical_controller_or_without_exact_tip(m
     assert propose_liquid_classes(_context(), _query(volume_ul=10.5))["candidates"] == []
 
 
+def test_proposals_rank_nearby_recorded_control_point_without_claiming_liquid_suitability(monkeypatch, tmp_path):
+    far = _class("far-from-five")
+    far["name"] = "A. Endpoints only"
+    near = _class("near-five")
+    near["name"] = "Z. Near five"
+    near["equation"]["control_points"].insert(1, {
+        "desired_ul": 4.9827, "commanded_ul": 5.0045,
+    })
+    _write_classes(monkeypatch, tmp_path, [far, near])
+
+    candidates = propose_liquid_classes(_context(), _query())["candidates"]
+    assert [row["liquid_class_id"] for row in candidates] == ["near-five", "far-from-five"]
+    assert candidates[0]["calibration_control_point_distance_ul"] == pytest.approx(0.0173)
+    assert candidates[1]["calibration_control_point_distance_ul"] == pytest.approx(5.0)
+    assert candidates[0]["score"] > candidates[1]["score"]
+    assert candidates[0]["score_scope"] == "calibration_control_point_proximity_only"
+    assert "does not establish reagent or plate suitability" in candidates[0]["ranking_reason"]
+    assert candidates[0]["execution_ready"] is False
+
+
 def test_related_publication_is_context_only_not_numeric_class_provenance(monkeypatch, tmp_path):
     _write_classes(monkeypatch, tmp_path, [_class()])
     method_path = tmp_path / "protocol_methods.yaml"

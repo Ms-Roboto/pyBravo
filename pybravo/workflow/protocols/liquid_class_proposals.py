@@ -175,6 +175,11 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
         ]
         if result["references"]:
             caveats.append("Related publications provide context only; they do not qualify this class's numeric settings.")
+        desired_points = [float(point["desired_ul"]) for point in active["equation"]["control_points"]]
+        nearest_point = min(desired_points, key=lambda point: (abs(point - query.volume_ul), point == 0, point))
+        point_distance = abs(nearest_point - query.volume_ul)
+        # A display/order metric only: it is not a reagent, plate, or transfer-performance score.
+        proximity_score = round(100 * (1 - min(point_distance / float(capacity), 1)), 2)
         candidate = {
             "liquid_class_id": class_id,
             "name": active["name"],
@@ -189,6 +194,15 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
             "status": "imported_unverified",
             "execution_ready": False,
             "can_apply_to_plan": False,
+            "score": proximity_score,
+            "score_scope": "calibration_control_point_proximity_only",
+            "nearest_control_point_ul": nearest_point,
+            "calibration_control_point_distance_ul": point_distance,
+            "ranking_reason": (
+                f"Nearest recorded desired-volume control point is {nearest_point:g} µL, "
+                f"{point_distance:.4g} µL from the requested {query.volume_ul:g} µL. "
+                "This ordering does not establish reagent or plate suitability."
+            ),
             "aspirate": deepcopy(active["aspirate"]),
             "dispense": deepcopy(active["dispense"]),
             "equation": deepcopy(active["equation"]),
@@ -214,7 +228,9 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
             ],
         }
         candidates.append(candidate)
-    candidates.sort(key=lambda row: (row["name"].lower(), row["liquid_class_id"]))
+    candidates.sort(key=lambda row: (
+        row["calibration_control_point_distance_ul"], row["name"].lower(), row["liquid_class_id"]
+    ))
     result["candidates"] = candidates
     result["planning_liquid_class_candidates"] = candidates
     result["summary_reason"] = (
