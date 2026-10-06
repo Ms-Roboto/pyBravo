@@ -79,21 +79,42 @@ scientist must explicitly attest it as `reviewed_default` or
 visible. `source_field_origins` is derived provenance, not an editable
 attestation.
 
-When the active simulation profile has no exact liquid class, the read-only
-`POST /api/protocols/liquid-class-proposals` endpoint can show classes recorded
-for a different local machine with the same explicit head and tip. A request
-supplies the proposed stroke volume and, when known, reagent family and plate
-IDs. The response includes the original machine, motion settings, calibration
-points, source digest, field origins, and gaps in reagent, plate and height
-evidence. These are `imported_unverified` planning references. A publication
-using a dye dissolved in DMSO may be listed as related solvent-family context
-for a neat-DMSO request. The family match is not an exact formulation match and
-never certifies another class's numeric settings. Record the source material as
-neat DMSO when that is what the scientist states; do not silently rename it to
-the publication's dye solution. Keeping or rejecting a proposal records a planning
-decision; it cannot populate an active class, pin a method, or release a run.
-The same read-only lookup is available to tool-using agents as the
+The simulation controller now uses the same machine ID as the configured
+physical Bravo, `04-91-62-CF-7B-B0`. This makes that machine's existing
+head- and tip-specific liquid classes visible during software-only planning;
+it does not switch to hardware control or copy a class into a new machine.
+For the 384-channel head and `st_10ul` tips, the local catalog contains
+`liq_66d89a6738` and `liq_15de77e0bd`. Both record motion and calibration,
+but neither records suitability for neat DMSO, Labcyte PP-to-LDV transfer,
+pipetting heights, or a reviewed tip policy. The latter has a calibration
+point near 5 µL; that proximity is useful for ordering proposals, not proof
+of 5 µL transfer performance.
+
+The read-only `POST /api/protocols/liquid-class-proposals` endpoint first
+shows exact machine/head/tip classes with their motion settings, calibration
+points, source digest, field origins, and missing method evidence. Only when
+the simulator has no exact active class does it fall back to classes from
+another local machine with the same explicit head and tip. Every returned
+class remains an `imported_unverified` *method candidate* with
+`execution_ready: false`: import establishes what settings are stored, not
+that they suit the named reagent or plates. Keeping or rejecting a proposal
+records a planning decision; it does not pin a reviewed method or release a
+run. The same read-only lookup is available to tool-using agents as the
 `bravo_propose_liquid_classes` MCP tool.
+
+For a neat-DMSO request, retain `neat DMSO` as the source reagent identity
+and `DMSO` as its broad family. Agilent's tartrazine-in-DMSO publication is
+related solvent-family context, not an exact formulation match and not
+provenance for either local class's numeric motion settings. A useful
+scientist-supplied example would include the existing VWorks protocol and
+liquid-class export, exact head/tip/rack and source/destination plate
+identities, aspirate and dispense heights, air volumes, blowout, tip touch,
+and a tip-reuse policy. Local 5 µL neat-DMSO PP-to-LDV results with a run ID,
+reviewer, accuracy, precision, residual volume, and carryover would support
+qualification. A protocol file without those results can guide method
+curation but cannot establish qualification. Until effective tip capacity is
+demonstrated for this liquid, two 5 µL dispenses from an ST10 tip should use
+separate aspirations rather than treating a nominal 10 µL fill as usable.
 
 ## Source candidates for curation
 
