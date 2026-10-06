@@ -1,7 +1,8 @@
-"""Read-only, cross-profile liquid-class references for planning in simulation.
+"""Read-only liquid-class starting points from the real hardware catalog.
 
-An imported class from another instrument is useful evidence for a scientist to
-review, but it is never an active class or a method that a protocol can pin.
+An active class supplies recorded motion and calibration values, not proof that
+those values suit a reagent or plate pair. Cross-profile records are shown only
+as planning references when a simulator has no class for its selected hardware.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ class LiquidClassProposalQuery(BaseModel):
 
     tip_id: str = Field(min_length=1)
     volume_ul: float = Field(gt=0, allow_inf_nan=False)
+    reagent_id: str | None = None
     reagent_family: str | None = None
     source_labware_id: str | None = None
     destination_labware_id: str | None = None
@@ -100,7 +102,7 @@ def _contextual_references(head_type: str, tip_id: str, reagent_family: str | No
 
 
 def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposalQuery) -> dict[str, Any]:
-    """Show exact, locally recorded settings from another profile, never run choices.
+    """Show explicit class settings without claiming method qualification.
 
     Reagent and plate applicability are not encoded by a liquid-class record.
     The candidate therefore stays explicitly unverified even when its tip,
@@ -111,9 +113,6 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
     result["planning_liquid_class_candidates"] = result["candidates"]
     machine_id = str(context.get("machine_id") or "")
     head_type = str(context.get("head_type") or "")
-    if context.get("controller_type") != "simulation":
-        result["summary_reason"] = "Cross-profile planning references are available only in simulation."
-        return result
     tips = {
         str(row.get("tip_id") or row.get("id")): row
         for row in context.get("tip_definitions", [])
@@ -127,14 +126,6 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
     if not isinstance(capacity, (int, float)) or query.volume_ul > capacity:
         result["summary_reason"] = "The requested stroke exceeds the selected tip's nominal capacity."
         return result
-    active_classes = context.get("liquid_classes") or []
-    if any(
-        isinstance(row, Mapping) and row.get("tip_id") == query.tip_id
-        for row in active_classes
-    ):
-        result["summary_reason"] = "An active liquid class exists; use normal method lookup for this machine."
-        return result
-
     result["references"] = _contextual_references(head_type, query.tip_id, query.reagent_family)
 
     raw_classes = _raw_liquid_classes()
@@ -146,13 +137,23 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
         if _liquid_store_path() == liquid_classes._STORE_PATH
         else "configured-liquid-class-store"
     )
+    active_classes = [
+        row for row in context.get("liquid_classes") or []
+        if isinstance(row, Mapping) and row.get("machine_id") == machine_id
+        and row.get("head_type") == head_type and row.get("tip_id") == query.tip_id
+    ]
+    cross_profile = not active_classes and context.get("controller_type") == "simulation"
+    source_classes = (liquid_classes.list_liquid_classes(head_type=head_type, tip_id=query.tip_id)
+                      if cross_profile else active_classes)
     candidates = []
-    for active in liquid_classes.list_liquid_classes(head_type=head_type, tip_id=query.tip_id):
+    for active in source_classes:
         class_id = str(active.get("liquid_class_id") or "")
         raw = raw_classes.get(class_id)
+        source_machine = str(active.get("machine_id") or "")
+        is_active = source_machine == machine_id
         if (
             not raw
-            or active.get("machine_id") == machine_id
+            or (cross_profile and is_active)
             or raw.get("machine_id") != active.get("machine_id")
             or raw.get("head_type") != head_type
             or raw.get("tip_id") != query.tip_id  # no tip inferred from nominal capacity
@@ -161,18 +162,16 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
             or not _explicit_calibration(raw, active, query.volume_ul)
         ):
             continue
-        source_machine = str(active["machine_id"])
-        reagent = (query.reagent_family or "").strip()
+        reagent = (query.reagent_id or query.reagent_family or "").strip()
         reagent_note = (
             f"This class has no recorded suitability for {reagent}; liquid-specific suitability is unverified."
             if reagent else
             "The source liquid is unspecified; liquid-specific suitability is unverified."
         )
-        caveats = [
+        caveats = ([] if is_active else [
             f"Recorded for {source_machine}, not active machine {machine_id}; these values cannot be executed here.",
-            reagent_note,
-            "No reviewed method links these settings to the selected source/destination plates or pipetting heights.",
-        ]
+        ]) + [reagent_note,
+              "No reviewed method links these settings to the selected source/destination plates or pipetting heights."]
         if result["references"]:
             caveats.append("Related publications provide context only; they do not qualify this class's numeric settings.")
         desired_points = [float(point["desired_ul"]) for point in active["equation"]["control_points"]]
@@ -191,6 +190,8 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
             "source_head_type": head_type,
             "source_tip_id": query.tip_id,
             "source_tip_capacity_ul": float(capacity),
+            "catalog_relation": "active_machine" if is_active else "other_machine",
+            "is_active": is_active,
             "status": "imported_unverified",
             "execution_ready": False,
             "can_apply_to_plan": False,
@@ -211,15 +212,16 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
                 "source_type": "local_config",
                 "source_path": source_path,
                 "source_digest": _digest(raw),
-                "note": "Locally configured for another machine; not a reagent- or plate-qualified method.",
+                "note": ("Locally configured for this hardware; not a reagent- or plate-qualified method."
+                         if is_active else
+                         "Locally configured for another machine; not a reagent- or plate-qualified method."),
             },
             "reasons": [
                 f"Explicitly recorded for {head_type} and {query.tip_id}.",
                 f"The requested {query.volume_ul:g} µL stroke lies within the recorded calibration range.",
             ],
             "caveats": caveats,
-            "missing_fields": [
-                "active_machine_liquid_class",
+            "missing_fields": ([] if is_active else ["active_machine_liquid_class"]) + [
                 "reagent_applicability",
                 "source_and_destination_labware_applicability",
                 "aspirate.distance_from_bottom_mm",
@@ -234,9 +236,12 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
     result["candidates"] = candidates
     result["planning_liquid_class_candidates"] = candidates
     result["summary_reason"] = (
-        "No class is installed for the active simulated machine and tip. "
-        "Showing unverified, cross-profile local settings for planning review only."
+        "Showing existing hardware liquid classes with recorded settings. "
+        "Reagent and plate suitability still require a reviewed method."
+        if candidates and not cross_profile else
+        "No class is installed for the selected simulated hardware and tip. "
+        "Showing unverified, cross-profile settings for planning review only."
         if candidates else
-        "No exact head/tip/volume class with explicit local settings was found on another profile."
+        "No exact head/tip/volume class with explicit local settings was found for this hardware."
     )
     return result

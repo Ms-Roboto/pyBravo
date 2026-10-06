@@ -78,8 +78,9 @@ _TOOLS = [
     {
         "name": "bravo_propose_liquid_classes",
         "description": (
-            "Read unverified, cross-profile liquid-class settings for planning in simulation. "
-            "Returns provenance and separate publication context; candidates cannot be pinned or executed."
+            "Read recorded hardware liquid-class settings for method planning, prioritizing the active machine. "
+            "Returns provenance and separate publication context; class candidates cannot be pinned or executed "
+            "as reviewed methods."
         ),
         "inputSchema": {
             "type": "object",
@@ -90,6 +91,7 @@ _TOOLS = [
                 "properties": {
                     "tip_id": {"type": "string", "minLength": 1},
                     "volume_ul": {"type": "number", "exclusiveMinimum": 0},
+                    "reagent_id": {"type": "string"},
                     "reagent_family": {"type": "string"},
                     "source_labware_id": {"type": "string"},
                     "destination_labware_id": {"type": "string"},

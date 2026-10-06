@@ -142,6 +142,7 @@ function methodQuery(step,rackId){
     const full=setup.head_mode?.subset_type==='all_barrels';
     return {operation:step.kind,tip_id:rack.tip_definition_id,tipbox_id:rack.labware_id,
         source_labware_id:source.labware_id,destination_labware_id:step.kind==='mix'?null:targetTypes[0],
+        reagent_id:step.reagent_id||source.reagent_id||null,
         reagent_family:step.reagent_family||source.reagent_family||null,volume_ul:volume,
         dispense_volumes_ul:step.kind==='distribute'?list(step.dispenses).map(item=>Number(item.volume_ul)):null,
         source_anchor:full?(step.kind==='mix'?step.anchor:step.source_anchor):null,
@@ -221,9 +222,11 @@ function liquidClassProposalQueries(){
             if(step.kind==='repeat'){visit(step.steps);continue;}
             if(!['transfer','distribute','mix'].includes(step.kind)||step.method_ref)continue;
             const method=methodQuery(step,rackId);
-            if(!method||!localLiquidClassGap(method))continue;
+            if(!method)continue;
             const query={tip_id:method.tip_id,volume_ul:method.volume_ul,
-                reagent_family:method.reagent_family,source_labware_id:method.source_labware_id,
+                ...(method.reagent_id?{reagent_id:method.reagent_id}:{}),
+                reagent_family:method.reagent_family,
+                source_labware_id:method.source_labware_id,
                 destination_labware_id:method.destination_labware_id};
             const key=JSON.stringify(query),entry=queries.get(key);
             if(entry)entry.step_count++;
@@ -275,13 +278,14 @@ function liquidClassProposalDecision(candidate,query){
 }
 function recordLiquidClassProposal(candidate,query,disposition){
     if(!state.session?.plan||!candidate?.liquid_class_id||!['shortlisted','rejected'].includes(disposition))return;
+    const active=candidate.catalog_relation==='active_machine'&&candidate.is_active===true;
     const sourceDigest=candidate.provenance?.source_digest;
     const path=liquidClassProposalPath(candidate,query);
     const value={disposition,liquid_class_id:candidate.liquid_class_id,source_machine_id:candidate.source_machine_id||candidate.machine_id,
-        source_digest:sourceDigest,query,execution_ready:false};
+        source_digest:sourceDigest,catalog_relation:candidate.catalog_relation||null,query,execution_ready:false};
     decide(path,value,disposition==='shortlisted'?
-        'Scientist kept this cross-profile liquid-class record as a planning candidate only; class and method review are still required.':
-        'Scientist rejected this cross-profile liquid-class planning candidate.');
+        `Scientist kept this ${active?'active hardware':'cross-profile'} liquid-class record as a candidate for method review only; no method or physical use was qualified.`:
+        `Scientist rejected this ${active?'active hardware':'cross-profile'} liquid-class candidate for method review.`);
     dirty();renderLiquidClassProposals();
     notify(disposition==='shortlisted'?
         'Candidate kept for method review. No liquid class or method was applied to the executable draft. Save this decision when ready.':
@@ -292,8 +296,8 @@ function renderLiquidClassProposals(){
     if(!panel)return;
     panel.hidden=!data?.items?.length;
     if(panel.hidden)return;
-    panel.replaceChildren(el('h3',{},'Suggested liquid-class starting point'),
-        el('p',{class:'muted'},'Review the recorded class below. It is a planning option; keeping it does not apply robot settings.'));
+    panel.replaceChildren(el('h3',{},'Liquid classes for method review'),
+        el('p',{class:'muted'},'Active hardware classes and cross-profile records are shown as candidates. Keeping one records a planning decision; it does not apply robot settings or qualify a liquid method.'));
     if(sharedSourceLiquidMissing()){
         const input=el('input',{type:'text',maxlength:120,placeholder:'For example, DMSO or aqueous buffer',
             'aria-label':'Liquid family in every source plate'});
@@ -308,33 +312,41 @@ function renderLiquidClassProposals(){
             el('div',{class:'actions'},apply)));
     }
     for(const item of data.items){
-        const query=item.query,label=[`${query.volume_ul} µL`,query.reagent_family||'liquid not identified',
+        const query=item.query,label=[`${query.volume_ul} µL`,query.reagent_id||query.reagent_family||'liquid not identified',
             `${query.tip_id} tips`,`${item.step_count} step${item.step_count===1?'':'s'}`].join(' · ');
         const plateName=id=>list(state.context?.labware).find(row=>row.id===id)?.name||id||'unidentified plate';
         const sourceName=plateName(query.source_labware_id),destinationName=plateName(query.destination_labware_id);
         const group=el('div',{class:'row-card'},el('strong',{},label));
         if(item.status==='loading'){group.append(el('p',{class:'muted'},'Checking compatible local class records…'));panel.append(group);continue;}
         if(item.error){group.append(el('p',{class:'issue error'},'Proposal lookup failed: '+item.error));panel.append(group);continue;}
-        const candidates=list(item.candidates);
+        const candidates=list(item.candidates).slice().sort((left,right)=>
+            Number(right.catalog_relation==='active_machine'&&right.is_active===true)-
+            Number(left.catalog_relation==='active_machine'&&left.is_active===true));
         if(!candidates.length){group.append(el('p',{class:'issue warn'},item.summary_reason||'No matching class record can be proposed for this tip and volume. A reviewed class and method must be added for the active machine.'));
             group.append(el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Open liquid-class editor'));panel.append(group);continue;}
         const alternatives=candidates.length>1?el('details',{},
             el('summary',{},`Show ${Math.min(candidates.length-1,2)} other class option${candidates.length===2?'':'s'}`)):null;
         for(const [candidateIndex,candidate] of candidates.slice(0,3).entries()){
+            const active=candidate.catalog_relation==='active_machine'&&candidate.is_active===true;
             const id=candidate.liquid_class_id,sourceMachine=candidate.source_machine_id||candidate.machine_id||'unknown machine';
             const sourceHead=candidate.source_head_type||candidate.head_type||'unknown head';
             const sourceTip=candidate.source_tip_id||candidate.tip_id||'unknown tip';
+            const provenance=candidate.provenance||{};
             const card=el('div',{class:'row-card',style:'margin:10px 0 0'},
                 el('strong',{},candidate.name||id||'Unnamed class'),
-                el('span',{class:'badge warn',style:'margin-left:8px'},'Planning candidate only'),
+                el('span',{class:'badge warn',style:'margin-left:8px'},
+                    active?'Active hardware class · candidate for method review':'Planning candidate only · other machine'),
                 el('p',{class:'muted',style:'margin:7px 0'},
-                    `Source: ${sourceMachine} / ${sourceHead} / ${sourceTip}. Class ${id||'unknown'}; ${candidate.status||'unverified'}.`));
+                    `${active?'Active hardware catalog':'Source'}: ${sourceMachine} / ${sourceHead} / ${sourceTip}. Class ${id||'unknown'}; ${candidate.status||'unverified'}.`),
+                el('p',{class:'muted',style:'margin:5px 0'},
+                    `Recorded provenance: ${provenance.source_type||'unknown'} · ${provenance.source_path||'source path unrecorded'}.`));
             if(candidate.ranking_reason)card.append(el('p',{class:'muted',style:'margin:5px 0'},candidate.ranking_reason));
             const caveats=list(candidate.caveats);
             if(/DMSO/i.test(query.reagent_family||'')&&!caveats.some(value=>/DMSO/i.test(value)))
                 caveats.unshift(`DMSO suitability for this ${query.volume_ul} µL transfer from ${sourceName} to ${destinationName} has not been established by this catalog record.`);
-            card.append(el('p',{class:'issue warn',style:'margin:7px 0'},
-                `Not active on ${state.context?.machine_id||'this machine'} or qualified for ${query.reagent_family||'the source liquid'} from ${sourceName} to ${destinationName}.`));
+            card.append(el('p',{class:'issue warn',style:'margin:7px 0'},active?
+                `This class is active on ${sourceMachine}, but ${query.reagent_id||query.reagent_family||'the source liquid'} from ${sourceName} to ${destinationName} still needs a reviewed method. It is not ready for physical use.`:
+                `Not active on ${state.context?.machine_id||'this machine'} or qualified for ${query.reagent_id||query.reagent_family||'the source liquid'} from ${sourceName} to ${destinationName}.`));
             const details=el('details',{},el('summary',{},'Inspect motion settings, calibration and provenance'));
             for(const reason of list(candidate.reasons))details.append(el('p',{class:'muted',style:'margin:7px 0'},reason));
             for(const caveat of caveats)details.append(el('p',{class:'muted',style:'margin:7px 0'},caveat));
@@ -351,7 +363,6 @@ function renderLiquidClassProposals(){
             const points=list(candidate.equation?.control_points);
             details.append(el('p',{class:'muted',style:'margin-top:8px'},
                 `Calibration points (desired → commanded µL): ${points.length?points.map(point=>`${point.desired_ul} → ${point.commanded_ul}`).join(', '):'not recorded'}. Origin: ${candidate.source_field_origins?.['equation.control_points']||'unrecorded'}.`));
-            const provenance=candidate.provenance||{};
             details.append(el('p',{class:'muted'},
                 `Provenance: ${provenance.source_type||'unknown'} · ${provenance.source_path||'source path unrecorded'} · digest ${provenance.source_digest||'unrecorded'}. ${provenance.note||''}`));
             if(list(candidate.missing_fields).length)details.append(el('p',{class:'muted'},
@@ -381,7 +392,7 @@ function renderLiquidClassProposals(){
             group.append(evidence);
         }
         group.append(el('p',{class:'muted',style:'margin:10px 0 0'},
-            `To use this class, review it and a ${query.volume_ul} µL method on the intended Bravo, then validate and strictly simulate.`));
+            `To use a ${query.volume_ul} µL liquid method, review the class and method on the intended Bravo, then validate and strictly simulate. These candidates do not authorize physical execution.`));
         group.append(el('a',{href:'/liquid-class-editor',target:'_blank',rel:'noopener'},'Review liquid classes'));
         panel.append(group);
     }
@@ -408,7 +419,7 @@ async function refreshLiquidClassProposals(){
         if(response.error){items[index].status='error';items[index].error=response.error;continue;}
         items[index].status='ready';items[index].summary_reason=response.summary_reason||'';
         items[index].references=list(response.references);
-        items[index].candidates=list(response.planning_liquid_class_candidates??response.candidates);
+        items[index].candidates=list(response.candidates??response.planning_liquid_class_candidates);
     }
     renderLiquidClassProposals();
 }
@@ -1342,7 +1353,9 @@ function renderGuidedSetup(){
     }
     else if(list(state.methodPreview?.items).some(item=>item.status==='needs_curation'))
         host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
-            el('p',{style:'margin:6px 0 0'},'A local liquid class exists, but no reviewed method covers all eight transfers. Open automatic method proposals to inspect the gaps.')));
+            el('p',{style:'margin:6px 0 0'},'An active hardware liquid class can be inspected above as a candidate for method review. No reviewed method covers all eight transfers yet.'),
+            liquidClassProposalQueries().length?el('a',{href:'#liquid-class-proposals'},'Inspect liquid-class candidates'):null,
+            ' · ',el('a',{href:'#method-preview-details'},'Inspect method gaps')));
     host.append(el('button',{class:'small',onclick:()=>{$('raw-questions').open=true;$('raw-questions').scrollIntoView({behavior:'smooth',block:'start'});}},
         'Review individual questions and exceptions'));
 }
@@ -1472,7 +1485,10 @@ function renderSetup(){
     const s=state.session;
     const active=state.context.profile??state.context.active_profile??{};
     const head=state.context.head_type??active.head_type??active.head??'configured head';
-    $('instrument-summary').textContent=`${active.name??state.context.profile_name??'Active instrument'} · ${typeof head==='object'?head.name??JSON.stringify(head):head}. The active profile is checked during validation.`;
+    const profileName=active.name??state.context.profile_name??'Active instrument';
+    const catalogIdentity=state.context.controller_type==='simulation'&&state.context.machine_id?
+        ` · simulated controller using Bravo ${state.context.machine_id} hardware catalog`:'';
+    $('instrument-summary').textContent=`${profileName}${catalogIdentity} · ${typeof head==='object'?head.name??JSON.stringify(head):head}. The active profile is checked during validation.`;
     const model=state.context.model??state.context.llm?.model??'qwen';
     $('model-status').textContent=`${model} · local LLM`;
     if(!s){$('setup-fields').replaceChildren(el('p',{class:'muted'},'Load a protocol to choose its experiment setup.'));renderGuidedSetup();renderSetupRecommendations();refreshLiquidClassProposals();return;}

@@ -8,6 +8,7 @@ import httpx
 import pytest
 import yaml
 
+from pybravo import liquid_classes
 from pybravo.web import server
 from pybravo.workflow.protocols import api
 from pybravo.workflow.protocols.liquid_class_proposals import (
@@ -104,6 +105,32 @@ def test_cross_profile_proposal_is_explicitly_unverified_and_pinned_to_raw_sourc
     assert any("DMSO" in note and "unverified" in note for note in candidate["caveats"])
     assert "local_method_review" in candidate["missing_fields"]
     assert source.read_text(encoding="utf-8")  # discovery never mutates the store
+
+
+@pytest.mark.parametrize("controller_type", ["simulation", "darwin_native"])
+def test_active_hardware_class_is_proposed_without_copying_or_qualifying_it(
+    monkeypatch, tmp_path, controller_type,
+):
+    source = _write_classes(monkeypatch, tmp_path, [_class()])
+    before = source.read_bytes()
+    active = liquid_classes.list_liquid_classes(machine_id="physical-bravo", head_type="HT_384_D_70")
+    context = _context(controller_type=controller_type, machine_id="physical-bravo", liquid_classes=active)
+
+    result = propose_liquid_classes(context, _query(reagent_id="neat DMSO"))
+
+    assert len(result["candidates"]) == 1
+    candidate = result["candidates"][0]
+    assert candidate["liquid_class_id"] == "physical-st10"
+    assert candidate["machine_id"] == "physical-bravo"
+    assert candidate["catalog_relation"] == "active_machine"
+    assert candidate["is_active"] is True
+    assert candidate["execution_ready"] is False
+    assert candidate["can_apply_to_plan"] is False
+    assert "active_machine_liquid_class" not in candidate["missing_fields"]
+    assert "reagent_applicability" in candidate["missing_fields"]
+    assert any("neat DMSO" in caveat for caveat in candidate["caveats"])
+    assert "method_ref" not in candidate
+    assert source.read_bytes() == before
 
 
 def test_no_cross_profile_proposal_on_physical_controller_or_without_exact_tip(monkeypatch, tmp_path):
