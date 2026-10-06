@@ -4,7 +4,9 @@ connection:
   address: ''
   serial_port: ''
   controller_type: simulation
-  machine_id: SIMULATED
+  # Model this configured Bravo while using the software-only controller.
+  # Liquid classes are shared with its physical profile, not copied.
+  machine_id: 04-91-62-CF-7B-B0
 head:
   head_type: HT_384_D_70
   check_on_init: true
