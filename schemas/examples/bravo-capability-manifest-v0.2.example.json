@@ -1,0 +1,1563 @@
+{
+  "schema_version": "0.2.0",
+  "standard": "pybravo.bravo-capability-manifest",
+  "context_hash": "9a0f7e8a0c20b937690d7a1623c416524c859b84c06e885572f199a689dbc4ea",
+  "machine": {
+    "machine_id": "SIMULATED",
+    "profile_name": "simulation",
+    "controller_type": "simulation",
+    "head_type": "HT_384_D_70",
+    "geometry": {
+      "rows": 16,
+      "columns": 24,
+      "pitch_x_mm": 4.5,
+      "pitch_y_mm": 4.5
+    },
+    "has_gripper": true,
+    "deck_slots": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "max_operations": 500,
+    "head_max_volume_ul": 250.0
+  },
+  "assistant_operations": [
+    {
+      "id": "transfer",
+      "description": "Move a per-channel volume between addressed source and destination wells.",
+      "selectable": true,
+      "availability": "available",
+      "parameters": [
+        {
+          "name": "source",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "destination",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source_anchor",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "destination_anchor",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "volume_ul",
+          "type": "number",
+          "required": true,
+          "unit": "uL"
+        }
+      ],
+      "preconditions": [
+        "disposable_head",
+        "compatible_tip_pair",
+        "confirmed_tip_inventory",
+        "approved_liquid_class",
+        "reachable_wells",
+        "source_and_destination_capacity"
+      ],
+      "effects": [
+        "source_volume_decreased",
+        "destination_volume_increased"
+      ],
+      "lowers_to": [
+        "liquid/Aspirate",
+        "liquid/Dispense"
+      ]
+    },
+    {
+      "id": "mix",
+      "description": "Aspirate and dispense repeatedly within one addressed material.",
+      "selectable": true,
+      "availability": "available",
+      "parameters": [
+        {
+          "name": "material",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "anchor",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "volume_ul",
+          "type": "number",
+          "required": true,
+          "unit": "uL"
+        },
+        {
+          "name": "cycles",
+          "type": "integer",
+          "required": true
+        }
+      ],
+      "preconditions": [
+        "disposable_head",
+        "compatible_tip_pair",
+        "confirmed_tip_inventory",
+        "approved_liquid_class",
+        "reachable_wells",
+        "source_and_destination_capacity"
+      ],
+      "effects": [
+        "material_mixed"
+      ],
+      "lowers_to": [
+        "liquid/Mix"
+      ]
+    },
+    {
+      "id": "move_plate",
+      "description": "Move a single accessible plate to an empty deck position.",
+      "selectable": true,
+      "availability": "available",
+      "parameters": [
+        {
+          "name": "material",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "destination_slot",
+          "type": "integer",
+          "required": true
+        }
+      ],
+      "preconditions": [
+        "configured_gripper",
+        "top_plate_access",
+        "deck_destination_available"
+      ],
+      "effects": [
+        "plate_relocated"
+      ],
+      "lowers_to": [
+        "plate/PickPlace"
+      ]
+    },
+    {
+      "id": "destack_plate",
+      "description": "Remove the top plate from a stack into an empty position.",
+      "selectable": true,
+      "availability": "available",
+      "parameters": [
+        {
+          "name": "material",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "destination_slot",
+          "type": "integer",
+          "required": true
+        }
+      ],
+      "preconditions": [
+        "configured_gripper",
+        "top_plate_access",
+        "source_stack_has_multiple_plates",
+        "deck_destination_available"
+      ],
+      "effects": [
+        "plate_relocated",
+        "source_stack_decreased"
+      ],
+      "lowers_to": [
+        "plate/Destack"
+      ]
+    },
+    {
+      "id": "stack_plate",
+      "description": "Place an accessible plate on a compatible occupied stack.",
+      "selectable": true,
+      "availability": "available",
+      "parameters": [
+        {
+          "name": "material",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "destination_slot",
+          "type": "integer",
+          "required": true
+        }
+      ],
+      "preconditions": [
+        "configured_gripper",
+        "top_plate_access",
+        "compatible_destination_stack"
+      ],
+      "effects": [
+        "plate_relocated",
+        "destination_stack_increased"
+      ],
+      "lowers_to": [
+        "plate/Stack"
+      ]
+    },
+    {
+      "id": "wait",
+      "description": "Wait for a specified elapsed duration; no temperature control is implied.",
+      "selectable": true,
+      "availability": "available",
+      "parameters": [
+        {
+          "name": "duration_s",
+          "type": "number",
+          "required": true,
+          "unit": "s"
+        }
+      ],
+      "preconditions": [
+        "positive_duration"
+      ],
+      "effects": [
+        "elapsed_time"
+      ],
+      "lowers_to": [
+        "system/Wait"
+      ]
+    },
+    {
+      "id": "manual",
+      "description": "Pause for a stated operator action or external instrument handoff.",
+      "selectable": true,
+      "availability": "available",
+      "parameters": [
+        {
+          "name": "message",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "duration_s",
+          "type": "number",
+          "required": false,
+          "unit": "s"
+        }
+      ],
+      "preconditions": [
+        "operator_instruction"
+      ],
+      "effects": [
+        "operator_checkpoint"
+      ],
+      "lowers_to": [
+        "system/Manual"
+      ]
+    },
+    {
+      "id": "repeat",
+      "description": "Repeat a bounded sequence of assistant steps.",
+      "selectable": true,
+      "availability": "available",
+      "parameters": [
+        {
+          "name": "repeat",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "steps",
+          "type": "array",
+          "required": true
+        }
+      ],
+      "preconditions": [
+        "bounded_repeat"
+      ],
+      "effects": [
+        "steps_repeated"
+      ],
+      "lowers_to": []
+    }
+  ],
+  "robot_operations": [
+    {
+      "id": "tips/TipsOn",
+      "description": "Pick up the validated tip footprint from a confirmed supply rack.",
+      "model_selectable": false,
+      "availability": "available"
+    },
+    {
+      "id": "tips/TipsOff",
+      "description": "Return or discard the loaded tip footprint according to setup.",
+      "model_selectable": false,
+      "availability": "available"
+    },
+    {
+      "id": "liquid/Aspirate",
+      "description": "Aspirate liquid from the addressed source wells.",
+      "model_selectable": false,
+      "availability": "available"
+    },
+    {
+      "id": "liquid/Dispense",
+      "description": "Dispense liquid into the addressed destination wells.",
+      "model_selectable": false,
+      "availability": "available"
+    },
+    {
+      "id": "liquid/Mix",
+      "description": "Perform repeated aspiration and dispense at one location.",
+      "model_selectable": false,
+      "availability": "available"
+    },
+    {
+      "id": "plate/PickPlace",
+      "description": "Move an accessible plate with the configured gripper.",
+      "model_selectable": false,
+      "availability": "available"
+    },
+    {
+      "id": "plate/Stack",
+      "description": "Place a plate onto a compatible existing stack.",
+      "model_selectable": false,
+      "availability": "available"
+    },
+    {
+      "id": "plate/Destack",
+      "description": "Remove the top plate from a stack.",
+      "model_selectable": false,
+      "availability": "available"
+    },
+    {
+      "id": "system/Wait",
+      "description": "Run a timed wait.",
+      "model_selectable": false,
+      "availability": "available"
+    },
+    {
+      "id": "system/Manual",
+      "description": "Pause for an operator checkpoint.",
+      "model_selectable": false,
+      "availability": "available"
+    }
+  ],
+  "tipbox_choices": [
+    {
+      "labware_id": "lw-4914769d0af7",
+      "labware_name": "384 V11 ST10 Tip Box 10734.102",
+      "tip_definition_id": "st_10ul",
+      "tip_name": "10 uL",
+      "rows": 16,
+      "cols": 24,
+      "wells": 384,
+      "spacing_x_mm": 4.5,
+      "spacing_y_mm": 4.5,
+      "tip_capacity_ul": 10.0,
+      "tip_length_mm": 19.9,
+      "execution_ready": true,
+      "missing_metadata": [],
+      "status": "catalog_verified",
+      "provenance": "active_head_catalog_pair"
+    },
+    {
+      "labware_id": "lw-4914769d0af7",
+      "labware_name": "384 V11 ST10 Tip Box 10734.102",
+      "tip_definition_id": "st_70ul",
+      "tip_name": "70 uL",
+      "rows": 16,
+      "cols": 24,
+      "wells": 384,
+      "spacing_x_mm": 4.5,
+      "spacing_y_mm": 4.5,
+      "tip_capacity_ul": 70.0,
+      "tip_length_mm": null,
+      "execution_ready": false,
+      "missing_metadata": [
+        "tip_length"
+      ],
+      "status": "planning_only",
+      "provenance": "active_head_catalog_pair"
+    }
+  ],
+  "tipbox_catalog_candidates": [],
+  "labware": [
+    {
+      "id": "01KD4P500RXXP69X03R0SDGS7C",
+      "name": "96 Costar 3596 clear cell culture PS flt btm",
+      "kind": "sbs_plate",
+      "base_class": "microplate",
+      "wells": 96,
+      "rows": 8,
+      "cols": 12,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 10.75,
+      "height_mm": 14.3,
+      "stack_height_mm": 13.0,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "01KD4PYY7N4EG0E22P3QP1RHB9",
+      "name": "384 Labcyte PP0200 PP sq flt",
+      "kind": "sbs_plate",
+      "base_class": "microplate",
+      "wells": 384,
+      "rows": 16,
+      "cols": 24,
+      "spacing_x_mm": 4.5,
+      "spacing_y_mm": 4.5,
+      "well_volume_ul": 130.0,
+      "well_depth_mm": 11.4,
+      "height_mm": 14.4,
+      "stack_height_mm": 13.6,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-006d2ad894c2",
+      "name": "96AM 250uL Tip Loading Station",
+      "kind": "sbs_plate",
+      "base_class": "tip_box",
+      "wells": 96,
+      "rows": 8,
+      "cols": 12,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 60.53,
+      "stack_height_mm": 58.21,
+      "provisional": false,
+      "supported_tip_ids": [
+        "am_lt250_teach"
+      ],
+      "tip_definition_id": "am_lt250_teach",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-0188881d2601",
+      "name": "96 Deepwell U-Bottom",
+      "kind": "sbs_plate",
+      "base_class": "microplate",
+      "wells": 96,
+      "rows": 0,
+      "cols": 0,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 200.0,
+      "well_depth_mm": 32.4,
+      "height_mm": 32.4,
+      "stack_height_mm": 0.0,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-0c182cad7c78",
+      "name": "96 V11 LT250 Tip Box Standard",
+      "kind": "sbs_plate",
+      "base_class": "tip_box",
+      "wells": 96,
+      "rows": 8,
+      "cols": 12,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 60.0,
+      "stack_height_mm": 57.5,
+      "provisional": false,
+      "supported_tip_ids": [
+        "am_lt250_teach",
+        "lt_250ul"
+      ],
+      "tip_definition_id": "am_lt250_teach",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-20726fce134a",
+      "name": "96AM Receiver Plate",
+      "kind": "sbs_plate",
+      "base_class": "microplate",
+      "wells": 96,
+      "rows": 0,
+      "cols": 0,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 250.0,
+      "well_depth_mm": 14.5,
+      "height_mm": 27.75,
+      "stack_height_mm": 0.0,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-34358f93e2a0",
+      "name": "384 CellVis 1.5H",
+      "kind": "sbs_plate",
+      "base_class": "microplate",
+      "wells": 384,
+      "rows": 0,
+      "cols": 0,
+      "spacing_x_mm": 0.0,
+      "spacing_y_mm": 0.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 14.3,
+      "stack_height_mm": 14.3,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-3918306f45b8",
+      "name": "1536 Labcyte LP-0400 LDV",
+      "kind": "sbs_plate",
+      "base_class": "microplate",
+      "wells": 1536,
+      "rows": 32,
+      "cols": 48,
+      "spacing_x_mm": 2.25,
+      "spacing_y_mm": 2.25,
+      "well_volume_ul": 5.5,
+      "well_depth_mm": 5.2,
+      "height_mm": 10.48,
+      "stack_height_mm": 9.8,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-4914769d0af7",
+      "name": "384 V11 ST10 Tip Box 10734.102",
+      "kind": "sbs_plate",
+      "base_class": "tip_box",
+      "wells": 384,
+      "rows": 16,
+      "cols": 24,
+      "spacing_x_mm": 4.5,
+      "spacing_y_mm": 4.5,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 50.0,
+      "stack_height_mm": 0.0,
+      "provisional": false,
+      "supported_tip_ids": [
+        "st_10ul",
+        "st_70ul"
+      ],
+      "tip_definition_id": "st_10ul",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-5ae0ff54b01a",
+      "name": "96 Eppendorf Twin.tec PCR",
+      "kind": "sbs_plate",
+      "base_class": "microplate",
+      "wells": 96,
+      "rows": 0,
+      "cols": 0,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 14.5,
+      "height_mm": 16.0,
+      "stack_height_mm": 12.38,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-5ec9d2c1a484",
+      "name": "96AM Cartridge Seating Station",
+      "kind": "sbs_plate",
+      "base_class": "AssayMap Cartridge Rack",
+      "wells": 96,
+      "rows": 0,
+      "cols": 0,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 64.0,
+      "stack_height_mm": 58.21,
+      "provisional": false,
+      "supported_tip_ids": [
+        "am_cartridge_60ul"
+      ],
+      "tip_definition_id": "am_cartridge_60ul",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-651f80d816b1",
+      "name": "TestPlate",
+      "kind": "sbs_plate",
+      "base_class": "microplate",
+      "wells": 96,
+      "rows": 0,
+      "cols": 0,
+      "spacing_x_mm": 0.0,
+      "spacing_y_mm": 0.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 13.2,
+      "stack_height_mm": 12.1,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-96st-provisional",
+      "name": "96 ST Tip Box (provisional model)",
+      "kind": "sbs_plate",
+      "base_class": "tip_box",
+      "wells": 96,
+      "rows": 8,
+      "cols": 12,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 50.0,
+      "stack_height_mm": 0.0,
+      "provisional": true,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "catalog_status": "provisional"
+    },
+    {
+      "id": "lw-b0704e550d2a",
+      "name": "96 V11 LT200 Tip Box 06880.002",
+      "kind": "sbs_plate",
+      "base_class": "tip_box",
+      "wells": 96,
+      "rows": 8,
+      "cols": 12,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 49.9,
+      "stack_height_mm": 0.0,
+      "provisional": false,
+      "supported_tip_ids": [
+        "lt_200ul"
+      ],
+      "tip_definition_id": "lt_200ul",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-b4799106e58b",
+      "name": "96AM Cartridge Rack and Receiver Plate",
+      "kind": "sbs_plate",
+      "base_class": "AssayMap Cartridge Rack",
+      "wells": 96,
+      "rows": 0,
+      "cols": 0,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 42.6,
+      "stack_height_mm": 42.6,
+      "provisional": false,
+      "supported_tip_ids": [
+        "am_cartridge_60ul"
+      ],
+      "tip_definition_id": "am_cartridge_60ul",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-cadcb0f0f9c1",
+      "name": "96 V11 LT250 Tip Box 19477.002",
+      "kind": "sbs_plate",
+      "base_class": "tip_box",
+      "wells": 96,
+      "rows": 8,
+      "cols": 12,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 0.0,
+      "well_depth_mm": 0.0,
+      "height_mm": 60.53,
+      "stack_height_mm": 58.21,
+      "provisional": false,
+      "supported_tip_ids": [
+        "am_lt250_teach",
+        "lt_250ul"
+      ],
+      "tip_definition_id": "am_lt250_teach",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-d4fcc14aaa86",
+      "name": "96 Nunc Flatbottom",
+      "kind": "sbs_plate",
+      "base_class": "microplate",
+      "wells": 96,
+      "rows": 0,
+      "cols": 0,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 100.0,
+      "well_depth_mm": 9.0,
+      "height_mm": 14.4,
+      "stack_height_mm": 0.0,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    },
+    {
+      "id": "lw-fba7222815b4",
+      "name": "96AM Tip Wash Station",
+      "kind": "sbs_plate",
+      "base_class": "Tip Wash Station",
+      "wells": 96,
+      "rows": 0,
+      "cols": 0,
+      "spacing_x_mm": 9.0,
+      "spacing_y_mm": 9.0,
+      "well_volume_ul": 250.0,
+      "well_depth_mm": 19.8,
+      "height_mm": 49.5,
+      "stack_height_mm": 0.0,
+      "provisional": false,
+      "supported_tip_ids": [],
+      "tip_definition_id": "",
+      "compatible_head_types": [],
+      "catalog_status": "catalog_entry"
+    }
+  ],
+  "tip_definitions": [
+    {
+      "id": "st_10ul",
+      "label": "10 uL",
+      "kind": "tip",
+      "capacity_ul": 10.0,
+      "length_mm": 19.9,
+      "overflow_ul": null,
+      "compatible_heads": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "supported_head_types": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "source": "measured",
+      "catalog_status": "defined"
+    },
+    {
+      "id": "st_15ul",
+      "label": "15 uL",
+      "kind": "tip",
+      "capacity_ul": 15.0,
+      "length_mm": null,
+      "overflow_ul": null,
+      "compatible_heads": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "supported_head_types": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "source": "vendor-source-option",
+      "catalog_status": "defined"
+    },
+    {
+      "id": "st_30ul",
+      "label": "30 uL",
+      "kind": "tip",
+      "capacity_ul": 30.0,
+      "length_mm": 26.1,
+      "overflow_ul": null,
+      "compatible_heads": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "supported_head_types": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "source": "vendor-source-comment",
+      "catalog_status": "defined"
+    },
+    {
+      "id": "st_50ul",
+      "label": "50 uL",
+      "kind": "tip",
+      "capacity_ul": 50.0,
+      "length_mm": null,
+      "overflow_ul": null,
+      "compatible_heads": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "supported_head_types": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "source": "vendor-source-option",
+      "catalog_status": "defined"
+    },
+    {
+      "id": "st_51ul",
+      "label": "51 uL",
+      "kind": "tip",
+      "capacity_ul": 51.0,
+      "length_mm": null,
+      "overflow_ul": null,
+      "compatible_heads": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "supported_head_types": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "source": "vendor-source-option",
+      "catalog_status": "defined"
+    },
+    {
+      "id": "st_70ul",
+      "label": "70 uL",
+      "kind": "tip",
+      "capacity_ul": 70.0,
+      "length_mm": null,
+      "overflow_ul": null,
+      "compatible_heads": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "supported_head_types": [
+        "HT_16_D_ST",
+        "HT_384_D_70",
+        "HT_384_D_70_S2",
+        "HT_96_D_70",
+        "HT_96_D_70_S2"
+      ],
+      "source": "vendor-source-option",
+      "catalog_status": "defined"
+    }
+  ],
+  "liquid_classes": [],
+  "setup_options": {
+    "tip_strategies": [
+      {
+        "id": "fresh_each_step",
+        "description": "Pick a fresh set for each liquid step."
+      },
+      {
+        "id": "fresh_each_source",
+        "description": "Use a dedicated tip set per source; requires a reuse rationale.",
+        "requires_reason": true
+      },
+      {
+        "id": "reuse_all",
+        "description": "Reuse a tip set across steps; requires a contamination assessment.",
+        "requires_reason": true
+      }
+    ],
+    "tip_disposals": [
+      {
+        "id": "waste_container",
+        "description": "Use the ID of a configured waste material, not this option ID.",
+        "value_kind": "material_id",
+        "required_material_role": "waste",
+        "setup_field": "tip_disposal_id"
+      },
+      {
+        "id": "return_to_source_rack",
+        "description": "Return spent tips to their own rack without reselecting them.",
+        "value_kind": "literal",
+        "setup_value": "return_to_source_rack",
+        "setup_field": "tip_disposal_id",
+        "requires_tip_strategy": "fresh_each_source"
+      }
+    ],
+    "head_modes": [
+      {
+        "id": "all_barrels",
+        "required_fields": [
+          "subset_type",
+          "subset_config"
+        ],
+        "subset_config_values": [
+          "back_left"
+        ],
+        "requires_confirmation": true,
+        "compatible_tip_pair_check_required": true
+      },
+      {
+        "id": "single_barrel",
+        "required_fields": [
+          "subset_type",
+          "subset_config"
+        ],
+        "subset_config_values": [
+          "back_left",
+          "back_right",
+          "front_left",
+          "front_right"
+        ],
+        "requires_confirmation": true,
+        "compatible_tip_pair_check_required": true
+      },
+      {
+        "id": "row",
+        "required_fields": [
+          "subset_type",
+          "subset_config",
+          "row_count"
+        ],
+        "subset_config_values": [
+          "back_left",
+          "back_right",
+          "front_left",
+          "front_right"
+        ],
+        "requires_confirmation": true,
+        "compatible_tip_pair_check_required": true,
+        "row_count_range": [
+          1,
+          16
+        ]
+      },
+      {
+        "id": "column",
+        "required_fields": [
+          "subset_type",
+          "subset_config",
+          "column_count"
+        ],
+        "subset_config_values": [
+          "back_left",
+          "back_right",
+          "front_left",
+          "front_right"
+        ],
+        "requires_confirmation": true,
+        "compatible_tip_pair_check_required": true,
+        "column_count_range": [
+          1,
+          24
+        ]
+      },
+      {
+        "id": "rectangle",
+        "required_fields": [
+          "subset_type",
+          "subset_config",
+          "row_count",
+          "column_count"
+        ],
+        "subset_config_values": [
+          "back_left",
+          "back_right",
+          "front_left",
+          "front_right"
+        ],
+        "requires_confirmation": true,
+        "compatible_tip_pair_check_required": true,
+        "row_count_range": [
+          1,
+          16
+        ],
+        "column_count_range": [
+          1,
+          24
+        ]
+      }
+    ]
+  },
+  "setup_decision_rules": [
+    {
+      "id": "head_mode_full_footprint",
+      "decision": "/setup/head_mode",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          },
+          {
+            "fact": "full_head_footprint",
+            "op": "eq",
+            "value": true
+          }
+        ]
+      },
+      "recommendation": {
+        "subset_type": "all_barrels",
+        "subset_config": "back_left",
+        "row_count": null,
+        "column_count": null
+      },
+      "evidence_level": "heuristic",
+      "requires_confirmation": true,
+      "rationale": "An affirmative all-wells instruction and matching catalog grid suggest all barrels; the scientist must confirm intended coverage. The back-left corner is canonical, and row and column counts come from the configured head rather than setup entry.",
+      "provenance": [
+        "pybravo.head_mode.normalize_head_mode",
+        "pybravo.workflow.protocols.validation"
+      ],
+      "required_evidence": [
+        "Affirmative source evidence or a structured scientist decision states full-head coverage for every liquid step on verified plate grids."
+      ]
+    },
+    {
+      "id": "head_mode_partial_selection",
+      "decision": "/setup/head_mode",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          },
+          {
+            "fact": "full_head_footprint",
+            "op": "eq",
+            "value": false
+          }
+        ]
+      },
+      "recommendation": null,
+      "evidence_level": "scientist_input",
+      "requires_confirmation": true,
+      "rationale": "A partial footprint needs the intended channel shape, size and corner; plate well count alone does not identify which barrels should be active.",
+      "provenance": [
+        "pybravo.head_mode.normalize_head_mode",
+        "pybravo.workflow.protocols.validation"
+      ],
+      "required_evidence": [
+        "Intended active channels or target region, orientation and verified tip-rack footprint."
+      ]
+    },
+    {
+      "id": "tip_strategy_dedicated_source",
+      "decision": "/setup/tip_strategy",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          },
+          {
+            "fact": "source_count",
+            "op": "gte",
+            "value": 2
+          },
+          {
+            "fact": "dedicated_tip_rack_per_source",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "destination_initially_empty",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "same_source_reuse_authorized",
+            "op": "eq",
+            "value": true
+          }
+        ]
+      },
+      "recommendation": "fresh_each_source",
+      "evidence_level": "heuristic",
+      "requires_confirmation": true,
+      "rationale": "A dedicated tip set per source isolates sources while allowing that set to dispense into initially empty destinations. Reuse still needs the scientist's contamination assessment.",
+      "provenance": [
+        "pybravo.workflow.protocols.validation",
+        "scientist_confirmed_reuse_intent"
+      ],
+      "required_evidence": [
+        "One physically distinct compatible rack per source in execution order.",
+        "Scientist authorization to reuse only within the same source.",
+        "Destination plates are initially empty and the procedure does not mix sources through tips."
+      ]
+    },
+    {
+      "id": "tip_strategy_fresh_step",
+      "decision": "/setup/tip_strategy",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          },
+          {
+            "fact": "same_source_reuse_authorized",
+            "op": "eq",
+            "value": false
+          }
+        ]
+      },
+      "recommendation": "fresh_each_step",
+      "evidence_level": "heuristic",
+      "requires_confirmation": true,
+      "rationale": "Fresh tips for each liquid step avoid assumed reuse. The plan must have enough confirmed compatible tips for every pickup.",
+      "provenance": [
+        "pybravo.workflow.protocols.validation"
+      ],
+      "required_evidence": [
+        "Explicit decision not to reuse tips within a source.",
+        "Sufficient inspected fresh-tip footprints for every liquid step."
+      ]
+    },
+    {
+      "id": "tip_rack_order_by_source",
+      "decision": "/setup/tip_rack_ids",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          },
+          {
+            "fact": "source_count",
+            "op": "gte",
+            "value": 2
+          },
+          {
+            "fact": "dedicated_tip_rack_per_source",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "tip_strategy",
+            "op": "eq",
+            "value": "fresh_each_source"
+          }
+        ]
+      },
+      "recommendation": {
+        "resolver": "source_ordered_verified_tip_rack_ids"
+      },
+      "evidence_level": "heuristic",
+      "requires_confirmation": true,
+      "rationale": "Pair one exact catalog-compatible tip rack with each source in first-use order. A rack ID encoding its source ID is a review candidate, not a verified association; an explicit scientist mapping provides stronger evidence. Physical identity and inventory must be checked.",
+      "provenance": [
+        "pybravo.workflow.protocols.validation",
+        "active_head_catalog_pair",
+        "scientist_source_rack_mapping"
+      ],
+      "required_evidence": [
+        "One distinct tip material and exact rack–tip catalog pair per source.",
+        "Source execution order and rack order are both known.",
+        "Physical rack contents and fresh-tip wells are confirmed before release."
+      ]
+    },
+    {
+      "id": "tip_disposal_return_to_source",
+      "decision": "/setup/tip_disposal_id",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          },
+          {
+            "fact": "tip_strategy",
+            "op": "eq",
+            "value": "fresh_each_source"
+          },
+          {
+            "fact": "dedicated_tip_rack_per_source",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "waste_material_present",
+            "op": "eq",
+            "value": false
+          }
+        ]
+      },
+      "recommendation": "return_to_source_rack",
+      "evidence_level": "heuristic",
+      "requires_confirmation": true,
+      "rationale": "With source-dedicated racks and no waste receptacle in the plan, spent tips can return to their original wells only if they will never be selected again.",
+      "provenance": [
+        "pybravo.workflow.protocols.validation"
+      ],
+      "required_evidence": [
+        "The original rack can accept each spent tip footprint.",
+        "Returned wells are marked spent and cannot be reused.",
+        "Scientist confirms the physical rack and contamination policy."
+      ]
+    },
+    {
+      "id": "tip_disposal_waste_material",
+      "decision": "/setup/tip_disposal_id",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          },
+          {
+            "fact": "waste_material_present",
+            "op": "eq",
+            "value": true
+          }
+        ]
+      },
+      "recommendation": null,
+      "evidence_level": "scientist_input",
+      "requires_confirmation": true,
+      "rationale": "Select the material ID of an on-deck waste receptacle; the option name 'waste_container' is not a setup value.",
+      "provenance": [
+        "pybravo.workflow.protocols.validation"
+      ],
+      "required_evidence": [
+        "A material with role waste is placed on an available deck position and has capacity."
+      ]
+    },
+    {
+      "id": "pipetting_height_qualification",
+      "decision": "/setup/distance_from_bottom_mm",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          }
+        ]
+      },
+      "recommendation": null,
+      "evidence_level": "scientist_input",
+      "requires_confirmation": true,
+      "rationale": "Well depth only bounds the allowed height. It does not establish a safe aspiration or dispense position for the liquid, tip, well shape and volume.",
+      "provenance": [
+        "pybravo.workflow.protocols.validation",
+        "labware_catalog.well_depth_mm"
+      ],
+      "required_evidence": [
+        "Qualified height for the selected tip, liquid class, labware and volume."
+      ],
+      "bounds": {
+        "minimum_inclusive": 0,
+        "maximum_exclusive_fact": "minimum_addressed_well_depth_mm"
+      }
+    },
+    {
+      "id": "liquid_class_qualification",
+      "decision": "/setup/liquid_class",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          }
+        ]
+      },
+      "recommendation": null,
+      "evidence_level": "scientist_input",
+      "requires_confirmation": true,
+      "rationale": "A catalog entry is not evidence that a liquid class is suitable for this reagent or procedure.",
+      "provenance": [
+        "pybravo.workflow.protocols.validation",
+        "active_liquid_class_catalog"
+      ],
+      "required_evidence": [
+        "Approved liquid class for the active machine, head, loaded tip and reagent."
+      ]
+    },
+    {
+      "id": "tip_reuse_assessment",
+      "decision": "/setup/tip_reuse_reason",
+      "when": {
+        "all": [
+          {
+            "fact": "liquid_step_count",
+            "op": "gte",
+            "value": 1
+          },
+          {
+            "fact": "tip_strategy",
+            "op": "in",
+            "value": [
+              "fresh_each_source",
+              "reuse_all"
+            ]
+          }
+        ]
+      },
+      "recommendation": null,
+      "evidence_level": "scientist_input",
+      "requires_confirmation": true,
+      "rationale": "The contamination rationale must be supplied or approved by the scientist; the model must not invent one from empty destination status alone.",
+      "provenance": [
+        "pybravo.workflow.protocols.validation"
+      ],
+      "required_evidence": [
+        "Scientist's explicit contamination and carryover assessment."
+      ]
+    }
+  ],
+  "transfer_patterns": [
+    {
+      "id": "384_to_1536_quadrant",
+      "description": "A full 384-channel source footprint maps to one 1536-well quadrant.",
+      "source_labware_wells": 384,
+      "destination_labware_wells": 1536,
+      "source_anchor": "A1",
+      "destination_anchors": [
+        "A1",
+        "A2",
+        "B1",
+        "B2"
+      ],
+      "status": "geometry_option",
+      "review_required": true
+    }
+  ],
+  "tip_plate_compatibility": [
+    {
+      "target_labware_id": "lw-3918306f45b8",
+      "target_wells": 1536,
+      "applies_to": [
+        "source",
+        "destination",
+        "mix"
+      ],
+      "tip_definition_id": "st_10ul",
+      "compatible": true,
+      "status": "planning_compatible",
+      "execution_ready": false,
+      "provenance": "catalog_pair_and_validator",
+      "reason": "Catalog tip/rack pair and 384ST-to-1536 grid support a review draft; confirm liquid class, tip inventory, plate and alignment before execution."
+    },
+    {
+      "target_labware_id": "lw-3918306f45b8",
+      "target_wells": 1536,
+      "applies_to": [
+        "source",
+        "destination",
+        "mix"
+      ],
+      "tip_definition_id": "st_70ul",
+      "compatible": false,
+      "status": "incompatible",
+      "execution_ready": false,
+      "provenance": "protocol_validator",
+      "reason": "ST70 tips cannot be used with 1536-well plates."
+    }
+  ],
+  "constraints": [
+    {
+      "id": "disposable_head",
+      "description": "Protocol Assistant liquid actions require a configured disposable-tip head."
+    },
+    {
+      "id": "compatible_tip_pair",
+      "description": "Rack geometry, rack-to-tip link and tip-to-head membership must match exactly."
+    },
+    {
+      "id": "confirmed_tip_inventory",
+      "description": "The scientist must confirm actual fresh tips; catalog compatibility is not inventory."
+    },
+    {
+      "id": "approved_liquid_class",
+      "description": "The chosen liquid class must match the active machine, head and selected tip."
+    },
+    {
+      "id": "reachable_wells",
+      "description": "Head footprint and selected anchors must fit each plate's verified grid and pitch."
+    },
+    {
+      "id": "source_and_destination_capacity",
+      "description": "Source stays above dead volume; destination stays below per-well capacity."
+    },
+    {
+      "id": "configured_gripper",
+      "description": "The active profile must provide the Bravo gripper axes."
+    },
+    {
+      "id": "top_plate_access",
+      "description": "Only the top plate of a stack may be addressed or moved."
+    },
+    {
+      "id": "deck_destination_available",
+      "description": "A plate move or destack requires an empty destination position."
+    },
+    {
+      "id": "source_stack_has_multiple_plates",
+      "description": "Destack requires at least two plates at the source position."
+    },
+    {
+      "id": "compatible_destination_stack",
+      "description": "Stack requires a same-type plate already at the destination."
+    },
+    {
+      "id": "positive_duration",
+      "description": "Elapsed wait time must be positive and finite."
+    },
+    {
+      "id": "operator_instruction",
+      "description": "A manual checkpoint must state the operator's action."
+    },
+    {
+      "id": "bounded_repeat",
+      "description": "Repeat count, nesting and expanded operation count must fit compiler limits."
+    },
+    {
+      "id": "source_volume_decreased",
+      "description": "Each addressed source well loses the aspirated volume."
+    },
+    {
+      "id": "destination_volume_increased",
+      "description": "Each addressed destination well gains the dispensed volume."
+    },
+    {
+      "id": "material_mixed",
+      "description": "Liquid is aspirated and dispensed within the same addressed material."
+    },
+    {
+      "id": "plate_relocated",
+      "description": "The moved plate's deck position changes."
+    },
+    {
+      "id": "source_stack_decreased",
+      "description": "The source stack loses its top plate."
+    },
+    {
+      "id": "destination_stack_increased",
+      "description": "The destination stack gains a top plate."
+    },
+    {
+      "id": "elapsed_time",
+      "description": "The workflow includes the specified timed wait."
+    },
+    {
+      "id": "operator_checkpoint",
+      "description": "Execution pauses for an operator action."
+    },
+    {
+      "id": "steps_repeated",
+      "description": "The nested body expands up to the reviewed repeat count."
+    },
+    {
+      "id": "st70_excluded_from_1536",
+      "description": "ST70 tips are incompatible with 1536-well microplates."
+    },
+    {
+      "id": "provisional_labware_excluded",
+      "description": "Provisional catalog labware is for review and cannot compile for execution."
+    }
+  ],
+  "review_requirements": [
+    {
+      "id": "physical_labware_identity",
+      "description": "Confirm every physical plate and rack against its selected catalog ID."
+    },
+    {
+      "id": "deck_layout_and_clearance",
+      "description": "Confirm deck positions, stack order, gripper clearance and plate teachpoints."
+    },
+    {
+      "id": "fresh_tip_inventory",
+      "description": "Inspect each supply rack and record the fresh tip wells before every run."
+    },
+    {
+      "id": "tip_identity_and_reuse",
+      "description": "Confirm loaded tip IDs, disposal and any source-specific reuse rationale."
+    },
+    {
+      "id": "liquid_setup",
+      "description": "Confirm source/dead volumes, approved liquid class, head mode and pipetting height."
+    },
+    {
+      "id": "simulation_and_approval",
+      "description": "Validate, strictly simulate and obtain scientist approval before release."
+    }
+  ]
+}

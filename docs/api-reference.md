@@ -1467,6 +1467,7 @@ See [Protocol Assistant](protocol-assistant.md) for the scientist workflow and c
 |---|---|---|
 | `GET` | `/api/protocols/context` | Active profile, head, calibration and catalogs with configuration fingerprints |
 | `GET` | `/api/protocols/capabilities` | Read-only [Bravo Capability Manifest](bravo-capability-manifest.md) of model-selectable intents, compiler operations, catalog choices, and review rules for the active profile |
+| `POST` | `/api/protocols/setup-recommendations` | `{plan, setup?, session_id?}` evaluates the current draft against the active manifest and returns evidence-tagged `recommendations`, `unresolved`, and `blocked` choices without saving or approving them |
 | `GET` | `/api/protocols` | Session summaries in `items` |
 | `POST` | `/api/protocols/chat` | `{message, session_id?, revision?}` proposes a cited plan from a conversation turn and returns `{session, reply, preview}`; follow-ups require the current revision |
 | `POST` | `/api/protocols/from-text` | `{text, name?}` creates a session; maximum 200,000 characters |

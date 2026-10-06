@@ -15,6 +15,16 @@ labware choices, geometry patterns, and review requirements in a versioned
 machine-readable format. It is discovery information for planning; validation
 and approval still govern executable workflows.
 
+The setup panel evaluates the manifest's decision rules against the current
+draft and only the currently selected source passages, including unsaved
+selection changes. It can propose a full-head mode, a tip policy,
+source-specific rack order, or disposal when their stated conditions are
+supported. Each proposal
+shows its evidence and must be accepted into the draft; it is never recorded
+as an automatic scientist decision. Liquid class, pipetting height, physical
+inventory, and contamination assessment remain open until qualified for the
+actual experiment. A missing fact prevents a rule from firing.
+
 ## Start with the local model
 
 Install the optional `llm` dependencies with `pip install -e '.[llm]'`, or run

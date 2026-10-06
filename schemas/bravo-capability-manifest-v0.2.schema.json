@@ -1,0 +1,469 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pybravo:bravo-capability-manifest:0.2.0",
+  "title": "Bravo Capability Manifest 0.2",
+  "description": "Read-only, machine-derived choices for planning a reviewed pyBravo protocol. A valid manifest does not authorize device execution.",
+  "type": "object",
+  "required": [
+    "standard",
+    "schema_version",
+    "context_hash",
+    "machine",
+    "assistant_operations",
+    "robot_operations",
+    "tipbox_choices",
+    "tipbox_catalog_candidates",
+    "tip_plate_compatibility",
+    "labware",
+    "tip_definitions",
+    "liquid_classes",
+    "constraints",
+    "review_requirements",
+    "setup_options",
+    "setup_decision_rules",
+    "transfer_patterns"
+  ],
+  "properties": {
+    "standard": { "const": "pybravo.bravo-capability-manifest" },
+    "schema_version": { "const": "0.2.0" },
+    "context_hash": { "type": "string", "minLength": 1 },
+    "machine": { "$ref": "#/$defs/machine" },
+    "assistant_operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/assistantOperation" },
+      "uniqueItems": true
+    },
+    "robot_operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/robotOperation" },
+      "uniqueItems": true
+    },
+    "tipbox_choices": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/tipboxChoice" },
+      "uniqueItems": true
+    },
+    "tipbox_catalog_candidates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/tipboxCandidate" },
+      "uniqueItems": true
+    },
+    "tip_plate_compatibility": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/tipPlateCompatibility" },
+      "uniqueItems": true
+    },
+    "labware": { "type": "array", "items": { "$ref": "#/$defs/labware" } },
+    "tip_definitions": { "type": "array", "items": { "$ref": "#/$defs/tipDefinition" } },
+    "liquid_classes": { "type": "array", "items": { "$ref": "#/$defs/liquidClass" } },
+    "constraints": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+    "review_requirements": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+    "setup_options": { "$ref": "#/$defs/setupOptions" },
+    "setup_decision_rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/setupDecisionRule" },
+      "uniqueItems": true
+    },
+    "transfer_patterns": { "type": "array", "items": { "$ref": "#/$defs/transferPattern" } },
+    "extensions": {
+      "type": "object",
+      "patternProperties": { "^x-[A-Za-z0-9][A-Za-z0-9.-]*$": {} },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "stringList": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
+    "machine": {
+      "type": "object",
+      "required": ["head_type", "geometry", "has_gripper"],
+      "properties": {
+        "machine_id": { "type": "string" },
+        "profile_name": { "type": "string" },
+        "controller_type": { "type": "string" },
+        "head_type": { "type": ["string", "null"] },
+        "geometry": {
+          "type": ["object", "null"],
+          "required": ["rows", "columns", "pitch_x_mm", "pitch_y_mm"],
+          "properties": {
+            "rows": { "type": "integer", "minimum": 1 },
+            "columns": { "type": "integer", "minimum": 1 },
+            "pitch_x_mm": { "type": "number", "exclusiveMinimum": 0 },
+            "pitch_y_mm": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "has_gripper": { "type": "boolean" },
+        "max_operations": { "type": "integer", "minimum": 1 },
+        "head_max_volume_ul": { "type": "number", "exclusiveMinimum": 0 },
+        "deck_slots": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "parameter": {
+      "type": "object",
+      "required": ["name", "type", "required"],
+      "properties": {
+        "name": { "$ref": "#/$defs/id" },
+        "type": { "type": "string", "enum": ["string", "number", "integer", "boolean", "array", "material_id", "well", "deck_slot", "operation_list"] },
+        "required": { "type": "boolean" },
+        "unit": { "type": "string", "enum": ["uL", "mm", "s", "count"] },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "assistantOperation": {
+      "type": "object",
+      "required": ["id", "description", "selectable", "availability", "parameters", "preconditions", "effects", "lowers_to"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "description": { "type": "string", "minLength": 1 },
+        "selectable": { "type": "boolean" },
+        "availability": { "enum": ["available", "requires_setup", "unavailable"] },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "preconditions": { "$ref": "#/$defs/stringList" },
+        "effects": { "$ref": "#/$defs/stringList" },
+        "lowers_to": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": false
+    },
+    "robotOperation": {
+      "type": "object",
+      "required": ["id", "description", "model_selectable", "availability"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "description": { "type": "string", "minLength": 1 },
+        "model_selectable": { "const": false },
+        "availability": { "enum": ["available", "requires_setup", "unavailable"] }
+      },
+      "additionalProperties": false
+    },
+    "tipboxChoice": {
+      "type": "object",
+      "required": ["labware_id", "tip_definition_id", "execution_ready", "missing_metadata", "status", "provenance"],
+      "properties": {
+        "labware_id": { "$ref": "#/$defs/id" },
+        "labware_name": { "type": "string" },
+        "tip_definition_id": { "$ref": "#/$defs/id" },
+        "tip_name": { "type": "string" },
+        "rows": { "type": "integer", "minimum": 1 },
+        "cols": { "type": "integer", "minimum": 1 },
+        "wells": { "type": "integer", "minimum": 1 },
+        "spacing_x_mm": { "type": "number", "exclusiveMinimum": 0 },
+        "spacing_y_mm": { "type": "number", "exclusiveMinimum": 0 },
+        "tip_capacity_ul": { "type": "number", "exclusiveMinimum": 0 },
+        "tip_length_mm": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "execution_ready": { "type": "boolean" },
+        "missing_metadata": { "$ref": "#/$defs/stringList" },
+        "tip_row_stride": { "type": "integer", "minimum": 1 },
+        "tip_col_stride": { "type": "integer", "minimum": 1 },
+        "required_head_mode": { "type": "string" },
+        "status": { "enum": ["catalog_verified", "planning_only"] },
+        "provenance": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "execution_ready": { "const": true } }, "required": ["execution_ready"] },
+          "then": { "properties": { "status": { "const": "catalog_verified" }, "missing_metadata": { "maxItems": 0 } } },
+          "else": { "properties": { "status": { "const": "planning_only" } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "tipboxCandidate": {
+      "type": "object",
+      "required": ["labware_id", "execution_ready", "missing_metadata", "status", "provenance"],
+      "properties": {
+        "labware_id": { "$ref": "#/$defs/id" },
+        "labware_name": { "type": "string" },
+        "rows": { "type": ["integer", "null"], "minimum": 0 },
+        "cols": { "type": ["integer", "null"], "minimum": 0 },
+        "wells": { "type": "integer", "minimum": 1 },
+        "spacing_x_mm": { "type": "number", "exclusiveMinimum": 0 },
+        "spacing_y_mm": { "type": "number", "exclusiveMinimum": 0 },
+        "execution_ready": { "const": false },
+        "missing_metadata": { "$ref": "#/$defs/stringList" },
+        "provisional": { "type": "boolean" },
+        "status": { "const": "catalog_candidate" },
+        "provenance": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "tipPlateCompatibility": {
+      "type": "object",
+      "required": ["tip_definition_id", "target_labware_id", "target_wells", "applies_to", "compatible", "status", "execution_ready", "provenance", "reason"],
+      "properties": {
+        "tip_definition_id": { "$ref": "#/$defs/id" },
+        "target_labware_id": { "$ref": "#/$defs/id" },
+        "target_wells": { "type": "integer", "minimum": 1 },
+        "applies_to": {
+          "type": "array",
+          "items": { "enum": ["source", "destination", "mix"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "compatible": { "type": "boolean" },
+        "status": { "enum": ["incompatible", "planning_compatible"] },
+        "execution_ready": { "const": false },
+        "provenance": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "oneOf": [
+        { "properties": { "compatible": { "const": false }, "status": { "const": "incompatible" } } },
+        { "properties": { "compatible": { "const": true }, "status": { "const": "planning_compatible" } } }
+      ],
+      "additionalProperties": false
+    },
+    "labware": {
+      "type": "object",
+      "required": ["id", "name", "catalog_status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "kind": { "type": "string" },
+        "base_class": { "type": "string" },
+        "rows": { "type": "integer", "minimum": 0 },
+        "cols": { "type": "integer", "minimum": 0 },
+        "wells": { "type": "integer", "minimum": 0 },
+        "spacing_x_mm": { "type": "number", "minimum": 0 },
+        "spacing_y_mm": { "type": "number", "minimum": 0 },
+        "well_volume_ul": { "type": "number", "minimum": 0 },
+        "provisional": { "type": "boolean" },
+        "catalog_status": { "enum": ["provisional", "catalog_entry"] },
+        "tip_definition_id": { "type": "string" },
+        "supported_tip_ids": { "$ref": "#/$defs/stringList" },
+        "compatible_head_types": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": true
+    },
+    "tipDefinition": {
+      "type": "object",
+      "required": ["id", "catalog_status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "tip_id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" },
+        "kind": { "type": "string" },
+        "capacity_ul": { "type": "number", "minimum": 0 },
+        "length_mm": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "compatible_heads": { "$ref": "#/$defs/stringList" },
+        "supported_head_types": { "$ref": "#/$defs/stringList" },
+        "source": { "type": "string" },
+        "catalog_status": { "enum": ["defined", "incomplete"] }
+      },
+      "additionalProperties": true
+    },
+    "liquidClass": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "liquid_class_id": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "head_type": { "type": "string" },
+        "machine_id": { "type": "string" },
+        "tip_id": { "type": "string" },
+        "tip_capacity_ul": { "type": "number", "minimum": 0 }
+      },
+      "anyOf": [ { "required": ["liquid_class_id"] }, { "required": ["id"] }, { "required": ["name"] } ],
+      "additionalProperties": true
+    },
+    "rule": {
+      "type": "object",
+      "required": ["id", "description"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "description": { "type": "string", "minLength": 1 },
+        "applies_to": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": false
+    },
+    "tipStrategyOption": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "enum": ["fresh_each_step", "fresh_each_source", "reuse_all"] },
+        "description": { "type": "string" },
+        "requires_reason": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "tipDisposalOption": {
+      "type": "object",
+      "required": ["id", "value_kind", "setup_field"],
+      "properties": {
+        "id": { "enum": ["waste_container", "return_to_source_rack"] },
+        "description": { "type": "string" },
+        "value_kind": { "enum": ["material_id", "literal"] },
+        "setup_field": { "const": "tip_disposal_id" },
+        "required_material_role": { "const": "waste" },
+        "setup_value": { "const": "return_to_source_rack" },
+        "requires_tip_strategy": { "const": "fresh_each_source" }
+      },
+      "oneOf": [
+        {
+          "properties": { "id": { "const": "waste_container" }, "value_kind": { "const": "material_id" } },
+          "required": ["required_material_role"],
+          "not": { "required": ["setup_value"] }
+        },
+        {
+          "properties": { "id": { "const": "return_to_source_rack" }, "value_kind": { "const": "literal" } },
+          "required": ["setup_value", "requires_tip_strategy"],
+          "not": { "required": ["required_material_role"] }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "headModeOption": {
+      "type": "object",
+      "required": ["id", "required_fields", "subset_config_values", "requires_confirmation", "compatible_tip_pair_check_required"],
+      "properties": {
+        "id": { "enum": ["all_barrels", "single_barrel", "row", "column", "rectangle"] },
+        "required_fields": {
+          "type": "array",
+          "items": { "enum": ["subset_type", "subset_config", "row_count", "column_count"] },
+          "uniqueItems": true
+        },
+        "subset_config_values": {
+          "type": "array",
+          "items": { "enum": ["back_left", "back_right", "front_left", "front_right"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "row_count_range": { "$ref": "#/$defs/integerRange" },
+        "column_count_range": { "$ref": "#/$defs/integerRange" },
+        "requires_confirmation": { "const": true },
+        "compatible_tip_pair_check_required": { "const": true }
+      },
+      "additionalProperties": false
+    },
+    "integerRange": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "integer", "minimum": 1 },
+        { "type": "integer", "minimum": 1 }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "setupOptions": {
+      "type": "object",
+      "required": ["tip_strategies", "tip_disposals", "head_modes"],
+      "properties": {
+        "tip_strategies": { "type": "array", "items": { "$ref": "#/$defs/tipStrategyOption" } },
+        "tip_disposals": { "type": "array", "items": { "$ref": "#/$defs/tipDisposalOption" } },
+        "head_modes": { "type": "array", "items": { "$ref": "#/$defs/headModeOption" } }
+      },
+      "additionalProperties": false
+    },
+    "setupDecisionRule": {
+      "type": "object",
+      "required": ["id", "decision", "when", "recommendation", "evidence_level", "requires_confirmation", "rationale", "provenance", "required_evidence"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "decision": {
+          "enum": ["/setup/head_mode", "/setup/tip_strategy", "/setup/tip_rack_ids", "/setup/tip_disposal_id", "/setup/distance_from_bottom_mm", "/setup/liquid_class", "/setup/tip_reuse_reason"]
+        },
+        "when": {
+          "type": "object",
+          "required": ["all"],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/setupFactPredicate" }
+            }
+          },
+          "additionalProperties": false
+        },
+        "recommendation": {
+          "oneOf": [
+            { "type": "null" },
+            { "enum": ["fresh_each_step", "fresh_each_source", "reuse_all", "return_to_source_rack"] },
+            {
+              "type": "object",
+              "required": ["subset_type", "subset_config", "row_count", "column_count"],
+              "properties": {
+                "subset_type": { "const": "all_barrels" },
+                "subset_config": { "const": "back_left" },
+                "row_count": { "type": "null" },
+                "column_count": { "type": "null" }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["resolver"],
+              "properties": { "resolver": { "const": "source_ordered_verified_tip_rack_ids" } },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "evidence_level": { "enum": ["derived", "heuristic", "scientist_input"] },
+        "requires_confirmation": { "const": true },
+        "rationale": { "type": "string", "minLength": 1 },
+        "provenance": { "$ref": "#/$defs/stringList" },
+        "required_evidence": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+        "bounds": {
+          "type": "object",
+          "required": ["minimum_inclusive", "maximum_exclusive_fact"],
+          "properties": {
+            "minimum_inclusive": { "const": 0 },
+            "maximum_exclusive_fact": { "const": "minimum_addressed_well_depth_mm" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "evidence_level": { "const": "scientist_input" } }, "required": ["evidence_level"] },
+          "then": { "properties": { "recommendation": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "evidence_level": { "enum": ["derived", "heuristic"] } }, "required": ["evidence_level"] },
+          "then": { "not": { "properties": { "recommendation": { "type": "null" } } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "setupFactPredicate": {
+      "type": "object",
+      "required": ["fact", "op", "value"],
+      "properties": {
+        "fact": {
+          "enum": ["liquid_step_count", "full_head_footprint", "source_count", "dedicated_tip_rack_per_source", "destination_initially_empty", "same_source_reuse_authorized", "tip_strategy", "waste_material_present"]
+        },
+        "op": { "enum": ["eq", "gte", "in"] },
+        "value": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "integer", "minimum": 0 },
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "transferPattern": {
+      "type": "object",
+      "required": ["id", "description", "source_labware_wells", "destination_labware_wells", "source_anchor", "destination_anchors", "status", "review_required"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "description": { "type": "string" },
+        "source_labware_wells": { "type": "integer", "minimum": 1 },
+        "destination_labware_wells": { "type": "integer", "minimum": 1 },
+        "source_anchor": { "type": "string" },
+        "destination_anchors": { "$ref": "#/$defs/stringList" },
+        "status": { "const": "geometry_option" },
+        "review_required": { "const": true }
+      },
+      "additionalProperties": false
+    }
+  }
+}

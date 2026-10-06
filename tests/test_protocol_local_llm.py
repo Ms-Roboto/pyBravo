@@ -158,7 +158,7 @@ async def test_model_receives_capability_options_without_controller_configuratio
         "tip_definitions": [], "tipbox_choices": [],
     })
     options = captured["capability_options"]
-    assert options["schema_version"] == "0.1.0"
+    assert options["schema_version"] == "0.2.0"
     transfer = next(item for item in options["assistant_operations"] if item["id"] == "transfer")
     assert transfer["selectable"] is True
     assert transfer["lowers_to"] == ["liquid/Aspirate", "liquid/Dispense"]

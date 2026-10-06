@@ -230,6 +230,14 @@ option with value_kind=material_id requires the actual ID of a waste material;
 its option ID is not a tip_disposal_id value. A value_kind=literal option uses
 its setup_value. Tip reuse needs a scientist's reason, and a head mode needs
 its listed required fields plus any pair-specific restriction.
+When setup_decision_rules are supplied, evaluate every predicate in a rule's
+when.all list against established plan, catalog, and scientist facts. Unknown
+facts do not satisfy a predicate. A rule's recommendation is a review-draft
+candidate, not an approved value; null recommendations identify choices that
+still need scientist input. Do not turn an empty destination or a matching
+plate grid into an invented contamination assessment, pipetting height, liquid
+class, full-head intention, or tip inventory. The separate setup recommendation
+service will evaluate eligible rules for the Protocol Assistant form.
 
 Preserve EVERY experimental step in the selected source, including manual
 preparation, incubation, centrifugation, instrument handoffs and measurements.

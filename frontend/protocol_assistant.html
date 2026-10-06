@@ -18,6 +18,10 @@
 .tip-rack-order-row .check{margin:0 auto 0 0}
 .tip-rack-pairing{margin-top:10px;padding:10px 12px;background:var(--input);border-radius:5px;font-size:12px}
 .tip-rack-pairing strong{display:block;margin-bottom:5px}
+.setup-recommendation{border-top:1px solid var(--line);padding:10px 0}
+.setup-recommendation:first-of-type{border-top:0}
+.setup-recommendation p{margin:5px 0;font-size:12px}
+.setup-recommendation .badge{margin-left:8px}
 </style>
 </head>
 <body>
@@ -32,7 +36,7 @@
 <div class="panel" id="source-panel" hidden><div class="panel-title"><div><h2>Review the source passages</h2><p class="muted" id="source-description"></p></div><div class="actions" style="margin:0"><a id="original-pdf" class="button small" target="_blank" rel="noopener" hidden>Open original PDF</a><button id="select-all" class="small">Select all</button><button id="select-none" class="small">Clear</button></div></div><div id="source-paragraphs" class="source-list"></div><label class="check"><input type="checkbox" id="source-reviewed"><span>I have checked these passages against the original document and selected the procedure to automate.</span></label><div class="actions end"><button data-go="plan" class="primary">Continue to setup</button></div></div>
 </section>
 <section id="plan-view" role="tabpanel" aria-labelledby="tab-plan" hidden>
-<div class="panel"><div class="panel-title"><div><h2>Experiment setup</h2><p class="muted" id="instrument-summary">Loading the active instrument catalog…</p><p class="muted" style="font-size:12px">Catalog corrections: <a href="/labware-editor" target="_blank" rel="noopener">labware geometry</a> · <a href="/tip-editor" target="_blank" rel="noopener">tip definitions</a> · <a href="/liquid-class-editor" target="_blank" rel="noopener">liquid classes</a>. Validation uses the catalog dimensions, not the labware name.</p></div><span class="badge" id="model-status">Local model</span></div><div class="fields" id="setup-fields"></div><div id="setup-tipbox-choices" class="row-card" style="margin-top:18px"></div><div class="actions"><label class="field" style="min-width:240px">Reusable setup<select id="setup-picker"><option value="">Choose a saved setup</option></select></label><button id="apply-setup">Apply setup</button><button id="prepare-deck">Configure materials</button><label class="field" style="flex:1;min-width:170px">Save setup as<input id="setup-name" placeholder="A descriptive laboratory setup name"></label><button id="save-setup">Save setup</button></div></div>
+<div class="panel"><div class="panel-title"><div><h2>Experiment setup</h2><p class="muted" id="instrument-summary">Loading the active instrument catalog…</p><p class="muted" style="font-size:12px">Catalog corrections: <a href="/labware-editor" target="_blank" rel="noopener">labware geometry</a> · <a href="/tip-editor" target="_blank" rel="noopener">tip definitions</a> · <a href="/liquid-class-editor" target="_blank" rel="noopener">liquid classes</a>. Validation uses the catalog dimensions, not the labware name.</p></div><span class="badge" id="model-status">Local model</span></div><div id="setup-recommendations" class="row-card" hidden></div><div class="fields" id="setup-fields"></div><div id="setup-tipbox-choices" class="row-card" style="margin-top:18px"></div><div class="actions"><label class="field" style="min-width:240px">Reusable setup<select id="setup-picker"><option value="">Choose a saved setup</option></select></label><button id="apply-setup">Apply setup</button><button id="prepare-deck">Configure materials</button><label class="field" style="flex:1;min-width:170px">Save setup as<input id="setup-name" placeholder="A descriptive laboratory setup name"></label><button id="save-setup">Save setup</button></div></div>
 <div class="panel"><div class="panel-title"><div><h2>Interpret the selected procedure</h2><p class="muted">The local model proposes a structured plan. Missing quantities and experimental choices remain open for review.</p></div></div><label class="field">Experiment context / extraction instructions<textarea id="extraction-instructions" placeholder="For example: use only the plate preparation section; preserve the centrifugation step as a manual handoff."></textarea></label><div class="actions"><button id="extract" class="primary">Interpret with local LLM</button><span class="muted" id="extraction-status"></span></div></div>
 <div id="plan-content" hidden><div class="panel"><div class="panel-title"><div><h2>Materials &amp; deck assignments</h2><p class="muted">Volumes are per well unless a well-specific override is supplied. Enter 0 µL for an empty destination. For plates sharing a deck position, assign stack levels from bottom 0 upward.</p></div><button id="add-material" class="small">Add material</button></div><div id="materials"></div></div><div class="panel"><div class="panel-title"><div><h2>Review the experimental steps</h2><p class="muted">Edit the interpretation and follow its source links. External operations remain explicit manual instructions.</p></div><button id="add-step" class="small">Add step</button></div><label class="field" style="margin-bottom:16px">Reason for corrections<input id="correction-reason" placeholder="For example, confirmed volume against laboratory SOP v3"></label><div id="steps"></div></div><div class="panel" id="questions-panel"><div class="panel-title"><div><h2>Resolve open questions</h2><p class="muted">Answers update the corresponding structured field and are recorded as scientist decisions.</p></div></div><div id="questions"></div></div><div class="actions end"><button data-go="review" class="primary">Review &amp; validate</button></div></div>
 <div class="empty" id="no-plan">Load and review a source, then interpret it to begin.</div>
@@ -49,7 +53,7 @@
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {session:null, context:{}, capabilities:null, setups:[], view:'source', dirty:false, busy:false, poll:null, sourceReviewedKey:null};
+const state = {session:null, context:{}, capabilities:null, setups:[], view:'source', dirty:false, busy:false, poll:null, sourceReviewedKey:null, setupRecommendations:null, setupRecommendationKey:null, setupRecommendationRequest:0, setupRecommendationTimer:null};
 const clone = value => JSON.parse(JSON.stringify(value));
 // getRandomValues is also available on ordinary laboratory HTTP origins.
 const randomFragment = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), value => value.toString(16).padStart(2, '0')).join('');
@@ -73,8 +77,9 @@ async function action(work,label='Working…'){if(state.busy)return;notify('');s
 function pointerGet(root,path){return path.split('/').slice(1).map(part=>part.replace(/~1/g,'/').replace(/~0/g,'~')).reduce((value,key)=>value?.[key],root);}
 function pointerSet(root,path,value){const keys=path.split('/').slice(1).map(part=>part.replace(/~1/g,'/').replace(/~0/g,'~'));if(!keys.length||keys.some(key=>['__proto__','constructor','prototype'].includes(key)))throw new Error('Unsupported field path.');let target=root;keys.slice(0,-1).forEach((key,index)=>{if(target[key]==null)target[key]=/^\d+$/.test(keys[index+1])?[]:{};target=target[key];});target[keys.at(-1)]=value;}
 function dirty(){state.dirty=true;$('plan-reviewed').checked=false;$('deck-confirmed').checked=false;gates();}
-function decide(path,value){if(!state.session?.plan)return;const reason=$('correction-reason').value.trim()||'Reviewed and edited by scientist in Protocol Assistant';const decisions=state.session.plan.decisions??=[];state.session.plan.decisions=decisions.filter(item=>item.path!==path);state.session.plan.decisions.push({path,value:clone(value),reason,actor:'scientist'});}
-function edit(path,value,{rerender=false}={}){if(!state.session)return;const setup=path.startsWith('/setup/');pointerSet(setup?state.session:state.session.plan,path,value);decide(path,value);dirty();if(rerender)renderPlan();else if(state.session?.plan){renderQuestions();renderReview();if((path.startsWith('/steps/')&&/\/(source|material|kind)$/.test(path))||(path.startsWith('/materials/')&&/\/(name|deck_slot|role)$/.test(path)))renderSetup();}}
+function sourceSelectionChanged(){dirty();$('source-reviewed').checked=false;scheduleSetupRecommendations();}
+function decide(path,value,reason=null){if(!state.session?.plan)return;const explanation=reason||$('correction-reason').value.trim()||'Reviewed and edited by scientist in Protocol Assistant';const decisions=state.session.plan.decisions??=[];state.session.plan.decisions=decisions.filter(item=>item.path!==path);state.session.plan.decisions.push({path,value:clone(value),reason:explanation,actor:'scientist'});}
+function edit(path,value,{rerender=false}={}){if(!state.session)return;const setup=path.startsWith('/setup/');pointerSet(setup?state.session:state.session.plan,path,value);decide(path,value);dirty();if(rerender)renderPlan();else if(state.session?.plan){renderQuestions();renderReview();if(setup||path.startsWith('/steps/')||path.startsWith('/materials/'))renderSetup();}}
 function makeField(label,path,{type='text',options=null,help='',wide=false,min=null,max=null,step=null,placeholder=''}={}){const setup=path.startsWith('/setup/');const value=pointerGet(setup?state.session:state.session?.plan,path);const field=el('label',{class:'field'+(wide?' wide':'')},label);let input;if(options){input=el('select',{'data-path':path});for(const option of options){const item=typeof option==='string'?{value:option,label:option}:option;input.append(el('option',{value:item.value},item.label));}input.value=textValue(value);if(value!=null&&!options.some(item=>textValue(typeof item==='string'?item:item.value)===textValue(value)))input.append(el('option',{value:String(value)},String(value)));input.value=textValue(value);}else{input=el(type==='textarea'?'textarea':'input',{'data-path':path,type:type==='number'?'number':'text',min,max,step:type==='number'?(step??'any'):null,placeholder});input.value=textValue(value);}if(/\/name$/.test(path)&&!path.startsWith('/setup/'))input.required=true;
 input.addEventListener('change',()=>{const raw=input.value.trim();const requiredString=/\/(name|description)$/.test(path);const next=type==='number'?(raw===''?null:Number(raw)):(requiredString?raw:raw||null);edit(path,next);});field.append(input);if(help)field.append(el('small',{},help));return field;}
 function catalogOptions(key){return [{value:'',label:'Select explicitly…'},...list(state.context[key==='tips'?'tip_definitions':key]).map(item=>({value:item.id??item.tip_id??item.name,label:item.name??item.display_name??item.id??item.tip_id}))];}
@@ -97,7 +102,7 @@ async function save(){
 }
 
 function render(){const s=state.session;$('session-bar').hidden=!s;$('source-panel').hidden=!s;$('session-name').textContent=s?.plan?.name||s?.name||'Prepare a protocol for Bravo';if(s){$('protocol-name').value=s.name||s.plan?.name||'';$('publish-name').value=s.plan?.name||s.name||'';$('source-reviewed').checked=state.sourceReviewedKey===reviewKey();renderSource();}renderSetup();renderPlan();renderReview();gates();}
-function renderSource(){const s=state.session;$('original-pdf').hidden=!s.source?.metadata?.original_pdf;$('original-pdf').href='/api/protocols/'+encodeURIComponent(s.id)+'/source-pdf';const paragraphs=list(s.source?.paragraphs);if(!s.selected_paragraph_ids)s.selected_paragraph_ids=paragraphs.map(item=>item.id);const selected=new Set(s.selected_paragraph_ids);$('source-description').textContent=`${paragraphs.length} passages · ${selected.size} selected${s.source?.name?' · '+s.source.name:''}`;$('source-paragraphs').replaceChildren(...paragraphs.map(p=>{const checkbox=el('input',{type:'checkbox',checked:selected.has(p.id),'aria-label':`Include ${p.id}${p.page?' on page '+p.page:''}`});checkbox.addEventListener('change',()=>{const chosen=new Set(s.selected_paragraph_ids);checkbox.checked?chosen.add(p.id):chosen.delete(p.id);s.selected_paragraph_ids=[...chosen];dirty();$('source-reviewed').checked=false;});return el('label',{class:'source-row',id:'source-'+p.id},checkbox,el('span',{},el('span',{class:'source-meta'},`${p.id}${p.page?' · Page '+p.page:''}`),el('span',{class:'source-text'},p.text)));}));}
+function renderSource(){const s=state.session;$('original-pdf').hidden=!s.source?.metadata?.original_pdf;$('original-pdf').href='/api/protocols/'+encodeURIComponent(s.id)+'/source-pdf';const paragraphs=list(s.source?.paragraphs);if(!s.selected_paragraph_ids)s.selected_paragraph_ids=paragraphs.map(item=>item.id);const selected=new Set(s.selected_paragraph_ids);$('source-description').textContent=`${paragraphs.length} passages · ${selected.size} selected${s.source?.name?' · '+s.source.name:''}`;$('source-paragraphs').replaceChildren(...paragraphs.map(p=>{const checkbox=el('input',{type:'checkbox',checked:selected.has(p.id),'aria-label':`Include ${p.id}${p.page?' on page '+p.page:''}`});checkbox.addEventListener('change',()=>{const chosen=new Set(s.selected_paragraph_ids);checkbox.checked?chosen.add(p.id):chosen.delete(p.id);s.selected_paragraph_ids=[...chosen];sourceSelectionChanged();});return el('label',{class:'source-row',id:'source-'+p.id},checkbox,el('span',{},el('span',{class:'source-meta'},`${p.id}${p.page?' · Page '+p.page:''}`),el('span',{class:'source-text'},p.text)));}));}
 function planningOnlyTipboxChoice(choice){return choice.execution_ready===false&&Array.isArray(choice.missing_metadata)&&choice.missing_metadata.length===1&&choice.missing_metadata[0]==='tip_length';}
 function verifiedTipboxChoices(){
     return list(state.context.tipbox_choices).filter(choice=>choice.labware_id&&choice.tip_definition_id&&['rows','cols','wells','spacing_x_mm','spacing_y_mm','tip_capacity_ul'].every(field=>Number(choice[field])>0)&&(Number(choice.tip_length_mm)>0||planningOnlyTipboxChoice(choice)));
@@ -210,32 +215,168 @@ function renderTipRackOrder(session){
     }
     return panel;
 }
-function renderSuggestedTipSetup(session){
-    const materials = list(session.plan?.materials);
-    const sources = liquidSourceOrder(session.plan?.steps);
-    const racks = materials.filter(item=>item.role==='tips');
-    if(!sources.length || !racks.length || session.setup.tip_strategy || list(session.setup.tip_rack_ids).length)return null;
-    const panel = el('div',{class:'field wide'});
-    panel.append(el('small',{},'Draft suggestion: '+sources.length+' source material'+(sources.length===1?'':'s')
-        +' and '+racks.length+' tip rack'+(racks.length===1?'':'s')+' are listed. Confirm the source/rack pairing and contamination assessment before validation.'));
-    if(sources.length===racks.length){
-        panel.append(el('button',{type:'button',class:'small',onclick:()=>{
-            const rackIds = racks.map(item=>item.id);
-            for(const [path,value] of [
-                ['/setup/tip_strategy','fresh_each_source'],
-                ['/setup/tip_rack_ids',rackIds],
-                ['/setup/tip_disposal_id','return_to_source_rack'],
-            ]){
-                pointerSet(session,path,value);
-                decide(path,value);
-            }
-            dirty();
-            renderSetup();
-        }},'Pair one rack per source; return spent tips to their rack'));
+const SETUP_LABELS={'/setup/head_mode':'Head footprint and corner','/setup/tip_strategy':'Tip strategy','/setup/tip_rack_ids':'Tip rack order','/setup/tip_disposal_id':'Tip disposal','/setup/liquid_class':'Liquid class','/setup/distance_from_bottom_mm':'Pipetting height','/setup/tip_reuse_reason':'Tip reuse assessment'};
+function setupChoiceLabel(path){
+    if(SETUP_LABELS[path])return SETUP_LABELS[path];
+    const tipInventory=String(path||'').match(/^\/materials\/(\d+)\/available_tips$/);
+    if(tipInventory){
+        const material=state.session?.plan?.materials?.[Number(tipInventory[1])];
+        return `Tip inventory · ${material?.name||material?.id||'rack '+tipInventory[1]}`;
     }
-    return panel;
+    return path||'Setup choice';
 }
-function renderSetup(){renderTipboxChoices();const s=state.session;const active=state.context.profile??state.context.active_profile??{};const head=state.context.head_type??active.head_type??active.head??'configured head';$('instrument-summary').textContent=`${active.name??state.context.profile_name??'Active instrument'} · ${typeof head==='object'?head.name??JSON.stringify(head):head}. The active profile is checked during validation.`;const model=state.context.model??state.context.llm?.model??'qwen';$('model-status').textContent=`${model} · local LLM`;if(!s){$('setup-fields').replaceChildren(el('p',{class:'muted'},'Load a protocol to choose its experiment setup.'));return;}s.setup??={};const fields=[makeField('Setup name','/setup/name'),makeField('Head footprint','/setup/head_mode/subset_type',{options:[{value:'',label:'Select explicitly…'},{value:'all_barrels',label:'All barrels'},{value:'row',label:'Row'},{value:'column',label:'Column'},{value:'rectangle',label:'Rectangle'},{value:'single_barrel',label:'Single barrel'}]}),makeField('Head corner','/setup/head_mode/subset_config',{options:[{value:'',label:'Select explicitly…'},{value:'back_left',label:'Back left'},{value:'back_right',label:'Back right'},{value:'front_left',label:'Front left'},{value:'front_right',label:'Front right'}]}),makeField('Footprint rows','/setup/head_mode/row_count',{type:'number',min:1}),makeField('Footprint columns','/setup/head_mode/column_count',{type:'number',min:1}),makeField('Liquid class','/setup/liquid_class',{options:catalogOptions('liquid_classes')}),makeField('Distance from well bottom (mm)','/setup/distance_from_bottom_mm',{type:'number',min:0}),makeField('Tip strategy','/setup/tip_strategy',{options:[{value:'',label:'Select explicitly…'},{value:'fresh_each_step',label:'Fresh tips for each step'},{value:'fresh_each_source',label:'Fresh tips for each source plate'},{value:'reuse_all',label:'Reuse across all steps'}]}),makeField('Tip reuse / contamination assessment','/setup/tip_reuse_reason',{help:'For fresh tips per source, explain why one dedicated tip set may dispense into both destination plates without unacceptable carryover.'}),makeField('Tip disposal','/setup/tip_disposal_id',{options:[{value:'',label:'Select explicitly…'},{value:'return_to_source_rack',label:'Return to original rack as spent tips'},...materialOptions().slice(1)],help:'Used tips returned to their original rack wells are spent and cannot be selected again. This requires fresh tips per source.'})];const suggestion=renderSuggestedTipSetup(s);if(suggestion)fields.push(suggestion);fields.push(renderTipRackOrder(s));$('setup-fields').replaceChildren(...fields);$('setup-fields').querySelector('[data-path="/setup/tip_strategy"]')?.addEventListener('change',renderSetup);}
+function suggestedValue(row){
+    if(row.path==='/setup/head_mode'&&row.value?.subset_type==='all_barrels'){
+        const g=state.capabilities?.machine?.geometry??{};
+        return `All barrels${g.rows&&g.columns?` (${g.rows}×${g.columns} channels)`:''}; back-left anchor`;
+    }
+    if(row.path==='/setup/tip_strategy')return {fresh_each_step:'Fresh tips for each step',fresh_each_source:'Fresh tips for each source',reuse_all:'Reuse across steps'}[row.value]||textValue(row.value);
+    if(row.path==='/setup/tip_disposal_id'&&row.value==='return_to_source_rack')return 'Return each spent set to its original rack';
+    if(row.path==='/setup/tip_rack_ids'){
+        const materials=Object.fromEntries(list(state.session?.plan?.materials).map(item=>[item.id,item]));
+        return list(row.value).map(id=>materials[id]?.name||id).join(' → ');
+    }
+    return textValue(row.value);
+}
+function renderSetupRecommendations(){
+    const panel=$('setup-recommendations');
+    if(!state.session?.plan||!state.capabilities){panel.hidden=true;return;}
+    panel.hidden=false;panel.replaceChildren(el('h3',{},'Bravo setup recommendations'));
+    const data=state.setupRecommendations;
+    if(!data){panel.append(el('p',{class:'muted'},'Checking this draft against the active head, catalog, and capability rules…'));return;}
+    if(data.error){panel.append(el('p',{class:'muted'},'Recommendations are unavailable: '+data.error));return;}
+    if(data.context_hash!==state.capabilities.context_hash){panel.append(el('p',{class:'muted'},'Instrument options changed. Refreshing the catalog before showing recommendations…'));return;}
+    panel.append(el('p',{class:'muted',style:'font-size:12px'},'These are review-draft choices. Applying one does not validate or approve the experiment.'));
+    for(const row of list(data.recommendations)){
+        const current=pointerGet(state.session,row.path);
+        const same=JSON.stringify(current)===JSON.stringify(row.value);
+        const conflict=current!=null&&current!==''&&!same;
+        const block=el('div',{class:'setup-recommendation'},
+            el('strong',{},setupChoiceLabel(row.path)),
+            el('span',{class:'badge'},row.evidence_level==='derived'?'Derived':'Suggested'),
+            el('p',{},suggestedValue(row)),el('p',{class:'muted'},row.rationale||''));
+        const evidence=list(row.evidence).map(item=>typeof item==='string'?item:JSON.stringify(item));
+        if(evidence.length){
+            const details=el('details',{},el('summary',{class:'muted'},`Inspect ${evidence.length} source and catalog check${evidence.length===1?'':'s'}`));
+            for(const item of evidence)details.append(el('p',{class:'muted',style:'font-size:12px;overflow-wrap:anywhere;margin:6px 0'},item));
+            block.append(details);
+        }
+        block.append(el('div',{class:'actions',style:'margin-top:8px'},el('button',{type:'button',class:'small',disabled:state.busy||same||conflict,onclick:()=>{
+            if(state.busy||!state.session?.plan)return;
+            const present=pointerGet(state.session,row.path);
+            if(present!=null&&present!==''&&JSON.stringify(present)!==JSON.stringify(row.value))return;
+            pointerSet(state.session,row.path,clone(row.value));
+            decide(row.path,row.value,`Accepted Bravo capability rule ${row.rule_id} as a draft choice; scientific review still required`);
+            dirty();renderSetup();renderQuestions();renderReview();
+            notify(`${setupChoiceLabel(row.path)} added to the draft. Review it and validate before approval.`);
+        }},same?'Already selected':conflict?'Current choice differs':'Use in draft')));
+        if(conflict)block.append(el('small',{class:'muted'},'A different choice is already selected. Change it directly if needed.'));
+        panel.append(block);
+    }
+    const open=list(data.unresolved);
+    if(open.length){
+        const details=el('details',{},el('summary',{},`${open.length} choice${open.length===1?'':'s'} still need experiment input`));
+        details.open=open.some(item=>item.path==='/setup/tip_strategy');
+        for(const item of open){
+            details.append(el('p',{class:'muted',style:'font-size:12px;margin:8px 0'},`${setupChoiceLabel(item.path)}: ${item.reason||list(item.required_evidence).join(', ')||'Review required.'}`));
+            if(item.path==='/setup/tip_strategy'&&data.plan_fingerprint){
+                const chooseReuse=authorized=>{
+                    if(state.busy||!state.session?.plan)return;
+                    decide('/setup/same_source_reuse_authorized',
+                        {authorized,plan_fingerprint:data.plan_fingerprint},
+                        authorized?'Scientist permits one dedicated tip set to serve this source’s destinations in the current plan; destination volumes and carryover remain to be checked':'Scientist requires a fresh tip set for each transfer in this plan');
+                    dirty();renderSetup();renderQuestions();renderReview();
+                    notify('Tip reuse policy recorded for this exact draft. Check destination volumes and complete the contamination assessment.');
+                };
+                details.append(el('div',{class:'actions',style:'margin:0 0 10px'},
+                    el('button',{type:'button',class:'small',disabled:state.busy,onclick:()=>chooseReuse(true)},'Allow one tip set per source'),
+                    el('button',{type:'button',class:'small',disabled:state.busy,onclick:()=>chooseReuse(false)},'Use fresh tips for each transfer')));
+            }
+        }
+        panel.append(details);
+    }
+    for(const item of list(data.blocked))panel.append(el('p',{class:'muted',style:'font-size:12px'},`${setupChoiceLabel(item.path)}: ${item.reason||'More catalog or plan information is needed.'}`));
+    if(!list(data.recommendations).length&&!open.length&&!list(data.blocked).length)panel.append(el('p',{class:'muted'},'No additional setup choices can be derived from this draft.'));
+}
+function scheduleSetupRecommendations(){
+    const session=state.session;
+    if(!session?.plan||!state.capabilities){renderSetupRecommendations();return;}
+    const key=JSON.stringify([session.id,session.plan,session.setup,session.selected_paragraph_ids,state.capabilities.context_hash]);
+    if(key===state.setupRecommendationKey){renderSetupRecommendations();return;}
+    state.setupRecommendationKey=key;state.setupRecommendations=null;
+    const requestId=++state.setupRecommendationRequest;
+    clearTimeout(state.setupRecommendationTimer);renderSetupRecommendations();
+    state.setupRecommendationTimer=setTimeout(async()=>{
+        try{
+            const data=await api('/setup-recommendations',{method:'POST',body:JSON.stringify({session_id:session.id,plan:session.plan,setup:session.setup,selected_paragraph_ids:session.selected_paragraph_ids})});
+            if(requestId!==state.setupRecommendationRequest||key!==state.setupRecommendationKey)return;
+            if(data.context_hash!==state.capabilities.context_hash){
+                const [context,capabilities]=await Promise.all([api('/context'),api('/capabilities')]);
+                if(requestId!==state.setupRecommendationRequest||key!==state.setupRecommendationKey)return;
+                state.context=context;state.capabilities=capabilities;state.setupRecommendationKey=null;
+                renderPlan();renderSetup();
+                notify('The active instrument catalog changed. Review the refreshed setup options before applying a recommendation.');
+                return;
+            }
+            state.setupRecommendations=data;
+        }catch(error){
+            if(requestId!==state.setupRecommendationRequest||key!==state.setupRecommendationKey)return;
+            state.setupRecommendations={error:error.message};
+        }
+        renderSetupRecommendations();
+    },180);
+}
+function renderSetup(){
+    renderTipboxChoices();
+    const s=state.session;
+    const active=state.context.profile??state.context.active_profile??{};
+    const head=state.context.head_type??active.head_type??active.head??'configured head';
+    $('instrument-summary').textContent=`${active.name??state.context.profile_name??'Active instrument'} · ${typeof head==='object'?head.name??JSON.stringify(head):head}. The active profile is checked during validation.`;
+    const model=state.context.model??state.context.llm?.model??'qwen';
+    $('model-status').textContent=`${model} · local LLM`;
+    if(!s){$('setup-fields').replaceChildren(el('p',{class:'muted'},'Load a protocol to choose its experiment setup.'));renderSetupRecommendations();return;}
+    s.setup??={};
+    const options=state.capabilities?.setup_options??{};
+    const modeLabels={all_barrels:'All barrels',row:'Row',column:'Column',rectangle:'Rectangle',single_barrel:'Single barrel'};
+    const modeDefinitions=list(options.head_modes);
+    const modeChoices=state.capabilities?modeDefinitions.map(item=>({value:item.id,label:modeLabels[item.id]||item.id})):
+        Object.entries(modeLabels).map(([value,label])=>({value,label}));
+    const selectedMode=modeDefinitions.find(item=>item.id===s.setup.head_mode?.subset_type);
+    const corners=selectedMode?.subset_config_values??['back_left','back_right','front_left','front_right'];
+    const cornerLabels={back_left:'Back left',back_right:'Back right',front_left:'Front left',front_right:'Front right'};
+    const cornerChoices=corners.map(value=>({value,label:cornerLabels[value]||value}));
+    const strategyLabels={fresh_each_step:'Fresh tips for each step',fresh_each_source:'Fresh tips for each source plate',reuse_all:'Reuse across all steps'};
+    const strategyDefinitions=list(options.tip_strategies);
+    const strategyChoices=state.capabilities?strategyDefinitions.map(item=>({value:item.id,label:strategyLabels[item.id]||item.id})):
+        Object.entries(strategyLabels).map(([value,label])=>({value,label}));
+    const waste=list(s.plan?.materials).filter(item=>item.role==='waste');
+    const disposalOptions=[{value:'',label:'Select explicitly…'}];
+    for(const option of list(options.tip_disposals)){
+        if(option.value_kind==='literal'&&(!option.requires_tip_strategy||option.requires_tip_strategy===s.setup.tip_strategy))
+            disposalOptions.push({value:option.setup_value,label:'Return spent tips to their original rack'});
+        if(option.value_kind==='material_id')
+            disposalOptions.push(...waste.map(item=>({value:item.id,label:`Waste: ${item.name||item.id}`})));
+    }
+    const geometry=state.capabilities?.machine?.geometry??{};
+    const rows=makeField('Footprint rows','/setup/head_mode/row_count',{type:'number',min:selectedMode?.row_count_range?.[0]??1,max:selectedMode?.row_count_range?.[1]??null,placeholder:geometry.rows?`${geometry.rows} derived from head`:''});
+    const columns=makeField('Footprint columns','/setup/head_mode/column_count',{type:'number',min:selectedMode?.column_count_range?.[0]??1,max:selectedMode?.column_count_range?.[1]??null,placeholder:geometry.columns?`${geometry.columns} derived from head`:''});
+    rows.querySelector('input').disabled=!selectedMode?.required_fields?.includes('row_count');
+    columns.querySelector('input').disabled=!selectedMode?.required_fields?.includes('column_count');
+    const fields=[
+        makeField('Setup name','/setup/name'),
+        makeField('Head footprint','/setup/head_mode/subset_type',{options:[{value:'',label:'Select explicitly…'},...modeChoices]}),
+        makeField('Head corner','/setup/head_mode/subset_config',{options:[{value:'',label:'Select explicitly…'},...cornerChoices]}),
+        rows,columns,
+        makeField('Liquid class','/setup/liquid_class',{options:catalogOptions('liquid_classes'),help:'Select a class qualified for this fluid, tip, and active head.'}),
+        makeField('Distance from well bottom (mm)','/setup/distance_from_bottom_mm',{type:'number',min:0,help:'Well depth bounds this value, but does not determine a qualified pipetting height.'}),
+        makeField('Tip strategy','/setup/tip_strategy',{options:[{value:'',label:'Select explicitly…'},...strategyChoices]}),
+        makeField('Tip reuse / contamination assessment','/setup/tip_reuse_reason',{help:'If tips are reused within a source, document why the path between destinations avoids unacceptable carryover.'}),
+        makeField('Tip disposal','/setup/tip_disposal_id',{options:disposalOptions,help:'Returned tips are spent and cannot be selected again. Waste choices must be real waste materials.'}),
+        renderTipRackOrder(s),
+    ];
+    $('setup-fields').replaceChildren(...fields);
+    scheduleSetupRecommendations();
+}
 function verifiedFullTipCount(material){
     const choice=verifiedTipboxChoices().find(item=>item.labware_id===material.labware_id
         && item.tip_definition_id===material.tip_definition_id);
@@ -396,7 +537,7 @@ $('ingest').addEventListener('click',()=>action(async()=>{
 },'Extracting document text…'));
 
 $('new-session').addEventListener('click',()=>{if(state.dirty){notify('Save your current changes before starting another protocol.',true);return;}clearTimeout(state.poll);state.session=null;localStorage.removeItem('pybravo-protocol-session');history.replaceState(null,'',location.pathname);$('protocol-name').value='';$('protocol-text').value='';$('protocol-file').value='';$('source-reviewed').checked=false;render();show('source');notify('');});
-$('select-all').addEventListener('click',()=>{state.session.selected_paragraph_ids=list(state.session.source.paragraphs).map(item=>item.id);dirty();renderSource();$('source-reviewed').checked=false;});$('select-none').addEventListener('click',()=>{state.session.selected_paragraph_ids=[];dirty();renderSource();$('source-reviewed').checked=false;});$('source-reviewed').addEventListener('change',()=>{state.sourceReviewedKey=$('source-reviewed').checked?reviewKey():null;gates();});
+$('select-all').addEventListener('click',()=>{state.session.selected_paragraph_ids=list(state.session.source.paragraphs).map(item=>item.id);sourceSelectionChanged();renderSource();});$('select-none').addEventListener('click',()=>{state.session.selected_paragraph_ids=[];sourceSelectionChanged();renderSource();});$('source-reviewed').addEventListener('change',()=>{state.sourceReviewedKey=$('source-reviewed').checked?reviewKey():null;gates();});
 $('extract').addEventListener('click',()=>action(async()=>{const reviewed=$('source-reviewed').checked;await save();acceptSession(await api('/'+encodeURIComponent(state.session.id)+'/extract',{method:'POST',body:JSON.stringify({revision:state.session.revision,selected_paragraph_ids:state.session.selected_paragraph_ids,instructions:$('extraction-instructions').value})}));$('source-reviewed').checked=reviewed;show('plan');notify('Interpretation ready. Review every material and step, then resolve the open questions.');},'Interpreting the selected procedure with the local LLM…'));
 $('prepare-deck').addEventListener('click',()=>{if(!state.session.plan){state.session.plan=planSkeleton();dirty();renderPlan();}$('materials').scrollIntoView({behavior:'smooth',block:'center'});});
 $('add-material').addEventListener('click',()=>{state.session.plan??=planSkeleton();state.session.plan.materials.push({id:'material_'+randomFragment(),name:'New material',role:'liquid',labware_id:null,deck_slot:null,initial_volume_ul:null,dead_volume_ul:null,well_volumes_ul:{}});dirty();renderPlan();});$('add-step').addEventListener('click',()=>{state.session.plan.steps.push(newStep());dirty();renderPlan();});

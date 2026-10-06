@@ -17,7 +17,7 @@ from pybravo.types import HeadType
 from .tipbox_choices import compatible_tipbox_choices, tipbox_catalog_candidates
 
 STANDARD = "pybravo.bravo-capability-manifest"
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.2.0"
 
 _LABWARE_FIELDS = (
     "id", "name", "kind", "base_class", "wells", "rows", "cols",
@@ -323,6 +323,143 @@ def _setup_options(head: HeadType | None) -> dict[str, Any]:
     }
 
 
+def _setup_decision_rules(head: HeadType | None) -> list[dict[str, Any]]:
+    """Publish reviewable setup reasoning, without inventing experimental data.
+
+    Predicates refer to facts extracted from a particular proposed plan, not
+    live instrument state. A consumer must establish every predicate before it
+    applies a recommendation; missing facts never count as ``False``.
+    """
+    if head is None or not head.is_disposable:
+        return []
+
+    def predicate(fact: str, value: Any, op: str = "eq") -> dict[str, Any]:
+        return {"fact": fact, "op": op, "value": value}
+
+    def rule(identity: str, decision: str, conditions: list[dict[str, Any]],
+             recommendation: Any, evidence_level: str, rationale: str,
+             provenance: list[str], required_evidence: list[str],
+             **extra: Any) -> dict[str, Any]:
+        return {
+            "id": identity, "decision": decision, "when": {"all": conditions},
+            "recommendation": recommendation, "evidence_level": evidence_level,
+            "requires_confirmation": True, "rationale": rationale,
+            "provenance": provenance, "required_evidence": required_evidence,
+            **extra,
+        }
+
+    liquid_step = predicate("liquid_step_count", 1, "gte")
+    return [
+        rule(
+            "head_mode_full_footprint", "/setup/head_mode",
+            [liquid_step, predicate("full_head_footprint", True)],
+            {"subset_type": "all_barrels", "subset_config": "back_left",
+             "row_count": None, "column_count": None},
+            "heuristic",
+            "An affirmative all-wells instruction and matching catalog grid suggest all barrels; "
+            "the scientist must confirm intended coverage. The back-left corner is canonical, and "
+            "row and column counts come from the configured head rather than setup entry.",
+            ["pybravo.head_mode.normalize_head_mode", "pybravo.workflow.protocols.validation"],
+            ["Affirmative source evidence or a structured scientist decision states full-head coverage "
+             "for every liquid step on verified plate grids."],
+        ),
+        rule(
+            "head_mode_partial_selection", "/setup/head_mode",
+            [liquid_step, predicate("full_head_footprint", False)], None,
+            "scientist_input",
+            "A partial footprint needs the intended channel shape, size and corner; plate well count "
+            "alone does not identify which barrels should be active.",
+            ["pybravo.head_mode.normalize_head_mode", "pybravo.workflow.protocols.validation"],
+            ["Intended active channels or target region, orientation and verified tip-rack footprint."],
+        ),
+        rule(
+            "tip_strategy_dedicated_source", "/setup/tip_strategy",
+            [liquid_step, predicate("source_count", 2, "gte"),
+             predicate("dedicated_tip_rack_per_source", True),
+             predicate("destination_initially_empty", True),
+             predicate("same_source_reuse_authorized", True)],
+            "fresh_each_source", "heuristic",
+            "A dedicated tip set per source isolates sources while allowing that set to dispense "
+            "into initially empty destinations. Reuse still needs the scientist's contamination assessment.",
+            ["pybravo.workflow.protocols.validation", "scientist_confirmed_reuse_intent"],
+            ["One physically distinct compatible rack per source in execution order.",
+             "Scientist authorization to reuse only within the same source.",
+             "Destination plates are initially empty and the procedure does not mix sources through tips."],
+        ),
+        rule(
+            "tip_strategy_fresh_step", "/setup/tip_strategy",
+            [liquid_step, predicate("same_source_reuse_authorized", False)],
+            "fresh_each_step", "heuristic",
+            "Fresh tips for each liquid step avoid assumed reuse. The plan must have enough confirmed "
+            "compatible tips for every pickup.",
+            ["pybravo.workflow.protocols.validation"],
+            ["Explicit decision not to reuse tips within a source.",
+             "Sufficient inspected fresh-tip footprints for every liquid step."],
+        ),
+        rule(
+            "tip_rack_order_by_source", "/setup/tip_rack_ids",
+            [liquid_step, predicate("source_count", 2, "gte"),
+             predicate("dedicated_tip_rack_per_source", True),
+             predicate("tip_strategy", "fresh_each_source")],
+            {"resolver": "source_ordered_verified_tip_rack_ids"}, "heuristic",
+            "Pair one exact catalog-compatible tip rack with each source in first-use order. "
+            "A rack ID encoding its source ID is a review candidate, not a verified association; "
+            "an explicit scientist mapping provides stronger evidence. Physical identity and inventory must be checked.",
+            ["pybravo.workflow.protocols.validation", "active_head_catalog_pair", "scientist_source_rack_mapping"],
+            ["One distinct tip material and exact rack–tip catalog pair per source.",
+             "Source execution order and rack order are both known.",
+             "Physical rack contents and fresh-tip wells are confirmed before release."],
+        ),
+        rule(
+            "tip_disposal_return_to_source", "/setup/tip_disposal_id",
+            [liquid_step, predicate("tip_strategy", "fresh_each_source"),
+             predicate("dedicated_tip_rack_per_source", True),
+             predicate("waste_material_present", False)],
+            "return_to_source_rack", "heuristic",
+            "With source-dedicated racks and no waste receptacle in the plan, spent tips can return "
+            "to their original wells only if they will never be selected again.",
+            ["pybravo.workflow.protocols.validation"],
+            ["The original rack can accept each spent tip footprint.",
+             "Returned wells are marked spent and cannot be reused.",
+             "Scientist confirms the physical rack and contamination policy."],
+        ),
+        rule(
+            "tip_disposal_waste_material", "/setup/tip_disposal_id",
+            [liquid_step, predicate("waste_material_present", True)], None,
+            "scientist_input",
+            "Select the material ID of an on-deck waste receptacle; the option name "
+            "'waste_container' is not a setup value.",
+            ["pybravo.workflow.protocols.validation"],
+            ["A material with role waste is placed on an available deck position and has capacity."],
+        ),
+        rule(
+            "pipetting_height_qualification", "/setup/distance_from_bottom_mm",
+            [liquid_step], None, "scientist_input",
+            "Well depth only bounds the allowed height. It does not establish a safe aspiration or "
+            "dispense position for the liquid, tip, well shape and volume.",
+            ["pybravo.workflow.protocols.validation", "labware_catalog.well_depth_mm"],
+            ["Qualified height for the selected tip, liquid class, labware and volume."],
+            bounds={"minimum_inclusive": 0, "maximum_exclusive_fact": "minimum_addressed_well_depth_mm"},
+        ),
+        rule(
+            "liquid_class_qualification", "/setup/liquid_class",
+            [liquid_step], None, "scientist_input",
+            "A catalog entry is not evidence that a liquid class is suitable for this reagent or procedure.",
+            ["pybravo.workflow.protocols.validation", "active_liquid_class_catalog"],
+            ["Approved liquid class for the active machine, head, loaded tip and reagent."],
+        ),
+        rule(
+            "tip_reuse_assessment", "/setup/tip_reuse_reason",
+            [liquid_step, predicate("tip_strategy", ["fresh_each_source", "reuse_all"], "in")],
+            None, "scientist_input",
+            "The contamination rationale must be supplied or approved by the scientist; the model "
+            "must not invent one from empty destination status alone.",
+            ["pybravo.workflow.protocols.validation"],
+            ["Scientist's explicit contamination and carryover assessment."],
+        ),
+    ]
+
+
 def build_capability_manifest(context: dict) -> dict:
     """Build a sanitized, versioned choice dictionary from ``machine_context``.
 
@@ -407,7 +544,9 @@ def build_capability_manifest(context: dict) -> dict:
         "robot_operations": robot_operations,
         "tipbox_choices": choices, "tipbox_catalog_candidates": candidates,
         "labware": labware, "tip_definitions": tips, "liquid_classes": liquid_classes,
-        "setup_options": _setup_options(head), "transfer_patterns": _transfer_patterns(head, labware),
+        "setup_options": _setup_options(head),
+        "setup_decision_rules": _setup_decision_rules(head),
+        "transfer_patterns": _transfer_patterns(head, labware),
         "tip_plate_compatibility": _tip_plate_compatibility(head, labware, tips, choices),
         "constraints": [{"id": identity, "description": description}
                         for identity, description in _CONSTRAINTS.items()],
@@ -444,6 +583,10 @@ def compact_capability_options(manifest: dict) -> dict:
                 "id", "required_fields", "requires_confirmation", "compatible_tip_pair_check_required")
                 if key in item} for item in setup.get("head_modes", [])],
         },
+        "setup_decision_rules": [{key: row[key] for key in (
+            "id", "decision", "when", "recommendation", "evidence_level", "rationale",
+            "required_evidence", "bounds") if key in row}
+            for row in manifest.get("setup_decision_rules", [])],
         "transfer_patterns": [{key: row[key] for key in (
             "id", "source_labware_wells", "destination_labware_wells", "source_anchor", "destination_anchors")
             if key in row} for row in manifest.get("transfer_patterns", [])],

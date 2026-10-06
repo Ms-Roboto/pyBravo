@@ -1,4 +1,4 @@
-# Bravo Capability Manifest, version 0.1
+# Bravo Capability Manifest, version 0.2
 
 The Bravo Capability Manifest (BCM) gives a protocol-planning model a finite,
 typed set of choices for the **configured** pyBravo instrument. It describes
@@ -7,9 +7,11 @@ which catalog resources may be selected. It is discovery data, not a command
 interface or permission to operate hardware.
 
 The normative JSON Schema is
-[`schemas/bravo-capability-manifest-v0.1.schema.json`](../schemas/bravo-capability-manifest-v0.1.schema.json).
-The [example](../schemas/examples/bravo-capability-manifest-v0.1.example.json)
-shows a 384ST simulation profile. The identifier `schema_version: "0.1.0"`
+[`schemas/bravo-capability-manifest-v0.2.schema.json`](../schemas/bravo-capability-manifest-v0.2.schema.json).
+The [example](../schemas/examples/bravo-capability-manifest-v0.2.example.json)
+shows a 384ST simulation profile. Version 0.1 remains available in the same
+directories for consumers of the earlier format. The identifier
+`schema_version: "0.2.0"`
 describes this document's format; it is independent of the `ProtocolPlan`
 schema version and the instrument's firmware or controller protocol.
 
@@ -43,6 +45,7 @@ producer MUST publish these top-level fields:
 | `tipbox_catalog_candidates` | Plausible incomplete rack records for catalog maintenance, never verified choices. |
 | `tip_plate_compatibility` | Exact tip ID to catalog plate ID planning rules, including explicit incompatibilities. These rules do not qualify a run. |
 | `labware`, `tip_definitions`, `liquid_classes` | Compact catalog entries with stable IDs and known values. A listed entry does not establish physical presence on the deck. |
+| `setup_decision_rules` | Conditional, evidence-tagged recommendations for setup fields. These are planning suggestions, not completed scientist decisions. |
 | `constraints`, `review_requirements` | Stable rule IDs and human-readable explanations. The server enforces rules; the descriptions help a model ask useful questions. |
 
 `setup_options` offers the protocol setup's tip strategies, disposal policies,
@@ -62,6 +65,73 @@ lists source anchor A1 and destination anchors A1, A2, B1, B2. The `status`
 value `geometry_option` means a shape that can be reviewed; it is not evidence
 that the physical plates, teachpoints, or liquid class are suitable.
 
+## Setup decision rules
+
+`setup_decision_rules` gives an assistant a small rule language for the setup
+fields that otherwise require automation-engineer judgment. Each rule names a
+JSON-pointer `decision`, a conjunction of typed fact predicates in `when.all`,
+and a `recommendation` or `null`. A predicate supports `eq`, `gte`, or `in`.
+Consumers MUST establish every required fact from the current reviewed plan
+and its source evidence before applying a rule. A missing or ambiguous fact is
+**unknown**, not `false`. Rules are advisory even when their
+`evidence_level` is `derived`; the validator and scientist still check the
+result. In particular, an assistant MUST NOT turn a rule's `required_evidence`
+text into a purported scientist answer.
+
+| Evidence level | Meaning |
+| --- | --- |
+| `derived` | The suggested value follows deterministically from verified plan facts and configured geometry. This does not verify physical setup. |
+| `heuristic` | An engineering option fits the stated facts but needs a contamination, inventory, or physical-layout review. |
+| `scientist_input` | No value is recommended. The scientist must provide or approve a procedure-specific value. |
+
+The plan-fact vocabulary is deliberately narrower than natural language:
+
+| Fact | Meaning |
+| --- | --- |
+| `liquid_step_count` | Number of planned transfer or mix intents after expanding bounded repeats. |
+| `full_head_footprint` | Cited all-wells instructions or a narrowly matched four-source quadrant plan support a full-head proposal on verified grids. A plate's well count or anchor alone is insufficient; free-text evidence remains a heuristic until the scientist confirms this exact plan. |
+| `source_count` | Distinct source materials addressed by liquid steps, in first-use order. |
+| `dedicated_tip_rack_per_source` | The plan has one distinct tip material per source, and each selected rack–tip pair is exact and catalog-compatible with the active head. This does not establish actual tip inventory. |
+| `destination_initially_empty` | Every destination well addressed by the proposed reuse pattern has a recorded initial volume of zero, and source footprints on each destination do not overlap. Unknown volumes or overlapping source footprints do not satisfy this fact. |
+| `same_source_reuse_authorized` | A scientist decision bound to the current plan allows a dedicated set to dispense from one source into the planned destinations. Empty destination plates by themselves do not grant authorization. |
+| `tip_strategy` | A saved or otherwise explicitly selected strategy; a model's unreviewed guess is not evidence. |
+| `waste_material_present` | The plan contains an on-deck material with role `waste`; an unplaced catalog entry does not count. |
+| `minimum_addressed_well_depth_mm` | Minimum positive catalog depth among all addressed plates, when all depths are known. Used only as an exclusive upper bound on pipetting height. |
+
+For a full-head 384-to-1536 quadrant candidate, the rule recommends
+`{subset_type: all_barrels, subset_config: back_left}`. The full head's 16×24
+channel count comes from configured geometry; `row_count` and `column_count`
+remain `null` in setup. A source phrase or model interpretation provides a
+heuristic proposal; only a scientist decision bound to that plan supplies
+derived scope evidence. If the intended footprint is partial, the model must
+ask for the shape and corner rather than choose an arbitrary quadrant of the
+head. The `tip_rack_order_by_source` rule uses a fixed
+`source_ordered_verified_tip_rack_ids` resolver: a consumer may fill this only
+when each source has an unambiguous link to one exact, distinct, catalog-
+compatible tip material, then list those racks in source first-use order.
+An explicit scientist mapping is derived evidence. A rack ID containing the
+exact source ID is a heuristic proposal that requires confirmation. Material
+list order and fuzzy name similarity do not establish a link.
+
+The source-dedicated tip rule suggests `fresh_each_source` only when the
+scientist explicitly permits same-source reuse, each source has its own
+compatible rack, and addressed destinations are recorded empty. It never
+authors `tip_reuse_reason`. A separate scientist-input rule leaves that
+contamination assessment open. If the scientist explicitly rejects reuse,
+`fresh_each_step` is a possible strategy subject to enough fresh tips. With
+source-dedicated racks and no waste material, the return rule may suggest the
+literal `return_to_source_rack`, provided used tips return to their original
+wells and are never reselected. A waste receptacle instead requires its actual
+on-deck material ID. These conditions are not claims that racks are stocked or
+that waste capacity is sufficient.
+
+Pipetting height is never guessed from plate depth. Its rule publishes the
+only generic bound supported by the catalog and validator:
+`0 <= distance_from_bottom_mm < minimum_addressed_well_depth_mm` when all
+addressed well depths are known. The approved height, liquid class, and reuse
+assessment remain scientist inputs because they depend on the reagent,
+geometry, tip, volumes, and qualified method.
+
 All dimensions and quantities carry unit-suffixed keys or an explicit `unit`.
 Volume is in µL, position in mm, and duration in seconds unless a parameter
 declares another unit. Unknown numeric values MUST remain absent or `null`;
@@ -79,7 +149,7 @@ validation rules; the scientist confirms physical state before a run.
 
 ## Intent versus robot operation
 
-An **assistant operation** is a scientific planning intent. In version 0.1,
+An **assistant operation** is a scientific planning intent. In version 0.2,
 `transfer` means one source-to-destination movement and lowers to a distinct
 `liquid/Aspirate` followed by `liquid/Dispense` at the same volume. Thus two
 5 µL transfers currently mean two 5 µL aspirations and two 5 µL dispenses.

@@ -23,6 +23,51 @@ def test_protocol_assistant_and_designer_javascript_parse(tmp_path):
         subprocess.run([NODE, "--check", str(source)], check=True, capture_output=True, text=True)
 
 
+def test_source_selection_invalidates_setup_recommendations(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    selection = re.search(r"function sourceSelectionChanged\(\)\{[^\n]*\}", html)
+    schedule = re.search(r"function scheduleSetupRecommendations\(\)\{[\s\S]*?\n\}", html)
+    assert selection and schedule
+    source = """
+const assert = require('node:assert/strict');
+const state={session:{id:'session',plan:{steps:[]},setup:{},selected_paragraph_ids:['p1']},
+  capabilities:{context_hash:'catalog'},setupRecommendationKey:null,setupRecommendations:null,
+  setupRecommendationRequest:0,setupRecommendationTimer:null};
+const pending=[],requests=[];
+const reviewed={checked:true};
+let dirtyCalls=0;
+function $(id){assert.equal(id,'source-reviewed');return reviewed;}
+function dirty(){dirtyCalls++;}
+function renderSetupRecommendations(){}
+function renderPlan(){}
+function renderSetup(){}
+function notify(){}
+function clearTimeout(){}
+function setTimeout(callback){pending.push(callback);return pending.length;}
+async function api(path,options){assert.equal(path,'/setup-recommendations');
+  requests.push(JSON.parse(options.body));return {context_hash:'catalog',recommendations:[]};}
+""" + selection.group(0) + "\n" + schedule.group(0) + """
+(async()=>{
+  sourceSelectionChanged();
+  assert.equal(reviewed.checked,false);
+  assert.equal(dirtyCalls,1);
+  await pending[0]();
+  assert.deepEqual(requests[0].selected_paragraph_ids,['p1']);
+  assert.ok(state.setupRecommendations);
+  state.session.selected_paragraph_ids=['p2'];reviewed.checked=true;
+  sourceSelectionChanged();
+  assert.equal(reviewed.checked,false);
+  assert.equal(dirtyCalls,2);
+  assert.equal(state.setupRecommendations,null);
+  await pending[1]();
+  assert.deepEqual(requests[1].selected_paragraph_ids,['p2']);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    script = tmp_path / "source-selection.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
 def test_designer_preserves_reviewed_properties_and_metadata(tmp_path):
     html = (ROOT / "frontend" / "designer.html").read_text()
     functions = []

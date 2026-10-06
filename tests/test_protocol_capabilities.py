@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import get_args
 
+import pytest
+
 from pybravo.bravo import Bravo
 from pybravo.workflow.protocols.capabilities import build_capability_manifest, compact_capability_options
 from pybravo.workflow.protocols.compiler import ALLOWED_NODE_TYPES
@@ -115,12 +117,15 @@ def test_compact_options_fit_small_local_model_budget_without_catalog_duplicatio
     finally:
         bravo.disconnect()
     compact = compact_capability_options(manifest)
-    assert len(json.dumps(compact, separators=(",", ":"))) < 3_200
+    assert len(json.dumps(compact, separators=(",", ":"))) < 10_000
     assert "labware" not in compact
     assert "tip_definitions" not in compact
     assert "tipbox_choices" not in compact
     assert "robot_operations" not in compact
     assert compact["assistant_operations"][0]["lowers_to"] == ["liquid/Aspirate", "liquid/Dispense"]
+    assert compact["setup_decision_rules"]
+    assert all("provenance" not in row and row.get("rationale") and row.get("required_evidence")
+               for row in compact["setup_decision_rules"])
 
 
 def test_compact_setup_options_distinguish_literal_disposal_from_material_reference():
@@ -180,7 +185,7 @@ def test_tip_to_1536_relation_is_typed_and_never_qualifies_execution():
     assert relations["st_10ul"]["applies_to"] == ["source", "destination", "mix"]
     assert all(row["execution_ready"] is False for row in relations.values())
     compact = compact_capability_options(manifest)
-    assert len(json.dumps(compact, separators=(",", ":"))) < 3_200
+    assert len(json.dumps(compact, separators=(",", ":"))) < 10_000
     assert {row["tip_definition_id"]: row["compatible"]
             for row in compact["tip_plate_compatibility"]} == {"st_10ul": True, "st_70ul": False}
 
@@ -200,3 +205,66 @@ def test_tip_to_1536_relation_does_not_promote_provisional_target_plate():
                "tip_definitions": [{"id": "st_70ul", "capacity_ul": 70.0,
                                     "compatible_heads": ["HT_384_D_70"]}]}
     assert build_capability_manifest(context)["tip_plate_compatibility"] == []
+
+
+def test_setup_rules_expose_grounded_choices_and_keep_experiment_values_open():
+    context = {"head_type": "HT_384_D_70", "has_gripper": True, "context_hash": "decisions"}
+    rules = {row["id"]: row for row in build_capability_manifest(context)["setup_decision_rules"]}
+    assert rules["head_mode_full_footprint"]["decision"] == "/setup/head_mode"
+    assert rules["head_mode_full_footprint"]["recommendation"] == {
+        "subset_type": "all_barrels", "subset_config": "back_left",
+        "row_count": None, "column_count": None,
+    }
+    assert rules["head_mode_full_footprint"]["evidence_level"] == "heuristic"
+    assert {item["fact"] for item in rules["head_mode_full_footprint"]["when"]["all"]} == {
+        "liquid_step_count", "full_head_footprint",
+    }
+    assert rules["head_mode_partial_selection"]["recommendation"] is None
+    assert rules["tip_strategy_dedicated_source"]["recommendation"] == "fresh_each_source"
+    assert {item["fact"] for item in rules["tip_strategy_dedicated_source"]["when"]["all"]} >= {
+        "dedicated_tip_rack_per_source", "destination_initially_empty", "same_source_reuse_authorized",
+    }
+    assert rules["tip_rack_order_by_source"]["recommendation"] == {
+        "resolver": "source_ordered_verified_tip_rack_ids",
+    }
+    assert rules["tip_disposal_return_to_source"]["recommendation"] == "return_to_source_rack"
+    assert rules["tip_disposal_waste_material"]["recommendation"] is None
+    assert rules["pipetting_height_qualification"]["bounds"] == {
+        "minimum_inclusive": 0, "maximum_exclusive_fact": "minimum_addressed_well_depth_mm",
+    }
+    for identity in ("pipetting_height_qualification", "liquid_class_qualification", "tip_reuse_assessment"):
+        assert rules[identity]["recommendation"] is None
+        assert rules[identity]["evidence_level"] == "scientist_input"
+        assert rules[identity]["requires_confirmation"] is True
+    assert all(row["provenance"] and row["required_evidence"] for row in rules.values())
+    assert build_capability_manifest({"head_type": "HT_384_PINTOOL"})["setup_decision_rules"] == []
+
+
+def test_setup_rules_match_published_schema_and_example():
+    jsonschema = pytest.importorskip("jsonschema")
+    root = Path(__file__).resolve().parents[1]
+    schema = json.loads((root / "schemas/bravo-capability-manifest-v0.2.schema.json").read_text())
+    validator = jsonschema.Draft202012Validator(schema)
+    validator.check_schema(schema)
+    example = json.loads((root / "schemas/examples/bravo-capability-manifest-v0.2.example.json").read_text())
+    assert not list(validator.iter_errors(example))
+    assert {row["id"] for row in example["setup_decision_rules"]} == {
+        row["id"] for row in build_capability_manifest({"head_type": "HT_384_D_70"})["setup_decision_rules"]
+    }
+
+    bravo = Bravo(mode="simulation")
+    try:
+        live = build_capability_manifest(machine_context(bravo))
+    finally:
+        bravo.disconnect()
+    assert not list(validator.iter_errors(live))
+
+
+def test_previous_manifest_schema_and_example_remain_compatible():
+    jsonschema = pytest.importorskip("jsonschema")
+    root = Path(__file__).resolve().parents[1]
+    schema = json.loads((root / "schemas/bravo-capability-manifest-v0.1.schema.json").read_text())
+    example = json.loads((root / "schemas/examples/bravo-capability-manifest-v0.1.example.json").read_text())
+    assert example["schema_version"] == "0.1.0"
+    assert "setup_decision_rules" not in example
+    assert not list(jsonschema.Draft202012Validator(schema).iter_errors(example))

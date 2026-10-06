@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from pybravo.bravo import Bravo
 from pybravo.web import server
 from pybravo.workflow.protocols import api
+from pybravo.workflow.protocols import setup_recommendations as setup_recommendations_module
 from pybravo.workflow.protocols.context import machine_context
 from pybravo.workflow.protocols.store import ProtocolStore, RevisionConflict, workflow_digest
 from pybravo.workflow.storage import WorkflowStorage
@@ -71,7 +72,7 @@ async def test_full_review_release_library_and_setup_lifecycle(environment):
         manifest_response = await client.get("/api/protocols/capabilities")
         assert manifest_response.status_code == 200
         manifest = manifest_response.json()
-        assert manifest["schema_version"] == "0.1.0"
+        assert manifest["schema_version"] == "0.2.0"
         assert manifest["context_hash"] == context["context_hash"]
         assert "profile" not in manifest
         assert next(row for row in manifest["assistant_operations"] if row["id"] == "transfer")["lowers_to"] == [
@@ -100,6 +101,46 @@ async def test_full_review_release_library_and_setup_lifecycle(environment):
         saved = await client.post("/api/protocols/setups", json={"name": "Manual setup", "setup": {}, "materials": []})
         assert saved.status_code == 200
         assert (await client.get("/api/protocols/setups")).json()["items"][0]["name"] == "Manual setup"
+
+
+@pytest.mark.asyncio
+async def test_setup_recommendations_use_active_context_without_saving_draft(environment, monkeypatch):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+        session = await session_with_plan(client)
+        unsaved_plan = copy.deepcopy(session["plan"])
+        unsaved_plan["name"] = "Unsaved setup review"
+        selected_id = session["source"]["paragraphs"][1]["id"]
+        observed_source_ids = []
+        original_recommend = setup_recommendations_module.recommend_setup
+
+        def capture_selected_source(plan, setup, manifest, *, source=None):
+            observed_source_ids.append([paragraph["id"] for paragraph in source["paragraphs"]])
+            return original_recommend(plan, setup, manifest, source=source)
+
+        monkeypatch.setattr(setup_recommendations_module, "recommend_setup", capture_selected_source)
+        response = await client.post("/api/protocols/setup-recommendations", json={
+            "session_id": session["id"], "plan": unsaved_plan, "setup": {},
+            "selected_paragraph_ids": [selected_id],
+        })
+        assert response.status_code == 200, response.text
+        assert observed_source_ids == [[selected_id]]
+        report = response.json()
+        assert report["context_hash"] == (await client.get("/api/protocols/capabilities")).json()["context_hash"]
+        assert all(key in report for key in ("recommendations", "unresolved", "blocked"))
+        saved = (await client.get(f"/api/protocols/{session['id']}")).json()
+        assert saved["revision"] == session["revision"]
+        assert saved["plan"]["name"] == session["plan"]["name"]
+        assert saved["selected_paragraph_ids"] == session["selected_paragraph_ids"]
+        for selected in ([], ["not-a-paragraph"]):
+            invalid = await client.post("/api/protocols/setup-recommendations", json={
+                "session_id": session["id"], "plan": unsaved_plan,
+                "selected_paragraph_ids": selected,
+            })
+            assert invalid.status_code == 422
+        missing = await client.post("/api/protocols/setup-recommendations", json={
+            "session_id": "missing-session", "plan": unsaved_plan,
+        })
+        assert missing.status_code == 404
 
 
 @pytest.mark.asyncio

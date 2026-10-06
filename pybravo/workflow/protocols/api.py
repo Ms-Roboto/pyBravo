@@ -109,6 +109,15 @@ class ChatRequest(Payload):
     revision: int | None = Field(default=None, ge=1)
 
 
+class SetupRecommendationRequest(Payload):
+    """Evaluate the current draft, including edits that have not been saved yet."""
+
+    plan: ProtocolPlan
+    setup: dict[str, Any] = Field(default_factory=dict)
+    session_id: str | None = None
+    selected_paragraph_ids: list[str] | None = None
+
+
 class ApprovalRequest(Payload):
     scientist: str = Field(min_length=1, max_length=200)
     notes: str = ""
@@ -143,6 +152,28 @@ async def capabilities():
     from pybravo.workflow.protocols.capabilities import build_capability_manifest
 
     return build_capability_manifest(machine_context(_bravo()))
+
+
+@router.post("/api/protocols/setup-recommendations")
+async def setup_recommendations(request: SetupRecommendationRequest):
+    """Suggest reviewable setup choices without editing or approving a draft."""
+    from pybravo.workflow.protocols.capabilities import build_capability_manifest
+    from pybravo.workflow.protocols.setup_recommendations import recommend_setup
+
+    if request.session_id:
+        record = _record(request.session_id)
+        selected = (record["selected_paragraph_ids"] if request.selected_paragraph_ids is None
+                    else request.selected_paragraph_ids)
+        try:
+            source = IngestedProtocol.model_validate(record["source"]).select(selected).model_dump()
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    else:
+        if request.selected_paragraph_ids is not None:
+            raise HTTPException(422, "A paragraph selection requires a session_id.")
+        source = None
+    manifest = build_capability_manifest(machine_context(_bravo()))
+    return recommend_setup(request.plan.model_dump(), request.setup, manifest, source=source)
 
 
 @router.get("/api/protocols/library")
