@@ -607,7 +607,8 @@ def test_guided_details_keep_individual_editors_and_questions_in_plan():
 def test_guided_readiness_groups_repeated_checks_but_keeps_details(tmp_path):
     html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
     functions = []
-    for name in ("readinessIssueGroup", "renderValidationIssues"):
+    for name in ("readinessIssueGroup", "readinessIssueContext", "readinessReasonLabel",
+                 "readinessReasonGuidance", "readinessRepeatedReason", "renderValidationIssues"):
         match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
         assert match, name
         functions.append(match[0])
@@ -620,7 +621,7 @@ function text(node){return node==null?'':typeof node==='string'?node:node.childr
 function renderValidationIssue(issue){return el('p',{},issue.message);}
 const nodes={
   issues:{children:[],replaceChildren(...items){this.children=items;}},
-  'issues-details':{hidden:false,open:true},
+  'issues-details':{hidden:false,open:true,addEventListener(name,callback){this.onToggle=callback;}},
   'blocking-summary':{children:[],replaceChildren(...items){this.children=items;}},
   'issues-summary':{textContent:''}};
 function $(id){return nodes[id];}
@@ -635,15 +636,36 @@ const issues=[
   {path:'/materials/6/available_tips',message:'Rack tips not inspected',severity:'error'},
   {path:'/setup/liquid_class',message:'No reviewed liquid method',severity:'error'}];
 renderValidationIssues(issues);
-assert.equal(nodes.issues.children.length,4);
 assert.equal(nodes['issues-details'].open,false,'Guided pattern collapses raw checks');
+assert.equal(nodes.issues.children.length,0,'Collapsed checks are not built eagerly');
 assert.ok(nodes['blocking-summary'].children.map(text).join(' ').includes('Confirm plate starting and dead volumes (2)'));
 assert.ok(nodes['blocking-summary'].children.map(text).join(' ').includes('Inspect fresh-tip inventory (1)'));
 assert.match(nodes['issues-summary'].textContent,/4/);
 nodes['issues-details'].open=true;
+nodes['issues-details'].onToggle();
 renderValidationIssues(issues);
 assert.equal(nodes['issues-details'].open,true,'User-expanded details stay open');
 assert.ok(nodes.issues.children.some(node=>text(node)==='Rack tips not inspected'));
+const repeated=Array.from({length:3072},(_,index)=>({
+  code:'insufficient_reagent',severity:'error',path:`/steps/${Math.floor(index/96)}/volume_ul`,
+  message:`source:A${index+1} would fall below its 10 uL dead volume.`}));
+const other=Array.from({length:8},(_,index)=>({code:'unreachable_wells',severity:'error',
+  path:`/steps/${index}/destination_anchor`,message:'The active head cannot reach these wells.'}));
+renderValidationIssues([...repeated,...other]);
+assert.equal(nodes['issues-details'].open,false,'Thousands of checks start collapsed');
+assert.equal(nodes.issues.children.length,0,'Large detail list is rendered on demand');
+const summary=nodes['blocking-summary'].children.map(text).join(' ');
+assert.match(summary,/3080 blocking checks/);
+assert.match(summary,/Review transfer mapping and motion \\(3080\\)/);
+assert.match(summary,/Source wells fall below their dead volume \\(3072 checks\\)/);
+assert.match(summary,/Review source starting volumes, dead volumes, and transfer volumes/);
+assert.match(summary,/Step 1: source:A1/);
+assert.match(summary,/Step 16: source:A1536/);
+assert.match(summary,/Step 32: source:A3072/);
+nodes['issues-details'].open=true;
+nodes['issues-details'].onToggle();
+assert.equal(nodes.issues.children.length,3080,'Every detailed issue remains available');
+assert.equal(text(nodes.issues.children.at(-1)),'The active head cannot reach these wells.');
 """
     )
     script = tmp_path / "readiness-groups.cjs"

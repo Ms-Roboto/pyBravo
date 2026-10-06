@@ -319,7 +319,9 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
     occupancy: dict[int, list[str]] = {}
     slot_materials: dict[int, list[tuple[int, Any]]] = {}
     volumes: dict[str, dict[tuple[int, int], float]] = {}
+    known_volume_cells: dict[str, set[tuple[int, int]]] = {}
     fresh_tips: dict[str, set[tuple[int, int]]] = {}
+    unconfirmed_tip_inventory: set[str] = set()
     discarded_tips: dict[str, set[tuple[int, int]]] = {}
     deck_entries: dict[str, dict] = {}
     for i, material in enumerate(plan.materials):
@@ -389,14 +391,19 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                         "This source dead volume differs from the reviewed catalog starting estimate. Confirm the value for its plate before validation; review liquid, tip, and method suitability separately.",
                         f"Confirm {material.dead_volume_ul:g} uL as the dead volume for {material.name}.",
                     )
-            initial = material.initial_volume_ul if _positive(material.initial_volume_ul, zero=True) else 0.0
+            initial_is_known = _positive(material.initial_volume_ul, zero=True)
+            # Zero is only a lower bound when the starting volume is missing.
+            # It must not produce a per-well shortage finding in that case.
+            initial = material.initial_volume_ul if initial_is_known else 0.0
             volumes[material.id] = {(r, c): initial for r in range(rows) for c in range(cols)}
+            known_volume_cells[material.id] = set(volumes[material.id]) if initial_is_known else set()
             for anchor, value in material.well_volumes_ul.items():
                 try:
                     cell = well_cell(anchor)
                     if cell not in volumes[material.id] or not _positive(value, zero=True):
                         raise ValueError("Well override must name an existing well and a nonnegative volume.")
                     volumes[material.id][cell] = value
+                    known_volume_cells[material.id].add(cell)
                 except ValueError as error:
                     result.issue("well_volume", path + "/well_volumes_ul", str(error))
             if any(v > definition["well_volume_ul"] + _EPS for v in volumes[material.id].values()):
@@ -409,6 +416,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             allowed_cells = {(r, c) for r in range(rows) for c in range(cols)}
             cells: set[tuple[int, int]] = set()
             if material.available_tips is None:
+                unconfirmed_tip_inventory.add(material.id)
                 result.issue("tip_inventory_unconfirmed", path + "/available_tips",
                              "A scientist must confirm the actual fresh-tip wells before this protocol can be compiled.",
                              f"Which fresh tip wells are present in {material.name}?")
@@ -640,7 +648,10 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                 rack_owner[material_id] = source_id
             add("tips/TipsOn", {"location": locations[material_id], "head_mode": mode.to_dict(), **tip_properties(selection)}, step, path)
             return
-        result.issue("tip_inventory_exhausted", path, "No compatible legal tip footprint remains in the selected supplies.")
+        # An unconfirmed rack may still contain a legal footprint. Its explicit
+        # inventory blocker is the actionable finding until the inventory is known.
+        if not unconfirmed_tip_inventory.intersection(setup.tip_rack_ids):
+            result.issue("tip_inventory_exhausted", path, "No compatible legal tip footprint remains in the selected supplies.")
 
     def discard(step: ProtocolStep, path: str) -> None:
         nonlocal loaded_tip
@@ -999,9 +1010,11 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                         result.issue("overlapping_transfer", path, "A transfer cannot overlap its own source footprint; use an explicit mix step.")
                     for cell in from_cells:
                         available = volumes[step.source][cell]
-                        dead = materials[step.source].dead_volume_ul or 0
-                        if available - step.volume_ul < dead - _EPS:
-                            result.issue("insufficient_reagent", path + "/volume_ul", f"{step.source}:{well_name(cell)} would fall below its {dead:g} uL dead volume.")
+                        dead = materials[step.source].dead_volume_ul
+                        if (cell in known_volume_cells[step.source] and _positive(dead, zero=True)
+                                and available - step.volume_ul < dead - _EPS):
+                            result.issue("insufficient_reagent", path + "/volume_ul",
+                                         f"{step.source}:{well_name(cell)} would fall below its {dead:g} uL dead volume.")
                         volumes[step.source][cell] -= step.volume_ul
                     for cell in to_cells:
                         volumes[step.destination][cell] += step.volume_ul
@@ -1043,9 +1056,10 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                             volumes[target.destination][cell] > _EPS for target, cells, _ in targets for cell in cells):
                         result.issue("distribute_calibration", path + "/dispenses",
                                      "The paired fallback would return tips from nonempty destination wells to the source.")
-                    dead = materials[step.source].dead_volume_ul or 0
+                    dead = materials[step.source].dead_volume_ul
                     for cell in from_cells:
-                        if volumes[step.source][cell] - aspiration_ul < dead - _EPS:
+                        if (cell in known_volume_cells[step.source] and _positive(dead, zero=True)
+                                and volumes[step.source][cell] - aspiration_ul < dead - _EPS):
                             result.issue("insufficient_reagent", path + "/dispenses",
                                          f"{step.source}:{well_name(cell)} would fall below its {dead:g} uL dead volume.")
                         volumes[step.source][cell] -= aspiration_ul
@@ -1086,8 +1100,10 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                 if step.cycles is None or not 1 <= step.cycles <= limit:
                     result.issue("mix_cycles", path + "/cycles", f"Mix cycles must be between 1 and {limit}.", "How many mixing cycles should run?")
                 if cells:
-                    dead = materials[step.material].dead_volume_ul or 0
-                    if any(volumes[step.material][cell] - step.volume_ul < dead - _EPS for cell in cells):
+                    dead = materials[step.material].dead_volume_ul
+                    if (_positive(dead, zero=True) and any(
+                            cell in known_volume_cells[step.material]
+                            and volumes[step.material][cell] - step.volume_ul < dead - _EPS for cell in cells)):
                         result.issue("mix_available_volume", path + "/volume_ul", "Mix volume exceeds available liquid above dead volume in at least one addressed well.")
                     details.update(volume_ul=step.volume_ul, cycles=step.cycles, material=step.material, wells=[well_name(c) for c in cells])
                     mix_props = {**aspirate_props, "blowout_volume": dispense_props.get("blowout_volume", 0)}

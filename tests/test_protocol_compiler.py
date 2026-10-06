@@ -74,6 +74,42 @@ def test_dead_volume_is_required_only_when_a_plate_is_aspirated():
                for issue in report["issues"])
 
 
+def test_unknown_starting_volume_does_not_invent_per_well_shortages():
+    plan, setup, context, sources = protocol_fixture()
+    plan["materials"][0].update(initial_volume_ul=None, dead_volume_ul=None)
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert {issue["path"] for issue in report["issues"] if issue["code"] == "missing_volume"} >= {
+        "/materials/0/initial_volume_ul", "/materials/0/dead_volume_ul"}
+    assert "insufficient_reagent" not in codes(report)
+
+    # Explicit per-well overrides are known even when the other wells are not.
+    plan["materials"][0]["dead_volume_ul"] = 0.0
+    plan["materials"][0]["well_volumes_ul"] = {"A1": 5.0, "A2": 10.0}
+    report = validate_plan(plan, setup, context, sources=sources)
+    shortages = [issue["message"] for issue in report["issues"] if issue["code"] == "insufficient_reagent"]
+    assert len(shortages) == 2
+    assert any("buffer:A1" in message for message in shortages)
+    assert any("buffer:A2" in message for message in shortages)
+
+    plan["materials"][0].update(initial_volume_ul=5.0, dead_volume_ul=None, well_volumes_ul={})
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert "insufficient_reagent" not in codes(report)
+    assert any(issue["path"] == "/materials/0/dead_volume_ul" and issue["code"] == "missing_volume"
+               for issue in report["issues"])
+
+
+def test_unconfirmed_tip_inventory_does_not_imply_exhaustion():
+    plan, setup, context, sources = protocol_fixture()
+    plan["materials"][2]["available_tips"] = None
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert "tip_inventory_unconfirmed" in codes(report)
+    assert "tip_inventory_exhausted" not in codes(report)
+
+    plan["materials"][2]["available_tips"] = []
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert "tip_inventory_exhausted" in codes(report)
+
+
 def test_unreviewed_catalog_dead_volume_requires_plate_bound_scientist_confirmation():
     plan, setup, context, sources = protocol_fixture()
     context["labware"][0].update(dead_volume_ul=10.0, dead_volume_status="placeholder")
@@ -649,6 +685,22 @@ def test_four_stacked_384_sources_fill_both_1536_plates_with_four_isolated_st10_
     assert "Before every run" in checkpoints[0]
     assert "returned spent tips" in checkpoints[1]
     assert summary["spent_tip_rack_ids"] == [f"rack-{n}" for n in range(1, 5)]
+
+
+def test_four_source_draft_waits_for_volume_and_tip_inventory_confirmation():
+    plan, setup, context, sources = _four_source_quadrant_fixture()
+    for material in plan["materials"]:
+        if material["id"].startswith("source-"):
+            material.update(initial_volume_ul=None, dead_volume_ul=None)
+        elif material["id"].startswith("rack-"):
+            material["available_tips"] = None
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert sum(issue["code"] == "missing_volume" for issue in report["issues"]) == 8
+    assert sum(issue["code"] == "tip_inventory_unconfirmed" for issue in report["issues"]) == 4
+    assert "insufficient_reagent" not in codes(report)
+    assert "tip_inventory_exhausted" not in codes(report)
+    with pytest.raises(ProtocolCompilationError):
+        compile_plan(plan, setup, context, sources=sources)
 
 
 def test_nonlinear_st10_distribute_uses_paired_fallback_without_extra_tipboxes():
