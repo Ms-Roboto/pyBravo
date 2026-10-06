@@ -27,6 +27,8 @@ async function run(){
         requests.push({method:req.method(),endpoint,body});
         let result;
         if(endpoint==='/context')result={tipbox_choices:tipboxChoices,tipbox_choices_reason:tipboxReason,tipbox_catalog_candidates:tipboxCandidates,profile_name:'Test Bravo',head_type:'ST',labware:[{id:'reservoir',name:'Reservoir'},{id:'plate',name:'96-well plate'},{id:'tiprack',name:'Tip rack'}],tip_definitions:[{id:'tip250',name:'250 µL tips'},{id:'tip70',name:'ST 70 µL tips'},{id:'mismatched-tip',name:'Unverified pairing'}],liquid_classes:[{id:'water',name:'Water'}]};
+        else if(endpoint==='/methods'&&req.method()==='GET')result={digest:'mock-registry',methods:[]};
+        else if(endpoint==='/methods/lookup')result={registry_digest:'mock-registry',issues:[],candidates:[]};
         else if(endpoint==='/setups'&&req.method()==='GET')result={items:[{id:'setup1',name:'Water qualification',setup,materials:plan.materials}]};
         else if(endpoint==='/setups'){savedSetup=body;result={id:'saved',...body};}
         else if(endpoint==='/library')result={items:library};

@@ -61,6 +61,40 @@ def _positive(value: Any, *, zero: bool = False) -> bool:
     return isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value) and (value >= 0 if zero else value > 0)
 
 
+def _commanded_volume(liquid_class: dict | None, volume_ul: float) -> float | None:
+    """Use the executor's calibration calculation before choosing a split stroke."""
+    if liquid_class is None:
+        return None
+    from pybravo.state_machine.tasks import _evaluate_volume_polynomial, _interpolate_control_points
+
+    try:
+        equation = dict(liquid_class.get("equation") or {})
+        points = list(equation.get("control_points") or [])
+        commanded = (_interpolate_control_points(points, volume_ul) if points else
+                     _evaluate_volume_polynomial(list(equation.get("coefficients") or [0.0, 1.0]), volume_ul))
+        return commanded if math.isfinite(commanded) and commanded > 0 else None
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def _volume_command_matches(actual: float, expected: float) -> bool:
+    # Differences below 0.05 uL or 1% are below this planning guard's resolution.
+    return math.isclose(actual, expected, rel_tol=0.01, abs_tol=0.05)
+
+
+def _calibration_supports(liquid_class: dict | None, volume_ul: float) -> bool:
+    if liquid_class is None:
+        return False
+    points = ((liquid_class.get("equation") or {}).get("control_points") or [])
+    if not points:
+        return True
+    try:
+        bounds = [float(point["desired_ul"]) for point in points]
+    except (KeyError, TypeError, ValueError):
+        return False
+    return bool(bounds) and min(bounds) - _EPS <= volume_ul <= max(bounds) + _EPS
+
+
 def _is_tip_box(definition: dict) -> bool:
     """Imported vendor racks often use an SBS kind with a tip-box base class."""
     return "tip_box" in {definition.get("kind"), definition.get("base_class")}
@@ -160,6 +194,18 @@ def _numeric_grounding(result: PreparedProtocol, step: ProtocolStep, path: str, 
         evidence = evidence_by_field.get(field_name, [])
         if not any(math.isclose(e.value * _UNIT_FACTORS[e.unit], float(value), rel_tol=1e-9, abs_tol=_EPS) for e in evidence):
             result.issue("ungrounded_parameter", f"{path}/{field_name}", f"{field_name}={value} needs matching source evidence or a recorded scientist decision.", f"Confirm {field_name} and record its source or reason.")
+    if step.kind == "distribute":
+        for index, target in enumerate(step.dispenses):
+            target_path = f"{path}/dispenses/{index}/volume_ul"
+            decision = decisions.get(target_path)
+            if decision is not None and not isinstance(decision.value, bool) and decision.value == target.volume_ul:
+                continue
+            evidence = evidence_by_field.get("volume_ul", [])
+            if not any(math.isclose(e.value * _UNIT_FACTORS[e.unit], target.volume_ul, rel_tol=1e-9, abs_tol=_EPS)
+                       for e in evidence):
+                result.issue("ungrounded_parameter", target_path,
+                             f"Dispense volume {target.volume_ul:g} uL needs matching source evidence or a recorded scientist decision.",
+                             "Confirm this dispense volume and record its source or reason.")
 
 
 def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, context: dict, *, sources: Any = None) -> PreparedProtocol:
@@ -213,10 +259,14 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         out: list[tuple[ProtocolStep, str]] = []
         for index, step in enumerate(steps):
             path = f"{prefix}/{index}"
-            parameter_fields = {"source", "destination", "material", "source_anchor", "destination_anchor", "anchor", "volume_ul", "cycles", "duration_s", "destination_slot", "message"}
+            parameter_fields = {"source", "destination", "material", "source_anchor", "destination_anchor", "anchor",
+                                "volume_ul", "cycles", "duration_s", "destination_slot", "message",
+                                "reagent_id", "reagent_family"}
             allowed_fields = {
-                "transfer": {"source", "destination", "source_anchor", "destination_anchor", "volume_ul"},
-                "mix": {"material", "anchor", "volume_ul", "cycles"},
+                "transfer": {"source", "destination", "source_anchor", "destination_anchor", "volume_ul",
+                             "reagent_id", "reagent_family"},
+                "distribute": {"source", "source_anchor", "reagent_id", "reagent_family"},
+                "mix": {"material", "anchor", "volume_ul", "cycles", "reagent_id", "reagent_family"},
                 "wait": {"duration_s"}, "manual": {"message", "duration_s"},
                 "move_plate": {"material", "destination_slot"},
                 "stack_plate": {"material", "destination_slot"},
@@ -226,6 +276,10 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             for unused in parameter_fields - allowed_fields:
                 if getattr(step, unused) is not None:
                     result.issue("unexpected_parameter", path + "/" + unused, f"{unused} does not apply to {step.kind}; it would otherwise be silently ignored.")
+            if step.kind != "distribute" and step.dispenses:
+                result.issue("unexpected_parameter", path + "/dispenses", "Only distribute may specify dispense targets.")
+            if step.kind not in {"transfer", "distribute", "mix"} and step.method_ref is not None:
+                result.issue("unexpected_parameter", path + "/method_ref", "A pipetting method applies only to liquid steps.")
             if step.id in seen_steps:
                 result.issue("duplicate_step_id", path + "/id", f"Duplicate step id {step.id!r}.")
             seen_steps.add(step.id)
@@ -250,7 +304,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
     expanded = expand(plan.steps, "/steps")
     if not expanded:
         result.issue("empty_protocol", "/steps", "A protocol must contain at least one step.")
-    liquid_steps = [s for s, _ in expanded if s.kind in {"transfer", "mix"}]
+    liquid_steps = [s for s, _ in expanded if s.kind in {"transfer", "distribute", "mix"}]
     labware = _catalog(context, "labware")
     tips = _catalog(context, "tip_definitions")
     materials: dict[str, Any] = {}
@@ -375,6 +429,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         occupancy[slot] = [material.id for _, material in ordered]
         result.deck[str(slot)] = [deck_entries[material.id] for _, material in ordered]
     mode, head_type, liquid_class = None, None, None
+    legacy_liquid_steps = any(step.method_ref is None for step in liquid_steps)
     if liquid_steps:
         try:
             ht = context.get("head_type")
@@ -410,9 +465,9 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
             result.issue("tip_reuse_reason", "/setup/tip_reuse_reason", "Tip reuse requires a scientist's contamination assessment.", "Why is reusing these tips acceptable for this procedure?")
         liquid_classes = _catalog(context, "liquid_classes")
         liquid_class = liquid_classes.get(setup.liquid_class)
-        if not setup.liquid_class or setup.liquid_class not in liquid_classes:
+        if legacy_liquid_steps and (not setup.liquid_class or setup.liquid_class not in liquid_classes):
             result.issue("liquid_class", "/setup/liquid_class", "Choose an approved liquid class from the active catalog.", "Which approved liquid class should be used?")
-        if not _positive(setup.distance_from_bottom_mm, zero=True):
+        if legacy_liquid_steps and not _positive(setup.distance_from_bottom_mm, zero=True):
             result.issue("pipetting_height", "/setup/distance_from_bottom_mm", "Specify a nonnegative pipetting height above the well bottom.", "What approved distance above the well bottom should be used (mm)?")
         if not setup.tip_rack_ids:
             result.issue("tip_supply", "/setup/tip_rack_ids", "Select at least one tip supply material.", "Which tip racks should the workflow consume?")
@@ -533,7 +588,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                 capacity = min(capacity, tip["overflow_ul"])
             if _positive(context.get("head_max_volume_ul")):
                 capacity = min(capacity, context["head_max_volume_ul"])
-            if liquid_class:
+            if liquid_class and step.method_ref is None:
                 class_tip = liquid_class.get("tip_id")
                 class_capacity = liquid_class.get("tip_capacity_ul")
                 if class_tip and class_tip != tip_id or (
@@ -599,7 +654,88 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         add("tips/TipsOff", properties, step, path)
         loaded_tip = None
 
-    def footprint(material_id: str | None, anchor: str | None, field_name: str, step: ProtocolStep, path: str) -> list[tuple[int, int]]:
+    methods_used: dict[tuple[str, str], dict[str, str]] = {}
+
+    def resolve_method(step: ProtocolStep, path: str, source_id: str | None,
+                       destination_ids: list[str]) -> dict | None:
+        """Resolve a pinned, technically complete method; report adaptations separately."""
+        if step.method_ref is None:
+            return None
+        from .methods import get_method
+
+        method_path = path + "/method_ref"
+        try:
+            method = get_method(context, step.method_ref.method_id, step.method_ref.revision)
+        except (OSError, ValueError) as error:
+            result.issue("method_registry", method_path, f"Method registry cannot be read: {error}")
+            return None
+        if method is None:
+            result.issue("method_reference", method_path,
+                         "Pinned method is missing or its revision changed; select and review a current method.")
+            return None
+        if not method.get("execution_ready") or method.get("status") not in {"reviewed", "qualified"}:
+            missing = ", ".join(method.get("missing_fields") or []) or "scientist review"
+            result.issue("method_incomplete", method_path,
+                         f"Method {method['method_id']!r} cannot compile until its record is complete: {missing}.")
+            return None
+        applies = method.get("applicability") or {}
+        tip_id = loaded_tip["tip_id"] if loaded_tip is not None else None
+        for applicability_field, current in (("machine_ids", context.get("machine_id")),
+                                             ("head_types", head_type.name if head_type else None),
+                                             ("tip_ids", tip_id)):
+            if current not in (applies.get(applicability_field) or []):
+                result.issue("method_incompatible", method_path,
+                             f"Method {method['method_id']!r} does not support {applicability_field}={current!r}.")
+        expected_strategy = {"fresh_per_transfer": "fresh_each_step", "fresh_per_source": "fresh_each_source",
+                             "reuse_within_source": "fresh_each_source"}.get(method.get("tip_policy"))
+        if expected_strategy and setup.tip_strategy != expected_strategy:
+            result.issue("method_tip_policy", method_path,
+                         f"Method requires {expected_strategy}, but setup selects {setup.tip_strategy!r}.")
+        if step.kind == "distribute" and method.get("tip_policy") == "fresh_per_transfer":
+            result.issue("method_tip_policy", method_path,
+                         "A distribute step reuses tips across destinations; this method requires fresh tips per transfer.")
+
+        source = materials.get(source_id)
+        rack = definitions.get(loaded_tip["rack"]) if loaded_tip is not None else None
+        actual = {
+            "tipbox_ids": rack.get("id") if rack else None,
+            "source_labware_ids": source.labware_id if source else None,
+            "reagent_families": step.reagent_family if step.reagent_family is not None else
+                                source.reagent_family if source else None,
+            "operations": step.kind,
+        }
+        differences = []
+        for applicability_field, value in actual.items():
+            accepted = applies.get(applicability_field) or []
+            if value not in accepted:
+                differences.append({"field": applicability_field, "actual": value, "method": accepted})
+        for destination_id in destination_ids:
+            target = materials.get(destination_id)
+            value = target.labware_id if target else None
+            accepted = applies.get("destination_labware_ids") or []
+            if value not in accepted:
+                differences.append({"field": "destination_labware_ids", "destination": destination_id,
+                                    "actual": value, "method": accepted})
+        resolved_classes = {}
+        for phase_name in ("aspirate", "dispense"):
+            phase = method.get(phase_name) or {}
+            ref = phase.get("liquid_class_ref") or {}
+            selected = liquid_classes.get(ref.get("id"))
+            if selected is None:
+                result.issue("method_liquid_class", method_path,
+                             f"Method {phase_name} liquid class is absent from the active catalog.")
+                continue
+            if tip_id and selected.get("tip_id") and selected["tip_id"] != tip_id:
+                result.issue("method_liquid_class", method_path,
+                             f"Method {phase_name} liquid class is not calibrated for tip {tip_id!r}.")
+            resolved_classes[phase_name] = selected
+        audit = {"method_id": method["method_id"], "version": method["version"],
+                 "revision": method["revision"], "digest": method["revision"], "status": method["status"]}
+        methods_used[(method["method_id"], method["revision"])] = audit
+        return {**method, "_classes": resolved_classes, "_audit": audit, "_differences": differences}
+
+    def footprint(material_id: str | None, anchor: str | None, field_name: str, step: ProtocolStep, path: str,
+                  *, height_mm: float | None = None) -> list[tuple[int, int]]:
         material = materials.get(material_id)
         definition = definitions.get(material_id)
         if material is None or material.role != "liquid" or definition is None or material_id not in locations:
@@ -629,30 +765,204 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         if not cells:
             result.issue("unreachable_wells", anchor_path, "The active head footprint cannot reach these wells at this labware pitch.")
         depth = definition.get("well_depth_mm")
-        if _positive(depth) and setup.distance_from_bottom_mm is not None and setup.distance_from_bottom_mm >= depth:
-            result.issue("pipetting_height", "/setup/distance_from_bottom_mm", f"Pipetting height reaches or exceeds the well depth of {material.name}.")
+        height = setup.distance_from_bottom_mm if height_mm is None else height_mm
+        if _positive(depth) and height is not None and height >= depth:
+            height_path = path + "/method_ref" if step.method_ref else "/setup/distance_from_bottom_mm"
+            result.issue("pipetting_height", height_path, f"Pipetting height reaches or exceeds the well depth of {material.name}.")
         return cells
 
     for step, path in expanded:
         details = {"id": step.id, "kind": step.kind, "description": step.description, "source_paragraph_ids": step.source_paragraph_ids}
         run_steps.append(details)
-        if step.kind in {"transfer", "mix"}:
-            if not _positive(step.volume_ul):
+        if step.kind in {"transfer", "distribute", "mix"}:
+            if step.kind == "distribute":
+                if not step.dispenses:
+                    result.issue("distribute_targets", path + "/dispenses", "A distribute step needs at least one destination.", "Which destination wells receive this aspiration?")
+                    continue
+                bad_targets = [index for index, target in enumerate(step.dispenses) if not _positive(target.volume_ul)]
+                for index in bad_targets:
+                    result.issue("liquid_volume", f"{path}/dispenses/{index}/volume_ul", "Dispense volume must be finite and positive.")
+                if bad_targets:
+                    continue
+                aspiration_ul = sum(target.volume_ul for target in step.dispenses)
+            else:
+                aspiration_ul = step.volume_ul
+            if not _positive(aspiration_ul):
                 result.issue("liquid_volume", path + "/volume_ul", "Pipetting volume must be finite and positive.", "What volume should be pipetted per channel (uL)?")
                 continue
-            source_id = step.source if step.kind == "transfer" else step.material
+            source_id = step.source if step.kind in {"transfer", "distribute"} else step.material
+            source_material = materials.get(source_id)
+            details["reagent_id"] = (step.reagent_id if step.reagent_id is not None else
+                                     source_material.reagent_id if source_material else None)
+            details["reagent_family"] = (step.reagent_family if step.reagent_family is not None else
+                                         source_material.reagent_family if source_material else None)
             if setup.tip_strategy == "fresh_each_source" and loaded_tip is not None and loaded_tip["source"] != source_id:
                 discard(step, path)
             pick_tips(step, path, source_id)
             if loaded_tip is not None:
                 details["tip_rack_id"] = loaded_tip["rack"]
-            if loaded_tip and step.volume_ul > loaded_tip["capacity_ul"] + _EPS:
-                result.issue("tip_volume_exceeded", path + "/volume_ul", f"Volume exceeds the permitted tip/head capacity of {loaded_tip['capacity_ul']:g} uL.")
-            liquid_props = {"volume": step.volume_ul, "liquid_class": (liquid_class or {}).get("name") or setup.liquid_class, "distance_from_bottom": setup.distance_from_bottom_mm,
-                            "pre_aspirate_volume": 0, "post_aspirate_volume": 0, "blowout_volume": 0, "tip_touch": False}
+            destination_ids = ([step.destination] if step.kind == "transfer" else
+                               [target.destination for target in step.dispenses] if step.kind == "distribute" else [])
+            method = resolve_method(step, path, source_id, destination_ids)
+            if step.method_ref is not None and method is None:
+                continue
+            if method is not None:
+                asp = method["aspirate"]
+                dsp = method["dispense"]
+                if step.kind == "distribute" and dsp["blowout_ul"] > 0:
+                    result.issue("method_distribute_unsupported", path + "/method_ref",
+                                 "Empty-tip distribute does not execute a reviewed blowout setting; use a compatible method or transfer intent.")
+                if step.kind == "distribute" and (asp["pre_air_ul"] > 0 or asp["post_air_ul"] > 0):
+                    result.issue("method_distribute_air_gap", path + "/method_ref",
+                                 "The final empty-tip dispense would expel method air gaps into a destination.")
+                if step.kind == "mix" and (asp["pre_air_ul"] > 0 or asp["post_air_ul"] > 0):
+                    result.issue("method_mix_unsupported", path + "/method_ref",
+                                 "Mix does not implement the method's separate pre/post aspiration air gaps.")
+                if step.kind == "mix" and asp["dynamic_tip_extension"] > 0:
+                    result.issue("method_mix_unsupported", path + "/method_ref",
+                                 "Mix scales dynamic tip extension by volume; this method records a fixed-distance extension.")
+                classes = method["_classes"]
+                if len(classes) != 2:
+                    continue
+                audit = method["_audit"]
+                details["method_ref"] = audit
+                aspirate_class = classes["aspirate"]
+                dispense_class = classes["dispense"]
+                if any(air_ul > 0 and not _calibration_supports(aspirate_class, air_ul)
+                       for air_ul in (asp["pre_air_ul"], asp["post_air_ul"])):
+                    result.issue("method_calibration_limit", path + "/method_ref",
+                                 "A method air gap is outside the aspirate class calibration range.")
+                aspirate_props = {"volume": aspiration_ul,
+                    "liquid_class": aspirate_class.get("name") or aspirate_class.get("liquid_class_id") or aspirate_class.get("id"),
+                    "distance_from_bottom": asp["distance_from_bottom_mm"],
+                    "pre_aspirate_volume": asp["pre_air_ul"], "post_aspirate_volume": asp["post_air_ul"],
+                    "dynamic_tip_extension": asp["dynamic_tip_extension"], "tip_touch": asp["tip_touch"],
+                    "_method_ref": audit}
+                dispense_props = {"volume": aspiration_ul,
+                    "liquid_class": dispense_class.get("name") or dispense_class.get("liquid_class_id") or dispense_class.get("id"),
+                    "distance_from_bottom": dsp["distance_from_bottom_mm"],
+                    "blowout_volume": dsp["blowout_ul"],
+                    "dynamic_tip_retraction": dsp["dynamic_tip_retraction"], "tip_touch": dsp["tip_touch"],
+                    "_method_ref": audit}
+            else:
+                legacy_props = {"volume": aspiration_ul,
+                    "liquid_class": (liquid_class or {}).get("name") or setup.liquid_class,
+                    "distance_from_bottom": setup.distance_from_bottom_mm,
+                    "pre_aspirate_volume": 0, "post_aspirate_volume": 0,
+                    "blowout_volume": 0, "tip_touch": False}
+                aspirate_props = legacy_props
+                dispense_props = legacy_props
+                aspirate_class = liquid_class
+                dispense_class = liquid_class
+            distribute_strategy = "single_aspiration"
+            if step.kind == "distribute" and len(step.dispenses) > 1:
+                total_commanded = _commanded_volume(aspirate_class, aspiration_ul)
+                dispense_commands = [_commanded_volume(dispense_class, target.volume_ul)
+                                     for target in step.dispenses]
+                if total_commanded is None or any(command is None for command in dispense_commands):
+                    result.issue("distribute_calibration", path + "/dispenses",
+                                 "The selected liquid-class correction cannot be checked for multi-dispense.")
+                else:
+                    fallback_reasons = []
+                    if not _volume_command_matches(total_commanded, sum(dispense_commands)):
+                        fallback_reasons.append("split_calibration")
+                    if loaded_tip is not None:
+                        if aspiration_ul > loaded_tip["capacity_ul"] + _EPS:
+                            fallback_reasons.append("nominal_tip_capacity")
+                        air_ul = (asp["pre_air_ul"] + asp["post_air_ul"]) if method is not None else 0.0
+                        if total_commanded + air_ul > loaded_tip["capacity_ul"] + _EPS:
+                            fallback_reasons.append("commanded_tip_capacity")
+                    if fallback_reasons:
+                        distribute_strategy = "paired_fallback"
+                        warning = {"severity": "warning", "code": "distribute_calibration_fallback",
+                            "path": path + "/dispenses",
+                            "message": "Separate aspiration-dispense pairs are required by calibration or tip capacity.",
+                            "reasons": fallback_reasons,
+                            "commanded_total_ul": total_commanded,
+                            "commanded_dispenses_ul": dispense_commands}
+                        if warning not in result.report["issues"]:
+                            result.report["issues"].append(warning)
+                        for index, target in enumerate(step.dispenses):
+                            aspiration_command = _commanded_volume(aspirate_class, target.volume_ul)
+                            if aspiration_command is None or not math.isclose(
+                                    aspiration_command, dispense_commands[index], rel_tol=1e-6, abs_tol=1e-6):
+                                result.issue("distribute_calibration", f"{path}/dispenses/{index}",
+                                             "A paired aspiration and dispense would leave residual commanded volume in the tip.")
+                aspiration_sequence = ([aspiration_ul] if distribute_strategy == "single_aspiration"
+                                       else [target.volume_ul for target in step.dispenses])
+                if (any(not _calibration_supports(aspirate_class, volume) for volume in aspiration_sequence)
+                        or any(not _calibration_supports(dispense_class, target.volume_ul)
+                               for target in step.dispenses)):
+                    result.issue("distribute_calibration", path + "/dispenses",
+                                 "An aspiration or dispense is outside its liquid-class calibration points.")
+            elif method is not None and (
+                    not _calibration_supports(aspirate_class, aspiration_ul)
+                    or not _calibration_supports(dispense_class, aspiration_ul)):
+                result.issue("method_calibration_limit", path + "/method_ref",
+                             "The requested liquid volume is outside an aspirate or dispense class calibration range.")
+            aspiration_strokes = ([aspiration_ul] if step.kind != "distribute"
+                                  or distribute_strategy == "single_aspiration"
+                                  else [target.volume_ul for target in step.dispenses])
+            if method is not None:
+                applies = method["applicability"]
+                low, high = applies.get("min_volume_ul"), applies.get("max_volume_ul")
+                differences = list(method["_differences"])
+                dispense_strokes = ([target.volume_ul for target in step.dispenses]
+                                    if step.kind == "distribute" else [aspiration_ul])
+                for phase, strokes in (("aspirate", aspiration_strokes), ("dispense", dispense_strokes)):
+                    for index, stroke_ul in enumerate(strokes):
+                        if (low is not None and stroke_ul < low - _EPS) or (high is not None and stroke_ul > high + _EPS):
+                            differences.append({"field": "volume_ul", "phase": phase, "target_index": index,
+                                                "actual": stroke_ul,
+                                                "method": {"min_volume_ul": low, "max_volume_ul": high}})
+                details["method_differences"] = differences
+                if differences:
+                    warning = {"severity": "warning", "code": "method_mismatch", "path": path + "/method_ref",
+                        "message": "Selected method differs from its recorded application; scientist acknowledgement is required.",
+                        "differences": differences}
+                    if warning not in result.report["issues"]:
+                        result.report["issues"].append(warning)
+            if loaded_tip is not None and aspirate_class is not None:
+                pre_air = asp["pre_air_ul"] if method is not None else 0.0
+                post_air = asp["post_air_ul"] if method is not None else 0.0
+                air_commands = [(_commanded_volume(aspirate_class, air_ul) if air_ul > 0 else 0.0)
+                                for air_ul in (pre_air, post_air)]
+                for stroke_ul in aspiration_strokes:
+                    if stroke_ul > loaded_tip["capacity_ul"] + _EPS:
+                        result.issue("tip_volume_exceeded", path + "/dispenses" if step.kind == "distribute"
+                                     else path + "/volume_ul",
+                                     f"An aspiration exceeds the selected tip/head capacity of {loaded_tip['capacity_ul']:g} uL.")
+                        break
+                    liquid_command = _commanded_volume(aspirate_class, stroke_ul)
+                    if liquid_command is None or any(command is None for command in air_commands):
+                        result.issue("calibration_command", path + "/method_ref" if method else path,
+                                     "The aspiration or air-gap correction cannot command a positive volume.")
+                        break
+                    commanded_total = liquid_command + sum(air_commands)
+                    if commanded_total > loaded_tip["capacity_ul"] + _EPS:
+                        result.issue("tip_volume_exceeded", path + "/method_ref" if method else path,
+                                     f"The calibrated aspiration and air gaps command {commanded_total:g} uL, "
+                                     f"above the selected tip/head capacity of {loaded_tip['capacity_ul']:g} uL.")
+                        break
+            if method is not None and dsp["blowout_ul"] > 0:
+                if step.kind == "mix":
+                    result.issue("method_blowout_unavailable", path + "/method_ref",
+                                 "Mix does not aspirate the extra volume needed for the reviewed blowout.")
+                elif step.kind == "transfer":
+                    aspirated_commands = [_commanded_volume(aspirate_class, aspiration_ul)]
+                    aspirated_commands.extend(_commanded_volume(aspirate_class, air_ul)
+                                              for air_ul in (asp["pre_air_ul"], asp["post_air_ul"]) if air_ul > 0)
+                    needed_command = _commanded_volume(dispense_class, aspiration_ul + dsp["blowout_ul"])
+                    if (not _calibration_supports(dispense_class, aspiration_ul + dsp["blowout_ul"])
+                            or needed_command is None or any(command is None for command in aspirated_commands)
+                            or needed_command > sum(aspirated_commands) + _EPS):
+                        result.issue("method_blowout_unavailable", path + "/method_ref",
+                                     "The reviewed blowout would be clipped because the aspiration did not command enough volume.")
+            source_height = aspirate_props["distance_from_bottom"]
+            destination_height = dispense_props["distance_from_bottom"]
             if step.kind == "transfer":
-                from_cells = footprint(step.source, step.source_anchor, "source", step, path)
-                to_cells = footprint(step.destination, step.destination_anchor, "destination", step, path)
+                from_cells = footprint(step.source, step.source_anchor, "source", step, path, height_mm=source_height)
+                to_cells = footprint(step.destination, step.destination_anchor, "destination", step, path, height_mm=destination_height)
                 if from_cells and to_cells:
                     if step.source == step.destination and set(from_cells).intersection(to_cells):
                         result.issue("overlapping_transfer", path, "A transfer cannot overlap its own source footprint; use an explicit mix step.")
@@ -669,10 +979,79 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                     consumed[step.source] = consumed.get(step.source, 0) + step.volume_ul * len(from_cells)
                     details.update(volume_ul=step.volume_ul, source=step.source, destination=step.destination,
                                    source_wells=[well_name(c) for c in from_cells], destination_wells=[well_name(c) for c in to_cells])
-                    add("liquid/Aspirate", {**liquid_props, "location": locations[step.source], "anchor": step.source_anchor}, step, path)
-                    add("liquid/Dispense", {**liquid_props, "location": locations[step.destination], "anchor": step.destination_anchor}, step, path)
+                    add("liquid/Aspirate", {**aspirate_props, "location": locations[step.source], "anchor": step.source_anchor}, step, path)
+                    add("liquid/Dispense", {**dispense_props, "location": locations[step.destination], "anchor": step.destination_anchor}, step, path)
+            elif step.kind == "distribute":
+                from_cells = footprint(step.source, step.source_anchor, "source", step, path, height_mm=source_height)
+                targets: list[tuple[Any, list[tuple[int, int]], str]] = []
+                seen_targets: set[tuple[str, str]] = set()
+                seen_destination_cells: dict[str, set[tuple[int, int]]] = {}
+                for index, target in enumerate(step.dispenses):
+                    target_path = f"{path}/dispenses/{index}"
+                    key = (target.destination, target.destination_anchor)
+                    if key in seen_targets:
+                        result.issue("duplicate_dispense", target_path, "A distribute step cannot address the same destination footprint twice.")
+                    seen_targets.add(key)
+                    cells = footprint(target.destination, target.destination_anchor, "destination", step, target_path,
+                                      height_mm=destination_height)
+                    if cells:
+                        earlier = seen_destination_cells.setdefault(target.destination, set())
+                        if earlier.intersection(cells):
+                            result.issue("overlapping_dispense", target_path,
+                                         "Distribute targets overlap wells already addressed in this step.")
+                        earlier.update(cells)
+                    if from_cells and cells and len(from_cells) != len(cells):
+                        result.issue("footprint_mismatch", target_path,
+                                     "Source and destination footprints must address the same number of channels.")
+                    if step.source == target.destination and set(from_cells).intersection(cells):
+                        result.issue("overlapping_transfer", target_path,
+                                     "A distribute destination cannot overlap its source footprint.")
+                    targets.append((target, cells, target_path))
+                if from_cells and targets and all(cells and len(cells) == len(from_cells) for _, cells, _ in targets):
+                    if distribute_strategy == "paired_fallback" and any(
+                            volumes[target.destination][cell] > _EPS for target, cells, _ in targets for cell in cells):
+                        result.issue("distribute_calibration", path + "/dispenses",
+                                     "The paired fallback would return tips from nonempty destination wells to the source.")
+                    dead = materials[step.source].dead_volume_ul or 0
+                    for cell in from_cells:
+                        if volumes[step.source][cell] - aspiration_ul < dead - _EPS:
+                            result.issue("insufficient_reagent", path + "/dispenses",
+                                         f"{step.source}:{well_name(cell)} would fall below its {dead:g} uL dead volume.")
+                        volumes[step.source][cell] -= aspiration_ul
+                    consumed[step.source] = consumed.get(step.source, 0) + aspiration_ul * len(from_cells)
+                    details.update(source=step.source, source_wells=[well_name(c) for c in from_cells],
+                                   aspirate_volume_ul=aspiration_ul, strategy=distribute_strategy,
+                                   aspiration_sequence_ul=([aspiration_ul] if distribute_strategy == "single_aspiration"
+                                                            else [target.volume_ul for target, _, _ in targets]),
+                                   dispenses=[])
+                    if distribute_strategy == "single_aspiration":
+                        add("liquid/Aspirate", {**aspirate_props, "location": locations[step.source],
+                                                "anchor": step.source_anchor}, step, path)
+                    for index, (target, cells, target_path) in enumerate(targets):
+                        if distribute_strategy == "paired_fallback":
+                            add("liquid/Aspirate", {**aspirate_props, "volume": target.volume_ul,
+                                                    "location": locations[step.source],
+                                                    "anchor": step.source_anchor}, step, target_path)
+                        for cell in cells:
+                            volumes[target.destination][cell] += target.volume_ul
+                            if volumes[target.destination][cell] > definitions[target.destination]["well_volume_ul"] + _EPS:
+                                result.issue("destination_capacity", target_path + "/volume_ul",
+                                             f"{target.destination}:{well_name(cell)} exceeds well capacity.")
+                        details["dispenses"].append({"destination": target.destination,
+                            "destination_anchor": target.destination_anchor, "volume_ul": target.volume_ul,
+                            "destination_wells": [well_name(cell) for cell in cells]})
+                        add("liquid/Dispense", {**dispense_props, "volume": target.volume_ul,
+                            "location": locations[target.destination], "anchor": target.destination_anchor,
+                            "empty_tips": index == len(targets) - 1}, step, target_path)
             else:
-                cells = footprint(step.material, step.anchor, "material", step, path)
+                cells = footprint(step.material, step.anchor, "material", step, path, height_mm=source_height)
+                if method is not None:
+                    asp_class = classes["aspirate"].get("liquid_class_id") or classes["aspirate"].get("id")
+                    dsp_class = classes["dispense"].get("liquid_class_id") or classes["dispense"].get("id")
+                    if (asp_class != dsp_class or source_height != destination_height
+                            or asp["tip_touch"] != dsp["tip_touch"] or dsp["dynamic_tip_retraction"] != 0):
+                        result.issue("method_mix_unsupported", path + "/method_ref",
+                                     "Mix methods must use one class, height and tip-touch setting, with no dispense retraction.")
                 if step.cycles is None or not 1 <= step.cycles <= limit:
                     result.issue("mix_cycles", path + "/cycles", f"Mix cycles must be between 1 and {limit}.", "How many mixing cycles should run?")
                 if cells:
@@ -680,7 +1059,8 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                     if any(volumes[step.material][cell] - step.volume_ul < dead - _EPS for cell in cells):
                         result.issue("mix_available_volume", path + "/volume_ul", "Mix volume exceeds available liquid above dead volume in at least one addressed well.")
                     details.update(volume_ul=step.volume_ul, cycles=step.cycles, material=step.material, wells=[well_name(c) for c in cells])
-                    add("liquid/Mix", {**liquid_props, "location": locations[step.material], "anchor": step.anchor, "cycles": step.cycles}, step, path)
+                    mix_props = {**aspirate_props, "blowout_volume": dispense_props.get("blowout_volume", 0)}
+                    add("liquid/Mix", {**mix_props, "location": locations[step.material], "anchor": step.anchor, "cycles": step.cycles}, step, path)
             if setup.tip_strategy == "fresh_each_step":
                 discard(step, path)
         elif step.kind in {"manual", "wait"}:
@@ -768,6 +1148,7 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
         result.issue("operation_limit", "/steps", f"Compiled workload exceeds the {limit}-operation limit.")
     result.report["summary"] = {"expanded_steps": len(expanded), "compiled_operations": len(result.operations), "physical_operations": work,
         "tips_required": tips_used, "channels": mode.num_channels if mode else 0, "reagent_consumption_ul": consumed,
+        "methods_used": list(methods_used.values()),
         "final_volumes_ul": {mid: {well_name(cell): round(v, 9) for cell, v in wells.items()} for mid, wells in volumes.items()},
         "final_deck": {str(slot): stack[-1] for slot, stack in occupancy.items()},
         "final_deck_stacks": {str(slot): list(stack) for slot, stack in occupancy.items()}, "run_steps": run_steps,

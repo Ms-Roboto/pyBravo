@@ -43,6 +43,11 @@ def machine_context(bravo) -> dict:
         "or select the correct configured head before choosing tips."
     )
     context["profile_hash"] = digest(profile)
+    # An approved protocol pins the method library as well as the physical
+    # catalogs. Editing an authored method or its referenced liquid class must
+    # invalidate the previous strict simulation and approval.
+    from pybravo.workflow.protocols.methods import method_registry
+    context["method_registry_digest"] = method_registry(context)["digest"]
     # Deliberately exclude volatile runtime positions and fitted tips. The setup
     # supplies head mode/tips; the approved profile/catalog values must not drift.
     context["context_hash"] = digest({k: v for k, v in context.items() if k != "head_mode"})

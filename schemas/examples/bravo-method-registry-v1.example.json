@@ -1,0 +1,272 @@
+{
+  "standard": "pybravo.bravo-method-registry",
+  "schema_version": "1.0.0",
+  "methods": [
+    {
+      "method_id": "reference:agilent-384st10-1536",
+      "version": "1.0.0",
+      "status": "reference_candidate",
+      "title": "Agilent 384ST10 access to 1536-well plates",
+      "derived_from": null,
+      "applicability": {
+        "machine_ids": [],
+        "head_types": [
+          "HT_384_D_70",
+          "HT_384_D_70_S2"
+        ],
+        "tip_ids": [
+          "st_10ul"
+        ],
+        "tipbox_ids": [],
+        "source_labware_ids": [],
+        "destination_labware_ids": [],
+        "reagent_families": [],
+        "operations": [
+          "transfer",
+          "distribute"
+        ],
+        "min_volume_ul": null,
+        "max_volume_ul": null
+      },
+      "aspirate": {
+        "liquid_class_ref": null,
+        "distance_from_bottom_mm": null,
+        "pre_air_ul": null,
+        "post_air_ul": null,
+        "dynamic_tip_extension": null,
+        "tip_touch": null,
+        "well_offset": null
+      },
+      "dispense": {
+        "liquid_class_ref": null,
+        "distance_from_bottom_mm": null,
+        "blowout_ul": null,
+        "dynamic_tip_retraction": null,
+        "tip_touch": null,
+        "well_offset": null
+      },
+      "tip_policy": null,
+      "evidence": [
+        {
+          "source_type": "publication",
+          "source_path": null,
+          "source_url": "https://www.agilent.com/cs/library/brochures/brochure-pipette-and-microplate-5994-5118en-agilent.pdf",
+          "source_digest": null,
+          "retrieved_at": "2026-10-05",
+          "reviewer": null,
+          "reviewed_at": null,
+          "run_id": null,
+          "note": "Vendor consumable compatibility reference; no local liquid-handling method or deck qualification supplied."
+        },
+        {
+          "source_type": "publication",
+          "source_path": null,
+          "source_url": "https://automation.help.agilent.com/AutomationSolutionsKB14/VWorks%20User%20Guide/08_LiquidHandling.11.13.html",
+          "source_digest": null,
+          "retrieved_at": "2026-10-05",
+          "reviewer": null,
+          "reviewed_at": null,
+          "run_id": null,
+          "note": "Vendor reference for 384-head quadrants in 1536-well plates; no motion settings asserted here."
+        }
+      ],
+      "revision": "85b0d598d273915dab51f353128625c8fe8cefc0c6663e2acad60de3c96377b6",
+      "missing_fields": [
+        "applicability.destination_labware_ids",
+        "applicability.machine_ids",
+        "applicability.max_volume_ul",
+        "applicability.min_volume_ul",
+        "applicability.reagent_families",
+        "applicability.source_labware_ids",
+        "applicability.tipbox_compatibility",
+        "applicability.tipbox_ids",
+        "aspirate.distance_from_bottom_mm",
+        "aspirate.dynamic_tip_extension",
+        "aspirate.liquid_class_ref",
+        "aspirate.post_air_ul",
+        "aspirate.pre_air_ul",
+        "aspirate.tip_touch",
+        "aspirate.well_offset",
+        "dispense.blowout_ul",
+        "dispense.distance_from_bottom_mm",
+        "dispense.dynamic_tip_retraction",
+        "dispense.liquid_class_ref",
+        "dispense.tip_touch",
+        "dispense.well_offset",
+        "evidence.local_review",
+        "status.review_required",
+        "tip_policy"
+      ],
+      "execution_ready": false
+    },
+    {
+      "method_id": "reference:agilent-aspirate-task",
+      "version": "1.0.0",
+      "status": "reference_candidate",
+      "title": "Agilent Bravo aspirate task parameters",
+      "derived_from": null,
+      "applicability": {
+        "machine_ids": [],
+        "head_types": [],
+        "tip_ids": [],
+        "tipbox_ids": [],
+        "source_labware_ids": [],
+        "destination_labware_ids": [],
+        "reagent_families": [],
+        "operations": [
+          "transfer",
+          "mix",
+          "distribute"
+        ],
+        "min_volume_ul": null,
+        "max_volume_ul": null
+      },
+      "aspirate": {
+        "liquid_class_ref": null,
+        "distance_from_bottom_mm": null,
+        "pre_air_ul": null,
+        "post_air_ul": null,
+        "dynamic_tip_extension": null,
+        "tip_touch": null,
+        "well_offset": null
+      },
+      "dispense": {
+        "liquid_class_ref": null,
+        "distance_from_bottom_mm": null,
+        "blowout_ul": null,
+        "dynamic_tip_retraction": null,
+        "tip_touch": null,
+        "well_offset": null
+      },
+      "tip_policy": null,
+      "evidence": [
+        {
+          "source_type": "publication",
+          "source_path": null,
+          "source_url": "https://automation.help.agilent.com/AutomationSolutionsKB14/Bravo%20User%20Guide/QuickRef.11.11.html",
+          "source_digest": null,
+          "retrieved_at": "2026-10-05",
+          "reviewer": null,
+          "reviewed_at": null,
+          "run_id": null,
+          "note": "Documents selectable aspirate task parameters; it is not a qualified method for any reagent."
+        }
+      ],
+      "revision": "534a82d3c04985d7c675dffbd51f2fa3520671ee4ef208354be0dbfcca613409",
+      "missing_fields": [
+        "applicability.destination_labware_ids",
+        "applicability.head_types",
+        "applicability.machine_ids",
+        "applicability.max_volume_ul",
+        "applicability.min_volume_ul",
+        "applicability.reagent_families",
+        "applicability.source_labware_ids",
+        "applicability.tip_ids",
+        "applicability.tipbox_ids",
+        "aspirate.distance_from_bottom_mm",
+        "aspirate.dynamic_tip_extension",
+        "aspirate.liquid_class_ref",
+        "aspirate.post_air_ul",
+        "aspirate.pre_air_ul",
+        "aspirate.tip_touch",
+        "aspirate.well_offset",
+        "dispense.blowout_ul",
+        "dispense.distance_from_bottom_mm",
+        "dispense.dynamic_tip_retraction",
+        "dispense.liquid_class_ref",
+        "dispense.tip_touch",
+        "dispense.well_offset",
+        "evidence.local_review",
+        "status.review_required",
+        "tip_policy"
+      ],
+      "execution_ready": false
+    },
+    {
+      "method_id": "reference:agilent-dispense-task",
+      "version": "1.0.0",
+      "status": "reference_candidate",
+      "title": "Agilent Bravo dispense task parameters",
+      "derived_from": null,
+      "applicability": {
+        "machine_ids": [],
+        "head_types": [],
+        "tip_ids": [],
+        "tipbox_ids": [],
+        "source_labware_ids": [],
+        "destination_labware_ids": [],
+        "reagent_families": [],
+        "operations": [
+          "transfer",
+          "distribute"
+        ],
+        "min_volume_ul": null,
+        "max_volume_ul": null
+      },
+      "aspirate": {
+        "liquid_class_ref": null,
+        "distance_from_bottom_mm": null,
+        "pre_air_ul": null,
+        "post_air_ul": null,
+        "dynamic_tip_extension": null,
+        "tip_touch": null,
+        "well_offset": null
+      },
+      "dispense": {
+        "liquid_class_ref": null,
+        "distance_from_bottom_mm": null,
+        "blowout_ul": null,
+        "dynamic_tip_retraction": null,
+        "tip_touch": null,
+        "well_offset": null
+      },
+      "tip_policy": null,
+      "evidence": [
+        {
+          "source_type": "publication",
+          "source_path": null,
+          "source_url": "https://automation.help.agilent.com/AutomationSolutionsKB14/Bravo%20User%20Guide/QuickRef.11.12.html",
+          "source_digest": null,
+          "retrieved_at": "2026-10-05",
+          "reviewer": null,
+          "reviewed_at": null,
+          "run_id": null,
+          "note": "Documents selectable dispense task parameters; it is not a qualified method for any reagent."
+        }
+      ],
+      "revision": "eb66ac4887ca0b7433362eda5d0284e4cbd989cc855090c258d28221f019cc4f",
+      "missing_fields": [
+        "applicability.destination_labware_ids",
+        "applicability.head_types",
+        "applicability.machine_ids",
+        "applicability.max_volume_ul",
+        "applicability.min_volume_ul",
+        "applicability.reagent_families",
+        "applicability.source_labware_ids",
+        "applicability.tip_ids",
+        "applicability.tipbox_ids",
+        "aspirate.distance_from_bottom_mm",
+        "aspirate.dynamic_tip_extension",
+        "aspirate.liquid_class_ref",
+        "aspirate.post_air_ul",
+        "aspirate.pre_air_ul",
+        "aspirate.tip_touch",
+        "aspirate.well_offset",
+        "dispense.blowout_ul",
+        "dispense.distance_from_bottom_mm",
+        "dispense.dynamic_tip_retraction",
+        "dispense.liquid_class_ref",
+        "dispense.tip_touch",
+        "dispense.well_offset",
+        "evidence.local_review",
+        "status.review_required",
+        "tip_policy"
+      ],
+      "execution_ready": false
+    }
+  ],
+  "digest": "1c89e1023264719f736303c3dcbd09c2e05e3ab7e383e4dc254ef2af9e455e46",
+  "status_counts": {
+    "reference_candidate": 3
+  }
+}

@@ -84,6 +84,7 @@ pybravo = [
     "model/pybravo_urdf/assets/*",
     "**/*.yaml",
     "**/*.json",
+    "**/SKILL.md",
 ]
 
 [tool.pytest.ini_options]

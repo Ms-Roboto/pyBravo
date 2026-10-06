@@ -1,0 +1,15 @@
+{
+  "operation": "distribute",
+  "tip_id": "st_10ul",
+  "tipbox_id": "lw-4914769d0af7",
+  "source_labware_id": "01KD4PYY7N4EG0E22P3QP1RHB9",
+  "destination_labware_id": "lw-3918306f45b8",
+  "reagent_family": "aqueous",
+  "volume_ul": 10,
+  "dispense_volumes_ul": [
+    5,
+    5
+  ],
+  "source_anchor": "A1",
+  "destination_anchor": "B1"
+}

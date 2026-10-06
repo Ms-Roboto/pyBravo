@@ -1,8 +1,9 @@
 """Explainable setup proposals derived from a capability manifest and a draft.
 
 This module never edits a protocol or records a scientist decision. It applies
-only the rules published by the active capability manifest; validation and
-scientist review remain separate gates.
+the active manifest's setup rules and a conservative deck-slot policy derived
+from its catalog and machine slots; validation and scientist review remain
+separate gates.
 """
 
 from __future__ import annotations
@@ -47,6 +48,206 @@ def _positive(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
 
 
+def _runtime_advisory(snapshot: Mapping[str, Any] | None, slots: set[int]) -> dict[str, Any]:
+    """Expose only deck/tip evidence from get_state, without certifying a load.
+
+    Bravo's deck and occupancy tables are software state. They can be stale or
+    preconfigured, so neither their identities nor their occupied-tip counts
+    are run authorization or a substitute for physical inspection.
+    """
+    result: dict[str, Any] = {
+        "status": "software_known_unverified" if isinstance(snapshot, Mapping) else "unavailable",
+        "physically_verified": False,
+        "occupied_slots": [],
+        "tipbox_inventory": [],
+    }
+    if not isinstance(snapshot, Mapping):
+        return result
+
+    deck = _data(snapshot.get("deck"))
+    details = _data(snapshot.get("deck_details"))
+    inventory = _data(snapshot.get("tipbox_inventory"))
+    for slot in sorted(slots):
+        names = deck.get(str(slot))
+        entries = details.get(str(slot))
+        tipbox = _data(inventory.get(str(slot)))
+        if not isinstance(names, list):
+            names = []
+        if not isinstance(entries, list):
+            entries = []
+        names = [name for name in names if isinstance(name, str) and name]
+        if not names:
+            names = [name for item in entries if isinstance(name := _data(item).get("name"), str) and name]
+        if not names and isinstance(tipbox.get("labware_name"), str) and tipbox["labware_name"]:
+            names = [tipbox["labware_name"]]
+        if names or entries or tipbox:
+            result["occupied_slots"].append({"slot": slot, "labware_names": names,
+                                               "source": ("software_deck_state" if deck.get(str(slot)) or entries
+                                                          else "software_tipbox_inventory")})
+
+    for slot in sorted(slots):
+        row = _data(inventory.get(str(slot)))
+        if not row:
+            continue
+        occupied = row.get("occupied")
+        occupied = [value for value in occupied if isinstance(value, str)] if isinstance(occupied, list) else []
+        nrows, ncols = row.get("rows"), row.get("cols")
+        well_count = (nrows * ncols if isinstance(nrows, int) and not isinstance(nrows, bool)
+                      and isinstance(ncols, int) and not isinstance(ncols, bool)
+                      and nrows > 0 and ncols > 0 else None)
+        result["tipbox_inventory"].append({
+            "slot": slot,
+            "labware_name": row.get("labware_name") if isinstance(row.get("labware_name"), str) else None,
+            "tip_id": row.get("tip_id") if isinstance(row.get("tip_id"), str) else None,
+            "software_occupied_count": len(occupied),
+            "well_count": well_count,
+            "occupied_wells": occupied,
+            "source": "software_tipbox_inventory",
+        })
+    return result
+
+
+def _deck_proposals(plan: Mapping[str, Any], manifest: Mapping[str, Any],
+                    runtime_advisory: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Suggest only collision-free positions for catalog-known materials.
+
+    An existing stack order may establish a single source stack, but this
+    routine never assigns an order or asserts that plates/tips are present.
+    Plate-move destinations are reserved even when currently empty. Software
+    occupancy is advisory and can reserve other slots, never certify a load.
+    """
+    rows = _rows(plan.get("materials"))
+    slots = sorted({slot for slot in (_data(manifest.get("machine")).get("deck_slots") or [])
+                    if isinstance(slot, int) and not isinstance(slot, bool) and slot > 0})
+    if not slots:
+        return [], []
+    catalog = {row.get("id"): row for row in _rows(manifest.get("labware")) if row.get("id")}
+    tip_pairs = {(row.get("labware_id"), row.get("tip_definition_id")) for row in
+                 _rows(manifest.get("tipbox_choices")) if row.get("execution_ready") is True}
+    assigned = {row.get("deck_slot") for row in rows if isinstance(row.get("deck_slot"), int)
+                and not isinstance(row.get("deck_slot"), bool)}
+    runtime_reserved = {row["slot"] for row in _rows(runtime_advisory.get("occupied_slots"))
+                        if isinstance(row.get("slot"), int) and row["slot"] not in assigned}
+    reserved_move_slots: set[int] = set()
+    source_ids: set[str] = set()
+    destination_ids: set[str] = set()
+
+    def inspect_steps(steps: Any) -> None:
+        for step in _rows(steps):
+            if step.get("kind") in {"move_plate", "destack_plate", "stack_plate"}:
+                slot = step.get("destination_slot")
+                if isinstance(slot, int) and not isinstance(slot, bool):
+                    reserved_move_slots.add(slot)
+            if step.get("kind") in {"transfer", "distribute"} and isinstance(step.get("source"), str):
+                source_ids.add(step["source"])
+            if step.get("kind") == "transfer" and isinstance(step.get("destination"), str):
+                destination_ids.add(step["destination"])
+            if step.get("kind") == "distribute":
+                destination_ids.update(item["destination"] for item in _rows(step.get("dispenses"))
+                                       if isinstance(item.get("destination"), str))
+            if step.get("kind") == "repeat":
+                inspect_steps(step.get("steps"))
+
+    inspect_steps(plan.get("steps"))
+    unplaced = [(index, row) for index, row in enumerate(rows) if row.get("deck_slot") is None]
+    if not unplaced:
+        return [], []
+    blocked: list[dict[str, Any]] = []
+    for index, row in unplaced:
+        definition = catalog.get(row.get("labware_id"))
+        if definition is None or definition.get("provisional"):
+            blocked.append({"path": f"/materials/{index}/deck_slot",
+                            "reason": "Choose a verified catalog labware ID before proposing a deck position.",
+                            "missing": ["Verified labware identity."]})
+        elif row.get("role") == "tips" and (row.get("labware_id"), row.get("tip_definition_id")) not in tip_pairs:
+            blocked.append({"path": f"/materials/{index}/deck_slot",
+                            "reason": "Select an exact head-compatible rack and tip pair before placing tips.",
+                            "missing": ["Verified rack–tip pair for the active head."]})
+    if blocked:
+        return [], blocked
+
+    # There is no stack-group identifier in ProtocolMaterial. A shared slot is
+    # safe to propose only for the one unambiguous, already ordered source
+    # stack in this plan. Partial/duplicate orders remain scientist decisions.
+    ordered = [(index, row) for index, row in enumerate(rows) if row.get("stack_order") is not None]
+    stack_group: list[tuple[int, dict[str, Any]]] = []
+    if ordered:
+        orders = [row.get("stack_order") for _, row in ordered]
+        same_definition = len({row.get("labware_id") for _, row in ordered}) == 1
+        candidate_slots = {row.get("deck_slot") for _, row in ordered if row.get("deck_slot") is not None}
+        stack_ok = (
+            len(ordered) > 1
+            and all(isinstance(order, int) and not isinstance(order, bool) and order >= 0 for order in orders)
+            and sorted(orders) == list(range(len(ordered)))
+            and same_definition and len(candidate_slots) <= 1
+            and all(row.get("role") == "liquid" and row.get("id") in source_ids for _, row in ordered)
+            and all(row.get("labware_id") in catalog for _, row in ordered)
+            and all(_positive(catalog[row["labware_id"]].get("stack_height_mm")) for _, row in ordered)
+            and _data(manifest.get("machine")).get("has_gripper") is True
+        )
+        if stack_ok and candidate_slots:
+            anchor = next(iter(candidate_slots))
+            stack_ok = anchor in slots and all(
+                row.get("deck_slot") != anchor or (index, row) in ordered
+                for index, row in enumerate(rows)
+            )
+        if stack_ok:
+            stack_group = ordered
+        elif any(row.get("deck_slot") is None for _, row in ordered):
+            return [], [{"path": f"/materials/{index}/deck_slot",
+                         "reason": "Stack levels are present, but they do not identify one verified, contiguous source stack.",
+                         "missing": ["Confirm one stack location and the bottom-to-top order."]}
+                        for index, row in ordered if row.get("deck_slot") is None]
+
+    free = [slot for slot in slots if slot not in assigned and slot not in reserved_move_slots
+            and slot not in runtime_reserved]
+    grouped_indexes = {index for index, _ in stack_group}
+    units: list[list[tuple[int, dict[str, Any]]]] = []
+    if stack_group and any(index in grouped_indexes for index, _ in unplaced):
+        units.append([(index, row) for index, row in stack_group if row.get("deck_slot") is None])
+    units.extend([[(index, row)] for index, row in unplaced if index not in grouped_indexes])
+    # Supply racks first, then destinations, then source plates and waste.
+    units.sort(key=lambda unit: (
+        0 if unit[0][1].get("role") == "tips" else
+        1 if unit[0][1].get("id") in destination_ids else
+        2 if unit[0][1].get("id") in source_ids else 3,
+        unit[0][0],
+    ))
+    needs_free = sum(1 for unit in units if not (
+        stack_group and unit[0][0] in grouped_indexes
+        and any(row.get("deck_slot") is not None for _, row in stack_group)
+    ))
+    if needs_free > len(free):
+        return [], [{"path": f"/materials/{index}/deck_slot",
+                     "reason": "No collision-free position remains after reserving draft materials, plate-move destinations, and software-known occupied slots.",
+                     "missing": ["Confirm an explicit stack or revise the deck layout."]}
+                    for index, _ in unplaced]
+
+    proposed: list[dict[str, Any]] = []
+    for unit in units:
+        in_stack = bool(stack_group and unit[0][0] in grouped_indexes)
+        anchor = next((row["deck_slot"] for _, row in stack_group if row.get("deck_slot") is not None), None) if in_stack else None
+        slot = anchor if anchor is not None else free.pop(0)
+        for index, row in unit:
+            proposed.append({
+                "path": f"/materials/{index}/deck_slot", "value": slot,
+                "rule_id": "explicit_source_stack_slot" if in_stack else "free_deck_slot",
+                "rationale": ("This source belongs to the plan's explicitly ordered stack."
+                              if in_stack else "This position is unassigned and not reserved by a plate move or software-known occupancy."),
+                "evidence_level": "heuristic", "requires_confirmation": True,
+                "provenance": ["active_machine_deck_slots", "catalog_labware", "plan_materials"]
+                + (["software_known_runtime_snapshot"] if runtime_advisory.get("status") == "software_known_unverified" else []),
+                "required_evidence": ["Scientist confirmation of physical deck placement and clearance."],
+                "evidence": [{"source": "plan_and_catalog", "material_id": row.get("id"),
+                              "labware_id": row.get("labware_id"), "proposed_slot": slot,
+                              "reserved_move_slots": sorted(reserved_move_slots),
+                              "software_occupied_unassigned_slots": sorted(runtime_reserved),
+                              "runtime_snapshot_status": runtime_advisory.get("status"),
+                              "software_state_physically_verified": False}],
+            })
+    return sorted(proposed, key=lambda item: int(item["path"].split("/")[2])), []
+
+
 def _steps(plan: Mapping[str, Any]) -> tuple[list[dict[str, Any]], bool, int | None]:
     """Return liquid steps; a repeat keeps consumable ordering unresolved."""
     found: list[dict[str, Any]] = []
@@ -64,7 +265,7 @@ def _steps(plan: Mapping[str, Any]) -> tuple[list[dict[str, Any]], bool, int | N
                     expanded_count = None
                     count = 1
                 visit(step.get("steps"), path + "/steps", multiplier * count)
-            elif step.get("kind") in {"transfer", "mix"}:
+            elif step.get("kind") in {"transfer", "distribute", "mix"}:
                 found.append({**step, "_path": path})
                 if expanded_count is not None:
                     expanded_count += multiplier
@@ -243,17 +444,28 @@ def _full_head_footprint(
             evidence.append({"source": "cited_protocol_text", "path": step["_path"],
                              "paragraph_ids": list(step.get("source_paragraph_ids") or []),
                              "scope_pattern": "four_source_384_to_two_1536_quadrants" if four_source_scope else "all_wells"})
-        targets = (("source", "source_anchor"), ("destination", "destination_anchor")) if step.get("kind") == "transfer" else (("material", "anchor"),)
-        for material_field, anchor_field in targets:
-            material_id, anchor = step.get(material_field), step.get(anchor_field)
+        path = step["_path"]
+        if step.get("kind") == "transfer":
+            targets = [(step.get("source"), step.get("source_anchor"), f"{path}/source", f"{path}/source_anchor"),
+                       (step.get("destination"), step.get("destination_anchor"),
+                        f"{path}/destination", f"{path}/destination_anchor")]
+        elif step.get("kind") == "distribute":
+            targets = [(step.get("source"), step.get("source_anchor"), f"{path}/source", f"{path}/source_anchor")]
+            targets.extend((item.get("destination"), item.get("destination_anchor"),
+                            f"{path}/dispenses/{index}/destination",
+                            f"{path}/dispenses/{index}/destination_anchor")
+                           for index, item in enumerate(_rows(step.get("dispenses"))))
+        else:
+            targets = [(step.get("material"), step.get("anchor"), f"{path}/material", f"{path}/anchor")]
+        for material_id, anchor, material_path, anchor_path in targets:
             material = materials.get(material_id)
             definition = labware.get(material.get("labware_id")) if material else None
             if material is None or material.get("role") != "liquid" or definition is None or definition.get("provisional"):
-                blocks.append(f"{step['_path']}/{material_field} needs a verified liquid plate catalog ID.")
+                blocks.append(f"{material_path} needs a verified liquid plate catalog ID.")
                 missing_definition = True
                 continue
             if any((definition["id"], rack.get("tip_definition_id")) in incompatible for rack in tips):
-                blocks.append(f"{step['_path']}/{material_field} has an explicitly incompatible selected tip/plate pair.")
+                blocks.append(f"{material_path} has an explicitly incompatible selected tip/plate pair.")
                 missing_definition = True
                 continue
             try:
@@ -264,14 +476,14 @@ def _full_head_footprint(
                     *anchor_cell,
                 )
             except (ValueError, TypeError):
-                blocks.append(f"{step['_path']}/{anchor_field} needs a valid, explicit well anchor and plate grid.")
+                blocks.append(f"{anchor_path} needs a valid, explicit well anchor and plate grid.")
                 missing_definition = True
                 continue
             if len(cells) != geometry.rows * geometry.columns:
-                blocks.append(f"{step['_path']}/{anchor_field} does not admit the full active-head footprint on {material_id}.")
+                blocks.append(f"{anchor_path} does not admit the full active-head footprint on {material_id}.")
                 partial = True
                 continue
-            evidence.append({"source": "plan_and_catalog", "path": f"{step['_path']}/{anchor_field}",
+            evidence.append({"source": "plan_and_catalog", "path": anchor_path,
                              "material_id": material_id, "labware_id": definition["id"],
                              "anchor": anchor, "addressed_wells": len(cells)})
     return (None if missing_definition else False if partial else True), evidence, blocks
@@ -285,6 +497,12 @@ def _destinations_empty_for_each_source(
     if full_head is not True or head is None:
         return None, []
     transfers = [step for step in liquid_steps if step.get("kind") == "transfer"]
+    for step in liquid_steps:
+        if step.get("kind") == "distribute":
+            transfers.extend({"source": step.get("source"), "destination": item.get("destination"),
+                              "destination_anchor": item.get("destination_anchor"),
+                              "_path": f"{step['_path']}/dispenses/{index}"}
+                             for index, item in enumerate(_rows(step.get("dispenses"))))
     if not transfers:
         return None, []
     labware = {row.get("id"): row for row in _rows(manifest.get("labware")) if row.get("id")}
@@ -337,12 +555,12 @@ def _rack_order(
     manifest: Mapping[str, Any], has_repeat: bool, plan: Mapping[str, Any],
 ) -> tuple[list[str] | None, list[str], list[dict[str, Any]]]:
     """Pair distinct catalog racks to first source use, in plan rack order."""
-    transfers = [step for step in liquid_steps if step.get("kind") == "transfer"]
+    transfers = [step for step in liquid_steps if step.get("kind") in {"transfer", "distribute"}]
     if has_repeat or len(transfers) != len(liquid_steps) or not transfers:
         return None, ["Tip-rack order needs explicit review when mixing or repeating liquid steps."], []
     sources = list(dict.fromkeys(step.get("source") for step in transfers))
     if any(source not in materials for source in sources):
-        return None, ["Each transfer source must identify a plan material."], []
+        return None, ["Each transfer or distribute source must identify a plan material."], []
     # A rack used for one source cannot be silently reused after an intervening
     # source or handoff. The compiler discards tips on these transitions.
     seen: set[str] = set()
@@ -357,7 +575,7 @@ def _rack_order(
     top_level_steps = _rows(plan.get("steps"))
     for source in sources:
         positions = [index for index, step in enumerate(top_level_steps)
-                     if step.get("kind") == "transfer" and step.get("source") == source]
+                     if step.get("kind") in {"transfer", "distribute"} and step.get("source") == source]
         if positions and positions != list(range(positions[0], positions[-1] + 1)):
             return None, [f"Source {source} has a handoff or plate move between transfers; the compiler discards loaded tips at that point."], []
     racks = [row for row in materials.values() if row.get("role") == "tips"]
@@ -401,11 +619,26 @@ def _rack_order(
             continue
         source_steps = [step for step in transfers if step.get("source") == source_id]
         for step in source_steps:
-            if not _positive(step.get("volume_ul")) or (
-                _positive(pair.get("tip_capacity_ul")) and step["volume_ul"] > pair["tip_capacity_ul"]
+            if step.get("kind") == "distribute":
+                dispenses = _rows(step.get("dispenses"))
+                volumes = [item.get("volume_ul") for item in dispenses]
+                valid_volume = bool(volumes) and all(_positive(volume) for volume in volumes)
+                # A distribute intent may compile as paired transfers when a
+                # shared aspiration cannot fit. Rack suitability therefore
+                # checks each dispense, not the sum of the sequence.
+                required_tip_volume = max(volumes) if valid_volume else None
+                volume_path = f"{step['_path']}/dispenses"
+                addressed_materials = [source_id, *(item.get("destination") for item in dispenses)]
+            else:
+                required_tip_volume = step.get("volume_ul")
+                valid_volume = _positive(required_tip_volume)
+                volume_path = f"{step['_path']}/volume_ul"
+                addressed_materials = [source_id, step.get("destination")]
+            if not valid_volume or (
+                _positive(pair.get("tip_capacity_ul")) and required_tip_volume > pair["tip_capacity_ul"]
             ):
-                blocks.append(f"{step['_path']}/volume_ul needs a confirmed volume within {rack.get('tip_definition_id')} capacity.")
-            for material_id in (source_id, step.get("destination")):
+                blocks.append(f"{volume_path} needs confirmed volumes within {rack.get('tip_definition_id')} capacity.")
+            for material_id in addressed_materials:
                 material = materials.get(material_id)
                 relation = relations.get((material.get("labware_id"), rack.get("tip_definition_id"))) if material else None
                 if relation and relation.get("compatible") is False:
@@ -435,7 +668,8 @@ def _condition_matches(condition: Mapping[str, Any], facts: Mapping[str, Any]) -
     return False
 
 
-def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | None = None) -> dict:
+def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | None = None,
+                    runtime_snapshot: dict | None = None) -> dict:
     """Return rule-backed setup proposals and remaining scientist inputs.
 
     Source paragraphs can establish an explicit all-wells instruction when
@@ -444,9 +678,13 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
     """
     plan, setup, manifest = _data(plan), _data(setup), _data(manifest)
     source = _data(source)
+    deck_slots = {slot for slot in (_data(manifest.get("machine")).get("deck_slots") or [])
+                  if isinstance(slot, int) and not isinstance(slot, bool) and slot > 0}
+    runtime_advisory = _runtime_advisory(runtime_snapshot, deck_slots)
     material_rows = _rows(plan.get("materials"))
     materials = {row["id"]: row for row in material_rows if isinstance(row.get("id"), str) and row["id"]}
     liquid_steps, has_repeat, expanded_count = _steps(plan)
+    legacy_liquid_steps = any(step.get("method_ref") is None for step in liquid_steps)
     head = _head(manifest)
     full_head, head_evidence, head_blocks = _full_head_footprint(liquid_steps, materials, manifest, head, source, plan)
     rack_ids, rack_blocks, rack_evidence = _rack_order(liquid_steps, materials, manifest, has_repeat, plan)
@@ -454,13 +692,18 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
     empty_destinations, destination_evidence = _destinations_empty_for_each_source(
         liquid_steps, materials, manifest, head, full_head,
     )
-    source_ids = list(dict.fromkeys(step.get("source") for step in liquid_steps if step.get("kind") == "transfer"))
+    source_ids = list(dict.fromkeys(step.get("source") for step in liquid_steps
+                                    if step.get("kind") in {"transfer", "distribute"}))
     catalog_labware = {row.get("id"): row for row in _rows(manifest.get("labware")) if row.get("id")}
-    addressed_ids = list(dict.fromkeys(
-        material_id for step in liquid_steps
-        for material_id in ((step.get("source"), step.get("destination")) if step.get("kind") == "transfer"
-                            else (step.get("material"),))
-    ))
+    def addressed_materials(step: Mapping[str, Any]) -> list[Any]:
+        if step.get("kind") == "transfer":
+            return [step.get("source"), step.get("destination")]
+        if step.get("kind") == "distribute":
+            return [step.get("source"), *(item.get("destination") for item in _rows(step.get("dispenses")))]
+        return [step.get("material")]
+
+    addressed_ids = list(dict.fromkeys(material_id for step in liquid_steps
+                                       for material_id in addressed_materials(step)))
     addressed_depths = [catalog_labware.get(materials.get(mid, {}).get("labware_id"), {}).get("well_depth_mm")
                         for mid in addressed_ids]
     minimum_depth = min(addressed_depths) if addressed_depths and all(_positive(depth) for depth in addressed_depths) else None
@@ -498,6 +741,11 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
         path = rule.get("decision")
         conditions = _data(rule.get("when")).get("all")
         if not isinstance(path, str) or not path.startswith("/setup/") or not isinstance(conditions, list):
+            continue
+        # A pinned method supplies phase-specific classes and heights. Keep
+        # protocol-wide fields only for drafts that still contain legacy
+        # liquid steps, so recommendations do not ask for redundant settings.
+        if not legacy_liquid_steps and path in {"/setup/liquid_class", "/setup/distance_from_bottom_mm"}:
             continue
         if not all(isinstance(condition, Mapping) and _condition_matches(condition, facts)
                    for condition in conditions):
@@ -600,17 +848,29 @@ def recommend_setup(plan: dict, setup: dict, manifest: dict, *, source: dict | N
                            "evidence_level": "scientist_input", "requires_confirmation": True,
                            "provenance": ["pybravo.workflow.protocols.validation"], "evidence": []})
     # Inventory is physical run state, never a catalog or model inference.
+    tipbox_by_slot = {row["slot"]: row for row in runtime_advisory["tipbox_inventory"]}
     for index, row in enumerate(material_rows):
         if row.get("role") == "tips" and row.get("available_tips") is None:
+            runtime_tipbox = tipbox_by_slot.get(row.get("deck_slot"))
             unresolved.append({"path": f"/materials/{index}/available_tips", "rule_id": None,
                                "reason": "Inspect and record which fresh tips are physically present before execution.",
                                "required_evidence": ["Scientist-inspected fresh-tip wells or a confirmed full rack."],
                                "evidence_level": "scientist_input", "requires_confirmation": True,
-                               "provenance": ["physical_tip_inventory"], "evidence": []})
+                               "provenance": ["physical_tip_inventory"],
+                               "evidence": ([{**runtime_tipbox, "matched_by": "draft_deck_slot_only",
+                                             "physically_verified": False}]
+                                            if runtime_tipbox else [])})
+    deck_recommendations, deck_blocked = _deck_proposals(plan, manifest, runtime_advisory)
+    # Place deck choices before reuse decisions in the review UI. Accepting a
+    # deck change updates the plan fingerprint, so reuse must be decided on the
+    # final layout rather than an earlier draft.
+    recommendations[:0] = deck_recommendations
+    blocked.extend(deck_blocked)
     return {
         "context_hash": manifest.get("context_hash"),
         "plan_fingerprint": setup_plan_fingerprint(plan),
         "recommendations": recommendations,
         "unresolved": unresolved,
         "blocked": blocked,
+        "runtime_snapshot": runtime_advisory,
     }

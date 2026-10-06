@@ -23,6 +23,7 @@ from pybravo.workflow.protocols.ingest import (
     ingest_pdf,
     ingest_text,
 )
+from pybravo.workflow.protocols.methods import MethodQuery, MethodRecord
 from pybravo.workflow.protocols.models import ProtocolPlan, ProtocolSetup
 from pybravo.workflow.protocols.store import (
     ProtocolStore,
@@ -118,12 +119,19 @@ class SetupRecommendationRequest(Payload):
     selected_paragraph_ids: list[str] | None = None
 
 
+class MethodSaveRequest(Payload):
+    expected_registry_digest: str = Field(min_length=1)
+    expected_method_revision: str | None = None
+    method: MethodRecord
+
+
 class ApprovalRequest(Payload):
     scientist: str = Field(min_length=1, max_length=200)
     notes: str = ""
     qualification: str
     reviewed: bool = False
     deck_confirmed: bool = False
+    method_differences_accepted: bool = False
     revision: int | None = None
 
 
@@ -154,6 +162,51 @@ async def capabilities():
     return build_capability_manifest(machine_context(_bravo()))
 
 
+@router.get("/api/protocols/methods")
+async def methods():
+    """Read the versioned method library for the active machine and head."""
+    from pybravo.workflow.protocols.methods import method_registry
+
+    return method_registry(machine_context(_bravo()))
+
+
+@router.post("/api/protocols/methods")
+async def save_method(request: MethodSaveRequest):
+    """Add a scientist-reviewed method version; never promote source material automatically."""
+    from pybravo.workflow.protocols.methods import (
+        MethodConflictError,
+        MethodValidationError,
+        save_reviewed_method,
+    )
+
+    try:
+        return save_reviewed_method(
+            machine_context(_bravo()), request.method,
+            expected_registry_digest=request.expected_registry_digest,
+            expected_method_revision=request.expected_method_revision,
+        )
+    except MethodConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except MethodValidationError as exc:
+        raise HTTPException(422, {"message": str(exc), "missing_fields": exc.missing_fields}) from exc
+
+
+@router.get("/api/protocols/recipes")
+async def recipes():
+    """Read composable planning patterns; none are execution qualifications."""
+    from pybravo.workflow.protocols.recipes import recipe_catalog
+
+    return recipe_catalog()
+
+
+@router.post("/api/protocols/methods/lookup")
+async def method_lookup(request: MethodQuery):
+    """Return compatible methods and explicit differences without changing a draft."""
+    from pybravo.workflow.protocols.methods import lookup_methods
+
+    return lookup_methods(machine_context(_bravo()), request)
+
+
 @router.post("/api/protocols/setup-recommendations")
 async def setup_recommendations(request: SetupRecommendationRequest):
     """Suggest reviewable setup choices without editing or approving a draft."""
@@ -172,8 +225,15 @@ async def setup_recommendations(request: SetupRecommendationRequest):
         if request.selected_paragraph_ids is not None:
             raise HTTPException(422, "A paragraph selection requires a session_id.")
         source = None
-    manifest = build_capability_manifest(machine_context(_bravo()))
-    return recommend_setup(request.plan.model_dump(), request.setup, manifest, source=source)
+    bravo = _bravo()
+    manifest = build_capability_manifest(machine_context(bravo))
+    try:
+        runtime_snapshot = bravo.get_state()
+    except Exception as exc:
+        logger.warning("Software deck snapshot unavailable for setup advice: %s", exc)
+        runtime_snapshot = None
+    return recommend_setup(request.plan.model_dump(), request.setup, manifest, source=source,
+                           runtime_snapshot=runtime_snapshot)
 
 
 @router.get("/api/protocols/library")
@@ -503,12 +563,30 @@ async def approve(identity: str, request: ApprovalRequest):
         raise HTTPException(409, "Protocol changed; reload before approval.")
     if not request.scientist.strip() or not request.reviewed or not request.deck_confirmed:
         raise HTTPException(422, "Record the reviewer and confirm the protocol and deck review.")
-    if request.qualification not in {"qualification_run", "previously_qualified"}:
-        raise HTTPException(422, "Choose supervised qualification or a previously qualified procedure.")
+    if request.qualification not in {"qualification_run", "previously_qualified", "scientist_reviewed_simulated"}:
+        raise HTTPException(422, "Choose a release basis for this procedure.")
     if request.qualification == "previously_qualified" and not request.notes.strip():
         raise HTTPException(422, "Record the previous qualification reference in the notes.")
+    if request.qualification == "scientist_reviewed_simulated" and not request.notes.strip():
+        raise HTTPException(422, "Record the rationale for the scientist-reviewed adaptation.")
     capabilities = machine_context(_bravo())
     fingerprint, workflow = _require_passed(record, capabilities)
+    report = _validate(record, capabilities)
+    paired_fallback = any(
+        str(issue.get("code") or "").startswith("distribute_")
+        and str(issue.get("code") or "").endswith("_fallback")
+        for issue in report.get("issues", [])
+    )
+    if paired_fallback:
+        if not request.method_differences_accepted:
+            raise HTTPException(422, "Review and accept the changed aspiration sequence before approval.")
+        if not request.notes.strip():
+            raise HTTPException(422, "Record why the paired aspiration-dispense fallback is acceptable.")
+    if any(issue.get("code") == "method_mismatch" for issue in report.get("issues", [])):
+        if not request.method_differences_accepted:
+            raise HTTPException(422, "Review and accept every listed method difference before approval.")
+        if not request.notes.strip():
+            raise HTTPException(422, "Record why the selected method differences are acceptable.")
     approval = {**request.model_dump(), "approved_at": now(), "record_hash": fingerprint,
                 "workflow_hash": workflow_digest(workflow), "context_hash": capabilities["context_hash"]}
     return _store.annotate(identity, {"approval": approval}, revision=record["revision"])

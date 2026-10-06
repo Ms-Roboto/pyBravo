@@ -14,6 +14,15 @@ configured head's selectable planning operations, catalog-backed tip and
 labware choices, geometry patterns, and review requirements in a versioned
 machine-readable format. It is discovery information for planning; validation
 and approval still govern executable workflows.
+The separate [method knowledge layer](bravo-method-knowledge.md) stores
+applicability, evidence and technique choices. The manifest carries only its
+registry version and lookup pointer, while liquid classes retain the numeric
+aspirate, dispense and Z-axis motion settings.
+The local model loads focused planning skills from
+`pybravo/workflow/protocols/skills/*/SKILL.md` for the relevant procedure, and
+the extraction record logs `skills_loaded` and `recipe_hints`. The read-only
+`GET /api/protocols/recipes` catalog exposes patterns and their review points;
+neither a skill nor a recipe certifies a liquid method.
 
 The setup panel evaluates the manifest's decision rules against the current
 draft and only the currently selected source passages, including unsaved
@@ -24,6 +33,21 @@ shows its evidence and must be accepted into the draft; it is never recorded
 as an automatic scientist decision. Liquid class, pipetting height, physical
 inventory, and contamination assessment remain open until qualified for the
 actual experiment. A missing fact prevents a rule from firing.
+
+The same recommender can suggest free deck positions for materials with known,
+non-provisional catalog IDs and exact tip-rack/tip pairing. It reserves all
+positions already assigned to materials or named as plate-move destinations.
+It also reserves positions that the Bravo's current software deck state shows
+as occupied when the draft has not assigned that position. The software state
+is advisory and may not match the physical deck. Current tip-box occupancy is
+shown as unverified evidence; it never fills in a fresh-tip count or confirms
+that a rack is loaded.
+It suggests a shared position for source plates only when the draft already
+contains one unambiguous, contiguous bottom-to-top stack order; it never
+invents that order or tip inventory. Every proposed position still needs
+physical placement and clearance confirmation.
+When every suggestion fits, **Apply all deck positions** copies those
+review-draft positions together; it does not confirm what is physically loaded.
 
 ## Start with the local model
 
@@ -231,11 +255,14 @@ This differs from the designer's visual **Simulate** preview, which is intended
 for animation and can continue after task warnings. The assistant requires its
 own successful strict result before approval.
 
-Review the run sheet, deck diagram and manual interventions. Record the
-scientist's name and select either a **supervised water/dye qualification run**
-or a previously qualified procedure with its reference in the notes. The
-software does not attest that hardware qualification has happened merely
-because a box was checked. Qualified staff must perform and assess that work.
+Review the run sheet, deck diagram, method differences and manual
+interventions. Record the scientist's name and choose a **supervised
+qualification run**, a previously qualified procedure with its reference in
+the notes, or **scientist-reviewed adaptation after strict simulation** with
+the rationale in the notes. If validation reports `method_mismatch`, approval
+also requires explicit acceptance of those listed differences. An adapted
+method remains labeled as an adaptation; simulation and review do not convert
+it into a qualified method or attest that hardware qualification occurred.
 
 Approval binds the source, selected passages, plan, setup, profile, catalogs,
 tip-offset calibration and compiled workflow. Changing any of these invalidates
@@ -281,7 +308,9 @@ Never copy the synthetic benchmark's dimensions into a real instrument setup.
 
 Simulation checks the software model; it cannot verify physical deck placement,
 calibration accuracy, liquid properties, contamination tolerance or scientific
-equivalence. Device-specific liquid-handling qualification remains necessary.
+equivalence. A scientist may release a reviewed adaptation under the explicit
+approval basis above, while a `qualified` method requires local qualification
+evidence for its stated applicability.
 
 ## Evaluate changes
 
@@ -308,6 +337,10 @@ simulation never execute physical hardware.
 | Method and suffix | Result |
 |---|---|
 | `GET /context` | Active machine and authoritative catalogs |
+| `GET /capabilities` | Published Bravo Capability Manifest and method-registry pointer |
+| `GET /methods`, `POST /methods/lookup` | Versioned method registry and read-only applicability lookup |
+| `POST /methods` | Save a complete scientist-reviewed method version against expected registry and method revisions |
+| `GET /recipes` | Read-only recipe patterns and review points |
 | `POST /chat` | Add a scientist message and return a cited draft graph |
 | `POST /from-text` | New session from `{text, name}` |
 | `POST /ingest` | New session from multipart PDF `file` |

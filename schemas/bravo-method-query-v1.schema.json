@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pybravo:bravo-method-query:1.0.0",
+  "title": "Bravo Method Query 1.0",
+  "description": "Read-only applicability lookup input. Distribute volume_ul is the summed aspiration intent; dispense_volumes_ul lists aliquots. The server checks active hardware and catalog identity.",
+  "properties": {
+    "operation": {
+      "default": "transfer",
+      "enum": [
+        "transfer",
+        "mix",
+        "distribute"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "machine_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Machine Id"
+    },
+    "head_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Head Type"
+    },
+    "tip_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tip Id"
+    },
+    "tipbox_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tipbox Id"
+    },
+    "source_labware_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Labware Id"
+    },
+    "destination_labware_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Destination Labware Id"
+    },
+    "reagent_family": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reagent Family"
+    },
+    "volume_ul": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Volume Ul"
+    },
+    "dispense_volumes_ul": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dispense Volumes Ul"
+    },
+    "source_anchor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Anchor"
+    },
+    "destination_anchor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Destination Anchor"
+    }
+  },
+  "type": "object"
+}

@@ -19,6 +19,7 @@ Start here. The pages below are ordered roughly the way you will need them.
 | [Workflows](workflows.md) | Building and running protocols in the designer |
 | [Protocol Assistant](protocol-assistant.md) | Local-model extraction, review, strict simulation and reusable protocols |
 | [Bravo Capability Manifest](bravo-capability-manifest.md) | Versioned, machine-derived options for protocol-planning models |
+| [Bravo method knowledge](bravo-method-knowledge.md) | Method evidence, liquid-class provenance, skills, recipes, and qualification states |
 | [Configuration](configuration.md) | Profiles, environment variables, config files |
 
 ## Build on it

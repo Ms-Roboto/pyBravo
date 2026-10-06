@@ -6,7 +6,7 @@
 <title>pyBravo · Protocol Assistant</title>
 <style>
 :root{color-scheme:dark;--bg:#0a0a0f;--panel:#12121a;--input:#1a1a28;--hover:#24243a;--line:#303044;--text:#e0e0e8;--muted:#aaaaba;--accent:#a2a2ff;--green:#70dca0;--yellow:#f4c276;--red:#ff9c9c;--sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--mono:'IBM Plex Mono','SFMono-Regular',monospace}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans)}button,input,textarea,select{font:inherit;color:inherit}button,a,input,textarea,select{outline-offset:4px}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent)}button,.button{border:1px solid var(--line);border-radius:6px;background:var(--input);padding:8px 13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.35}button:hover:not(:disabled),.button:hover{background:var(--hover);border-color:#646482}button:disabled{opacity:.5;cursor:not-allowed}.primary{background:#35356f;border-color:#7575c2;color:#fff}.primary:hover:not(:disabled){background:#45458b}.danger{color:var(--red)}a{color:var(--accent)}header{height:64px;border-bottom:1px solid var(--line);padding:0 30px;display:flex;align-items:center;gap:20px;background:var(--panel)}.brand{font-weight:650;color:var(--text);text-decoration:none}.brand span{color:var(--accent)}header nav{display:flex;gap:18px;margin-left:auto}header nav a{font-size:13px;text-decoration:none;color:var(--muted)}.workspace{max-width:1400px;margin:auto;padding:30px}.eyebrow{font:11px var(--mono);text-transform:uppercase;letter-spacing:.12em;color:var(--accent);margin-bottom:8px}h1{font-size:28px;letter-spacing:-.025em;margin:0 0 7px}h2{font-size:18px;margin:0}h3{font-size:14px;margin:0 0 8px}.muted{color:var(--muted)}p{margin:0 0 12px}.intro{display:flex;justify-content:space-between;align-items:center;gap:24px;margin-bottom:24px}.intro p{max-width:770px}.badge{display:inline-block;padding:3px 9px;background:var(--input);border:1px solid var(--line);border-radius:20px;font:11px/1.5 var(--mono);white-space:nowrap}.badge.good{color:var(--green);border-color:#365843}.badge.warn{color:var(--yellow);border-color:#675037}.badge.bad{color:var(--red);border-color:#744545}.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:24px;padding-bottom:10px;flex-wrap:wrap}.tabs button{background:transparent;border-color:transparent;color:var(--muted)}.tabs button[aria-selected="true"]{background:#242440;border-color:#47476b;color:var(--text)}.tabs .num{font:11px var(--mono);margin-right:5px;color:var(--accent)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:23px;margin-bottom:18px}.panel-title{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:14px}.panel-title p{margin:4px 0 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.fields.two{grid-template-columns:repeat(2,minmax(0,1fr))}.fields.four{grid-template-columns:repeat(4,minmax(0,1fr))}.field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);min-width:0}.field.wide{grid-column:1/-1}.field small{font-size:11px;line-height:1.4}.field input,.field select,.field textarea{width:100%;background:var(--input);border:1px solid var(--line);border-radius:5px;padding:8px 9px;color:var(--text);min-width:0}.field textarea{min-height:75px;resize:vertical}.field input:invalid{border-color:var(--red)}textarea.protocol-text{min-height:230px;font-family:var(--mono);font-size:12px;line-height:1.65}.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px}.actions.end{justify-content:flex-end}.actions .muted{font-size:12px;margin-right:auto}.upload{border:1px dashed #62627e;border-radius:7px;padding:24px;min-height:230px;display:flex;flex-direction:column;justify-content:center;gap:16px;background:#151522}.upload input{max-width:100%}.source-list{max-height:540px;overflow:auto;display:grid;gap:10px}.source-row{border:1px solid var(--line);border-radius:6px;display:grid;grid-template-columns:23px 1fr;gap:8px;padding:12px;scroll-margin-top:20px}.source-row:has(input:checked){border-color:#535384;background:#1a1a2a}.source-row.highlight{outline:2px solid var(--accent)}.source-text{white-space:pre-wrap;font-size:13px}.source-meta{font:11px var(--mono);color:var(--accent);display:block;margin-bottom:5px}.check{display:flex;align-items:flex-start;gap:9px;font-size:13px;margin-top:12px}.check input{margin-top:4px;accent-color:var(--accent)}.row-card{padding:17px;background:#161620;border:1px solid var(--line);border-radius:7px;margin-bottom:12px}.row-top{display:flex;align-items:center;gap:12px;margin-bottom:13px}.row-top h3{margin:0}.row-top .spacer{flex:1}.small{padding:4px 8px;font-size:11px}.mono{font-family:var(--mono)}.citations{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0 0}.citations button{font:10px var(--mono);padding:3px 7px}.nested{margin:14px 0 0 15px;border-left:2px solid #4d4d73;padding-left:15px}.notice{border:1px solid #505075;background:#202033;border-radius:7px;padding:13px 16px;font-size:13px;white-space:pre-wrap}.notice.error{color:var(--red);border-color:#6e4545;background:#281a21}.notice.good{color:var(--green);border-color:#365a47;background:#13251d}#notice{margin-bottom:18px}#notice:empty{display:none}.empty{padding:30px 10px;color:var(--muted);text-align:center}.issues{display:grid;gap:9px}.issue{border-left:3px solid var(--yellow);padding:11px 13px;background:#231f1a;border-radius:3px;font-size:13px}.issue.error{border-color:var(--red);background:#281c24}.issue code{font-size:11px;color:var(--muted);display:block;margin-top:4px}.question{display:grid;grid-template-columns:1fr auto;gap:10px;border-bottom:1px solid var(--line);padding:12px 0}.question:first-child{padding-top:0}.question:last-child{border-bottom:none}.question input{background:var(--input);border:1px solid var(--line);border-radius:5px;padding:7px 9px;color:var(--text);width:100%;margin-top:7px}.deck{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.deck-slot{min-height:98px;padding:12px;background:var(--input);border:1px solid var(--line);border-radius:6px}.deck-slot.occupied{background:#24203a;border-color:#696089}.deck-slot.tips{background:#182536;border-color:#3c638b}.deck-slot.waste{background:#302128;border-color:#8d5260}.deck-slot small{font:10px var(--mono);color:var(--muted);display:block;margin-bottom:8px}.deck-slot strong{font-size:12px;display:block;overflow-wrap:anywhere}.deck-slot span{font-size:11px;color:var(--muted)}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:10px 9px;vertical-align:top}th{font-weight:500;color:var(--muted);font-size:11px}td small{display:block;color:var(--muted)}.summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:15px}.metric{background:var(--input);padding:14px;border-radius:6px}.metric strong{display:block;font-size:20px;font-weight:500}.metric span{font-size:11px;color:var(--muted)}.history-row{padding:11px 0;border-bottom:1px solid var(--line);font-size:12px}.history-row time{color:var(--muted);font-size:11px}.history-row pre,pre.log{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 var(--mono);background:var(--input);padding:12px;border-radius:6px;max-height:260px;overflow:auto}.library-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.library-item{border:1px solid var(--line);border-radius:7px;padding:18px;background:var(--input)}.library-item p{font-size:12px;color:var(--muted)}.step-list{padding-left:25px}.step-list li{padding:7px 0}.step-list small{display:block;color:var(--muted)}details{margin-top:10px}summary{cursor:pointer;color:var(--accent);font-size:12px}.footer-bar{position:sticky;bottom:0;background:rgba(18,18,26,.97);border:1px solid var(--line);border-radius:8px;padding:13px 18px;display:flex;gap:12px;align-items:center;z-index:5;box-shadow:0 -8px 28px #0a0a0f55}.footer-bar p{font-size:12px;color:var(--muted);margin:0 auto 0 0}.footer-bar .actions{margin:0}button.loading::before{content:'';width:12px;height:12px;border:2px solid #aaa4;border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}[hidden]{display:none!important}.skip-link{position:absolute;top:-50px;left:10px;z-index:20;padding:9px;background:var(--panel)}.skip-link:focus{top:10px}@media(max-width:850px){.workspace{padding:20px}.grid,.library-grid{grid-template-columns:1fr}.fields,.fields.four{grid-template-columns:repeat(2,minmax(0,1fr))}header{padding:0 20px}.intro{align-items:flex-start}.intro .badge{display:none}}@media(max-width:540px){header nav a:first-child{display:none}.workspace{padding:16px}.fields,.fields.two,.fields.four{grid-template-columns:1fr}.panel{padding:17px}.intro{display:block}h1{font-size:25px}.footer-bar{flex-wrap:wrap}.footer-bar p{width:100%}.summary-grid{grid-template-columns:1fr}.question{grid-template-columns:1fr}.tabs button{padding:7px}}@media print{header,.tabs,.footer-bar,.actions,#notice,#source-view,#plan-view,#library-view,.no-print{display:none!important}body{background:white;color:#111}.workspace{padding:0}.panel{background:white;border-color:#aaa;break-inside:avoid}.muted,th,td small,.step-list small{color:#444}.deck-slot,.deck-slot.occupied,.deck-slot.tips,.deck-slot.waste,.metric{background:#eee;color:#111}#review-view{display:block!important}.grid{grid-template-columns:1fr 1fr}.badge{color:#111!important;border-color:#888!important}}
+[hidden]{display:none!important}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans)}button,input,textarea,select{font:inherit;color:inherit}button,a,input,textarea,select{outline-offset:4px}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent)}button,.button{border:1px solid var(--line);border-radius:6px;background:var(--input);padding:8px 13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.35}button:hover:not(:disabled),.button:hover{background:var(--hover);border-color:#646482}button:disabled{opacity:.5;cursor:not-allowed}.primary{background:#35356f;border-color:#7575c2;color:#fff}.primary:hover:not(:disabled){background:#45458b}.danger{color:var(--red)}a{color:var(--accent)}header{height:64px;border-bottom:1px solid var(--line);padding:0 30px;display:flex;align-items:center;gap:20px;background:var(--panel)}.brand{font-weight:650;color:var(--text);text-decoration:none}.brand span{color:var(--accent)}header nav{display:flex;gap:18px;margin-left:auto}header nav a{font-size:13px;text-decoration:none;color:var(--muted)}.workspace{max-width:1400px;margin:auto;padding:30px}.eyebrow{font:11px var(--mono);text-transform:uppercase;letter-spacing:.12em;color:var(--accent);margin-bottom:8px}h1{font-size:28px;letter-spacing:-.025em;margin:0 0 7px}h2{font-size:18px;margin:0}h3{font-size:14px;margin:0 0 8px}.muted{color:var(--muted)}p{margin:0 0 12px}.intro{display:flex;justify-content:space-between;align-items:center;gap:24px;margin-bottom:24px}.intro p{max-width:770px}.badge{display:inline-block;padding:3px 9px;background:var(--input);border:1px solid var(--line);border-radius:20px;font:11px/1.5 var(--mono);white-space:nowrap}.badge.good{color:var(--green);border-color:#365843}.badge.warn{color:var(--yellow);border-color:#675037}.badge.bad{color:var(--red);border-color:#744545}.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:24px;padding-bottom:10px;flex-wrap:wrap}.tabs button{background:transparent;border-color:transparent;color:var(--muted)}.tabs button[aria-selected="true"]{background:#242440;border-color:#47476b;color:var(--text)}.tabs .num{font:11px var(--mono);margin-right:5px;color:var(--accent)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:23px;margin-bottom:18px}.panel-title{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:14px}.panel-title p{margin:4px 0 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.fields.two{grid-template-columns:repeat(2,minmax(0,1fr))}.fields.four{grid-template-columns:repeat(4,minmax(0,1fr))}.field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);min-width:0}.field.wide{grid-column:1/-1}.field small{font-size:11px;line-height:1.4}.field input,.field select,.field textarea{width:100%;background:var(--input);border:1px solid var(--line);border-radius:5px;padding:8px 9px;color:var(--text);min-width:0}.field textarea{min-height:75px;resize:vertical}.field input:invalid{border-color:var(--red)}textarea.protocol-text{min-height:230px;font-family:var(--mono);font-size:12px;line-height:1.65}.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px}.actions.end{justify-content:flex-end}.actions .muted{font-size:12px;margin-right:auto}.upload{border:1px dashed #62627e;border-radius:7px;padding:24px;min-height:230px;display:flex;flex-direction:column;justify-content:center;gap:16px;background:#151522}.upload input{max-width:100%}.source-list{max-height:540px;overflow:auto;display:grid;gap:10px}.source-row{border:1px solid var(--line);border-radius:6px;display:grid;grid-template-columns:23px 1fr;gap:8px;padding:12px;scroll-margin-top:20px}.source-row:has(input:checked){border-color:#535384;background:#1a1a2a}.source-row.highlight{outline:2px solid var(--accent)}.source-text{white-space:pre-wrap;font-size:13px}.source-meta{font:11px var(--mono);color:var(--accent);display:block;margin-bottom:5px}.check{display:flex;align-items:flex-start;gap:9px;font-size:13px;margin-top:12px}.check input{margin-top:4px;accent-color:var(--accent)}.row-card{padding:17px;background:#161620;border:1px solid var(--line);border-radius:7px;margin-bottom:12px}.row-top{display:flex;align-items:center;gap:12px;margin-bottom:13px}.row-top h3{margin:0}.row-top .spacer{flex:1}.small{padding:4px 8px;font-size:11px}.mono{font-family:var(--mono)}.citations{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0 0}.citations button{font:10px var(--mono);padding:3px 7px}.nested{margin:14px 0 0 15px;border-left:2px solid #4d4d73;padding-left:15px}.notice{border:1px solid #505075;background:#202033;border-radius:7px;padding:13px 16px;font-size:13px;white-space:pre-wrap}.notice.error{color:var(--red);border-color:#6e4545;background:#281a21}.notice.good{color:var(--green);border-color:#365a47;background:#13251d}#notice{margin-bottom:18px}#notice:empty{display:none}.empty{padding:30px 10px;color:var(--muted);text-align:center}.issues{display:grid;gap:9px}.issue{border-left:3px solid var(--yellow);padding:11px 13px;background:#231f1a;border-radius:3px;font-size:13px}.issue.error{border-color:var(--red);background:#281c24}.issue code{font-size:11px;color:var(--muted);display:block;margin-top:4px}.question{display:grid;grid-template-columns:1fr auto;gap:10px;border-bottom:1px solid var(--line);padding:12px 0}.question:first-child{padding-top:0}.question:last-child{border-bottom:none}.question input{background:var(--input);border:1px solid var(--line);border-radius:5px;padding:7px 9px;color:var(--text);width:100%;margin-top:7px}.deck{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.deck-slot{min-height:98px;padding:12px;background:var(--input);border:1px solid var(--line);border-radius:6px}.deck-slot.occupied{background:#24203a;border-color:#696089}.deck-slot.tips{background:#182536;border-color:#3c638b}.deck-slot.waste{background:#302128;border-color:#8d5260}.deck-slot small{font:10px var(--mono);color:var(--muted);display:block;margin-bottom:8px}.deck-slot strong{font-size:12px;display:block;overflow-wrap:anywhere}.deck-slot span{font-size:11px;color:var(--muted)}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:10px 9px;vertical-align:top}th{font-weight:500;color:var(--muted);font-size:11px}td small{display:block;color:var(--muted)}.summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:15px}.metric{background:var(--input);padding:14px;border-radius:6px}.metric strong{display:block;font-size:20px;font-weight:500}.metric span{font-size:11px;color:var(--muted)}.history-row{padding:11px 0;border-bottom:1px solid var(--line);font-size:12px}.history-row time{color:var(--muted);font-size:11px}.history-row pre,pre.log{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 var(--mono);background:var(--input);padding:12px;border-radius:6px;max-height:260px;overflow:auto}.library-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.library-item{border:1px solid var(--line);border-radius:7px;padding:18px;background:var(--input)}.library-item p{font-size:12px;color:var(--muted)}.step-list{padding-left:25px}.step-list li{padding:7px 0}.step-list small{display:block;color:var(--muted)}details{margin-top:10px}summary{cursor:pointer;color:var(--accent);font-size:12px}.footer-bar{position:sticky;bottom:0;background:rgba(18,18,26,.97);border:1px solid var(--line);border-radius:8px;padding:13px 18px;display:flex;gap:12px;align-items:center;z-index:5;box-shadow:0 -8px 28px #0a0a0f55}.footer-bar p{font-size:12px;color:var(--muted);margin:0 auto 0 0}.footer-bar .actions{margin:0}button.loading::before{content:'';width:12px;height:12px;border:2px solid #aaa4;border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}[hidden]{display:none!important}.skip-link{position:absolute;top:-50px;left:10px;z-index:20;padding:9px;background:var(--panel)}.skip-link:focus{top:10px}@media(max-width:850px){.workspace{padding:20px}.grid,.library-grid{grid-template-columns:1fr}.fields,.fields.four{grid-template-columns:repeat(2,minmax(0,1fr))}header{padding:0 20px}.intro{align-items:flex-start}.intro .badge{display:none}}@media(max-width:540px){header nav a:first-child{display:none}.workspace{padding:16px}.fields,.fields.two,.fields.four{grid-template-columns:1fr}.panel{padding:17px}.intro{display:block}h1{font-size:25px}.footer-bar{flex-wrap:wrap}.footer-bar p{width:100%}.summary-grid{grid-template-columns:1fr}.question{grid-template-columns:1fr}.tabs button{padding:7px}}@media print{header,.tabs,.footer-bar,.actions,#notice,#source-view,#plan-view,#library-view,.no-print{display:none!important}body{background:white;color:#111}.workspace{padding:0}.panel{background:white;border-color:#aaa;break-inside:avoid}.muted,th,td small,.step-list small{color:#444}.deck-slot,.deck-slot.occupied,.deck-slot.tips,.deck-slot.waste,.metric{background:#eee;color:#111}#review-view{display:block!important}.grid{grid-template-columns:1fr 1fr}.badge{color:#111!important;border-color:#888!important}}
 </style>
 <style>
 .field input[type="checkbox"]{width:auto;flex:none}
@@ -36,7 +36,7 @@
 <div class="panel" id="source-panel" hidden><div class="panel-title"><div><h2>Review the source passages</h2><p class="muted" id="source-description"></p></div><div class="actions" style="margin:0"><a id="original-pdf" class="button small" target="_blank" rel="noopener" hidden>Open original PDF</a><button id="select-all" class="small">Select all</button><button id="select-none" class="small">Clear</button></div></div><div id="source-paragraphs" class="source-list"></div><label class="check"><input type="checkbox" id="source-reviewed"><span>I have checked these passages against the original document and selected the procedure to automate.</span></label><div class="actions end"><button data-go="plan" class="primary">Continue to setup</button></div></div>
 </section>
 <section id="plan-view" role="tabpanel" aria-labelledby="tab-plan" hidden>
-<div class="panel"><div class="panel-title"><div><h2>Experiment setup</h2><p class="muted" id="instrument-summary">Loading the active instrument catalog…</p><p class="muted" style="font-size:12px">Catalog corrections: <a href="/labware-editor" target="_blank" rel="noopener">labware geometry</a> · <a href="/tip-editor" target="_blank" rel="noopener">tip definitions</a> · <a href="/liquid-class-editor" target="_blank" rel="noopener">liquid classes</a>. Validation uses the catalog dimensions, not the labware name.</p></div><span class="badge" id="model-status">Local model</span></div><div id="setup-recommendations" class="row-card" hidden></div><div class="fields" id="setup-fields"></div><div id="setup-tipbox-choices" class="row-card" style="margin-top:18px"></div><div class="actions"><label class="field" style="min-width:240px">Reusable setup<select id="setup-picker"><option value="">Choose a saved setup</option></select></label><button id="apply-setup">Apply setup</button><button id="prepare-deck">Configure materials</button><label class="field" style="flex:1;min-width:170px">Save setup as<input id="setup-name" placeholder="A descriptive laboratory setup name"></label><button id="save-setup">Save setup</button></div></div>
+<div class="panel"><div class="panel-title"><div><h2>Experiment setup</h2><p class="muted" id="instrument-summary">Loading the active instrument catalog…</p><p class="muted" style="font-size:12px">Catalog corrections: <a href="/labware-editor" target="_blank" rel="noopener">labware geometry</a> · <a href="/tip-editor" target="_blank" rel="noopener">tip definitions</a> · <a href="/liquid-class-editor" target="_blank" rel="noopener">liquid classes</a>. Validation uses the catalog dimensions, not the labware name.</p></div><span class="badge" id="model-status">Local model</span></div><div id="setup-recommendations" class="row-card" hidden></div><div id="method-preview" class="row-card" hidden></div><div class="fields" id="setup-fields"></div><div id="setup-tipbox-choices" class="row-card" style="margin-top:18px"></div><div class="actions"><label class="field" style="min-width:240px">Reusable setup<select id="setup-picker"><option value="">Choose a saved setup</option></select></label><button id="apply-setup">Apply setup</button><button id="prepare-deck">Configure materials</button><button id="suggest-methods">Suggest liquid methods</button><label class="field" style="flex:1;min-width:170px">Save setup as<input id="setup-name" placeholder="A descriptive laboratory setup name"></label><button id="save-setup">Save setup</button></div></div>
 <div class="panel"><div class="panel-title"><div><h2>Interpret the selected procedure</h2><p class="muted">The local model proposes a structured plan. Missing quantities and experimental choices remain open for review.</p></div></div><label class="field">Experiment context / extraction instructions<textarea id="extraction-instructions" placeholder="For example: use only the plate preparation section; preserve the centrifugation step as a manual handoff."></textarea></label><div class="actions"><button id="extract" class="primary">Interpret with local LLM</button><span class="muted" id="extraction-status"></span></div></div>
 <div id="plan-content" hidden><div class="panel"><div class="panel-title"><div><h2>Materials &amp; deck assignments</h2><p class="muted">Volumes are per well unless a well-specific override is supplied. Enter 0 µL for an empty destination. For plates sharing a deck position, assign stack levels from bottom 0 upward.</p></div><button id="add-material" class="small">Add material</button></div><div id="materials"></div></div><div class="panel"><div class="panel-title"><div><h2>Review the experimental steps</h2><p class="muted">Edit the interpretation and follow its source links. External operations remain explicit manual instructions.</p></div><button id="add-step" class="small">Add step</button></div><label class="field" style="margin-bottom:16px">Reason for corrections<input id="correction-reason" placeholder="For example, confirmed volume against laboratory SOP v3"></label><div id="steps"></div></div><div class="panel" id="questions-panel"><div class="panel-title"><div><h2>Resolve open questions</h2><p class="muted">Answers update the corresponding structured field and are recorded as scientist decisions.</p></div></div><div id="questions"></div></div><div class="actions end"><button data-go="review" class="primary">Review &amp; validate</button></div></div>
 <div class="empty" id="no-plan">Load and review a source, then interpret it to begin.</div>
@@ -44,7 +44,7 @@
 <section id="review-view" role="tabpanel" aria-labelledby="tab-review" hidden>
 <div class="panel"><div class="panel-title"><div><h2>Readiness checks</h2><p class="muted">Validate the saved plan, then run a simulation that stops on any task error.</p></div><button id="print" class="small no-print">Print run sheet</button></div><div class="summary-grid"><div class="metric"><strong id="validation-status">Not validated</strong><span>Plan and instrument compatibility</span></div><div class="metric"><strong id="simulation-status">Not simulated</strong><span>Strict simulation</span></div><div class="metric"><strong id="approval-status">Needs review</strong><span>Approval for this saved revision</span></div></div><div id="validation-summary" class="muted" style="font-size:12px;margin-bottom:14px"></div><div id="issues" class="issues"></div><div class="actions"><button id="validate" class="primary">Validate plan</button><button id="simulate">Run strict simulation</button></div><details id="simulation-details" hidden><summary>Simulation events</summary><pre class="log" id="simulation-events"></pre></details></div>
 <div class="grid"><div class="panel"><div class="panel-title"><h2>Deck run sheet</h2><span class="badge">Bravo positions</span></div><div id="deck" class="deck"></div><p class="muted" style="font-size:11px;margin:12px 0 0">Position numbers follow the configured Bravo deck. Confirm the physical labware arrangement before a run.</p></div><div class="panel"><div class="panel-title"><h2>Reagent &amp; tip preparation</h2></div><div id="supplies"></div></div></div><div class="panel"><div class="panel-title"><h2>Execution &amp; manual handoffs</h2></div><div id="run-steps"></div></div>
-<div class="panel no-print"><div class="panel-title"><div><h2>Scientist approval</h2><p class="muted">Approval is attached to this source, plan, setup, and simulation. Edits require another validation and approval.</p></div></div><div class="fields"><label class="field">Scientist name<input id="scientist" autocomplete="name" placeholder="Name of the reviewing scientist"></label><label class="field">Qualification path<select id="qualification"><option value="qualification_run">Supervised water / dye qualification run</option><option value="previously_qualified">Previously qualified procedure</option></select></label><label class="field">Qualification record / review notes<textarea id="approval-notes" placeholder="Describe the qualification plan or reference the existing qualification record."></textarea></label></div><label class="check"><input id="plan-reviewed" type="checkbox"><span>I reviewed quantities, well mappings, timing, manual instructions, and the source references.</span></label><label class="check"><input id="deck-confirmed" type="checkbox"><span>I reviewed the deck layout, head footprint, liquid class, tip strategy, and starting reagent volumes.</span></label><div class="actions"><button id="approve" class="primary">Approve this revision</button><button id="export" disabled>Open approved workflow in Designer</button></div><div id="approval-record" class="muted" style="font-size:12px;margin-top:12px"></div><div class="actions"><label class="field" style="min-width:260px">Approved library name<input id="publish-name" placeholder="Reusable, reviewed procedure name"></label><button id="publish" disabled>Add to protocol library</button></div></div>
+<div class="panel no-print"><div class="panel-title"><div><h2>Scientist approval</h2><p class="muted">Approval is attached to this source, plan, setup, and simulation. Edits require another validation and approval.</p></div></div><div class="fields"><label class="field">Scientist name<input id="scientist" autocomplete="name" placeholder="Name of the reviewing scientist"></label><label class="field">Release basis<select id="qualification"><option value="qualification_run">Supervised qualification run</option><option value="previously_qualified">Previously qualified procedure</option><option value="scientist_reviewed_simulated">Scientist-reviewed adaptation after strict simulation</option></select></label><label class="field">Release rationale / review notes<textarea id="approval-notes" placeholder="Record the qualification reference or why this reviewed adaptation is suitable."></textarea></label></div><label class="check"><input id="plan-reviewed" type="checkbox"><span>I reviewed quantities, well mappings, timing, manual instructions, and the source references.</span></label><label class="check"><input id="deck-confirmed" type="checkbox"><span>I confirmed the physical deck, loaded tip types and freshness, head footprint, reagent volumes, and liquid methods.</span></label><label class="check" id="method-differences-label" hidden><input id="method-differences" type="checkbox"><span>I reviewed and accept the listed method differences and any fallback to separate aspirate/dispense pairs.</span></label><div class="actions"><button id="approve" class="primary">Approve this revision</button><button id="export" disabled>Open approved workflow in Designer</button></div><div id="approval-record" class="muted" style="font-size:12px;margin-top:12px"></div><div class="actions"><label class="field" style="min-width:260px">Approved library name<input id="publish-name" placeholder="Reusable, reviewed procedure name"></label><button id="publish" disabled>Add to protocol library</button></div></div>
 <div class="panel"><div class="panel-title"><h2>Revision &amp; correction history</h2></div><div id="history"></div></div>
 </section>
 <section id="library-view" role="tabpanel" aria-labelledby="tab-library" hidden><div class="panel"><div class="panel-title"><div><h2>Scientist-approved protocol library</h2><p class="muted">Reuse starts a new draft. Check the new experiment setup and repeat validation, simulation, and approval.</p></div><button id="refresh-library" class="small">Refresh library</button></div><div id="library" class="library-grid"><p class="muted">Loading the protocol library…</p></div></div></section>
@@ -53,7 +53,7 @@
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {session:null, context:{}, capabilities:null, setups:[], view:'source', dirty:false, busy:false, poll:null, sourceReviewedKey:null, setupRecommendations:null, setupRecommendationKey:null, setupRecommendationRequest:0, setupRecommendationTimer:null};
+const state = {session:null, context:{}, capabilities:null, setups:[], view:'source', dirty:false, busy:false, poll:null, sourceReviewedKey:null, methodPreview:null, methodPreviewKey:null, methodPreviewRequest:0, setupRecommendations:null, setupRecommendationKey:null, setupRecommendationRequest:0, setupRecommendationTimer:null};
 const clone = value => JSON.parse(JSON.stringify(value));
 // getRandomValues is also available on ordinary laboratory HTTP origins.
 const randomFragment = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), value => value.toString(16).padStart(2, '0')).join('');
@@ -84,14 +84,436 @@ function makeField(label,path,{type='text',options=null,help='',wide=false,min=n
 input.addEventListener('change',()=>{const raw=input.value.trim();const requiredString=/\/(name|description)$/.test(path);const next=type==='number'?(raw===''?null:Number(raw)):(requiredString?raw:raw||null);edit(path,next);});field.append(input);if(help)field.append(el('small',{},help));return field;}
 function catalogOptions(key){return [{value:'',label:'Select explicitly…'},...list(state.context[key==='tips'?'tip_definitions':key]).map(item=>({value:item.id??item.tip_id??item.name,label:item.name??item.display_name??item.id??item.tip_id}))];}
 function operationOptions(){
-    const labels={transfer:'Transfer (aspirate → dispense)',mix:'Mix',manual:'Manual handoff',wait:'Wait',move_plate:'Move plate',destack_plate:'Destack plate',stack_plate:'Stack plate',repeat:'Repeat'};
+    const labels={transfer:'Transfer (aspirate → dispense)',distribute:'Distribute (one aspirate → several dispenses)',mix:'Mix',manual:'Manual handoff',wait:'Wait',move_plate:'Move plate',destack_plate:'Destack plate',stack_plate:'Stack plate',repeat:'Repeat'};
     const choices=list(state.capabilities?.assistant_operations);
     return choices.length?choices.filter(item=>item.selectable===true).map(item=>({value:item.id,label:labels[item.id]||item.id})):
         Object.entries(labels).map(([value,label])=>({value,label}));
 }
 function materialOptions(role=null){return [{value:'',label:'Select material…'},...list(state.session?.plan?.materials).filter(item=>!role||item.role===role).map(item=>({value:item.id,label:`${item.name||item.id} (${item.id})`}))];}
+function methodQuery(step,rackId){
+    const plan=state.session?.plan,setup=state.session?.setup??{};
+    const materials=new Map(list(plan?.materials).map(item=>[item.id,item]));
+    const source=materials.get(step.kind==='mix'?step.material:step.source);
+    const rack=materials.get(rackId);
+    const targets=step.kind==='distribute'?list(step.dispenses).map(item=>materials.get(item.destination)):
+        step.kind==='mix'?[source]:[materials.get(step.destination)];
+    const targetTypes=[...new Set(targets.map(item=>item?.labware_id).filter(Boolean))];
+    const volume=step.kind==='distribute'?list(step.dispenses).reduce((sum,item)=>sum+Number(item.volume_ul||0),0):Number(step.volume_ul);
+    if(!source?.labware_id||!rack?.labware_id||!rack?.tip_definition_id||!volume||
+        (step.kind!=='mix'&&(!targets.length||targetTypes.length!==1||targets.some(item=>!item?.labware_id))))return null;
+    const full=setup.head_mode?.subset_type==='all_barrels';
+    return {operation:step.kind,tip_id:rack.tip_definition_id,tipbox_id:rack.labware_id,
+        source_labware_id:source.labware_id,destination_labware_id:step.kind==='mix'?null:targetTypes[0],
+        reagent_family:step.reagent_family||source.reagent_family||null,volume_ul:volume,
+        dispense_volumes_ul:step.kind==='distribute'?list(step.dispenses).map(item=>Number(item.volume_ul)):null,
+        source_anchor:full?(step.kind==='mix'?step.anchor:step.source_anchor):null,
+        destination_anchor:full&&step.kind==='transfer'?step.destination_anchor:null};
+}
+function suggestedMethodRack(step){
+    const plan=state.session?.plan,setup=state.session?.setup??{},racks=list(setup.tip_rack_ids);
+    if(racks.length===1)return racks[0];
+    if(setup.tip_strategy==='fresh_each_source'){
+        const sources=[...new Set(list(plan?.steps).filter(item=>['transfer','distribute'].includes(item.kind)).map(item=>item.source))];
+        if(racks.length===sources.length)return racks[sources.indexOf(step.source)]||'';
+    }
+    return '';
+}
+function methodClassChoices(registry,query){
+    return list(state.context.liquid_classes).map(row=>{
+        const id=row.liquid_class_id||row.id;
+        const imported=list(registry.methods).find(method=>method.method_id==='imported:'+id);
+        const ref=imported?.aspirate?.liquid_class_ref;
+        return id&&ref&&row.machine_id===state.context.machine_id&&row.head_type===state.context.head_type&&row.tip_id===query.tip_id?
+            {id,row,ref}:null;
+    }).filter(Boolean);
+}
+function methodNumber(label,value='',help=''){
+    const field=el('label',{class:'field'},label),input=el('input',{type:'number',min:0,step:'any'});
+    input.value=value==null?'':String(value);field.append(input);
+    if(help)field.append(el('small',{},help));
+    return {field,input};
+}
+function reviewedNumber(input,label){
+    const raw=input.value.trim(),value=Number(raw);
+    if(!raw||!Number.isFinite(value)||value<0)throw new Error(`Enter a finite, nonnegative ${label}. Use 0 only when that is the reviewed setting.`);
+    return value;
+}
+function methodBoolean(label,value){
+    const select=el('select',{},el('option',{value:''},'Select explicitly…'),
+        el('option',{value:'false'},'No'),el('option',{value:'true'},'Yes'));
+    select.value=value===true?'true':value===false?'false':'';
+    return {field:el('label',{class:'field'},label,select),select};
+}
+function reviewedBoolean(select,label){
+    if(!['true','false'].includes(select.value))throw new Error(`Select ${label} explicitly.`);
+    return select.value==='true';
+}
+function recordMethodSelection(path,selected,candidates,reason,selectionMode='scientist_choice'){
+    const offered=list(candidates).slice(0,6).map((item,index)=>({
+        method_id:item.method_id,revision:item.revision,rank:index+1,
+        match_kind:item.match_kind,execution_ready:Boolean(item.execution_ready),
+        mismatches:clone(list(item.mismatches))
+    }));
+    decide(path+'/method_selection',{selected:clone(selected),offered,selection_mode:selectionMode},reason);
+}
+function safeMethodSourceUrl(value){
+    if(!value)return null;
+    try{const url=new URL(value.trim());return ['http:','https:'].includes(url.protocol)?url.href:null;}
+    catch{return null;}
+}
+function methodEvidence(candidate){
+    const evidence=list(candidate.evidence);
+    const details=el('details',{},el('summary',{},`Supporting evidence (${evidence.length})`));
+    for(const item of evidence){
+        const href=safeMethodSourceUrl(item.source_url);
+        details.append(el('div',{class:'row-card',style:'margin-top:6px;overflow-wrap:anywhere'},
+            el('strong',{},item.source_type||'Unspecified source'),
+            item.reviewer?el('span',{class:'muted'},` · ${item.reviewer}`):null,
+            item.reviewed_at?el('span',{class:'muted'},` · reviewed ${item.reviewed_at}`):null,
+            item.retrieved_at?el('span',{class:'muted'},` · retrieved ${item.retrieved_at}`):null,
+            href?el('p',{},el('a',{href,target:'_blank',rel:'noopener noreferrer'},href)):null,
+            item.source_path?el('p',{class:'mono'},item.source_path):null,
+            item.note?el('p',{class:'muted'},item.note):null));
+    }
+    if(!evidence.length)details.append(el('p',{class:'muted'},'No supporting source is recorded.'));
+    return details;
+}
+function renderMethodCuration(candidate,query,path,candidates,container,registry){
+    const choices=methodClassChoices(registry,query),updating=['reviewed','qualified'].includes(candidate.status);
+    const form=el('form',{'data-method-curation':'true',class:'row-card',style:'margin-top:12px'});
+    form.append(el('h3',{},updating?'Review a new method version':'Create a reviewed method'),
+        el('p',{class:'muted'},'Every liquid setting and applicability choice below needs scientist review. This saves a reusable method, not a hardware qualification.'));
+    if(!choices.length){form.append(el('p',{class:'issue error'},'No active liquid class matches this machine, head and exact tip. Complete the liquid-class catalog before curating a method.'));container.append(form);return;}
+    const identity=el('div',{class:'fields'});
+    const idInput=el('input',{type:'text',maxlength:120});
+    idInput.value=updating?candidate.method_id:'method-'+randomFragment();
+    const currentVersion=(candidate.version||'1.0.0').split('.').map(Number);
+    const versionInput=el('input',{type:'text',placeholder:'1.0.0'});
+    versionInput.value=updating&&currentVersion.length===3?`${currentVersion[0]}.${currentVersion[1]}.${currentVersion[2]+1}`:'1.0.0';
+    const titleInput=el('input',{type:'text',maxlength:200});titleInput.value=updating?candidate.title||'':`${candidate.title||'Bravo transfer'} — reviewed`;
+    const reagentInput=el('input',{type:'text',placeholder:'aqueous, ethanol, viscous protein…'});
+    reagentInput.value=query.reagent_family||list(candidate.applicability?.reagent_families)[0]||'';
+    const requestedStroke=query.operation==='distribute'&&list(query.dispense_volumes_ul).length?
+        `Ordered aliquots: ${query.dispense_volumes_ul.join(' + ')} µL; combined total ${query.volume_ul} µL. The reviewed range is per aspiration/dispense stroke.`:
+        `This step requests ${query.volume_ul} µL per aspiration/dispense stroke.`;
+    const minVolume=methodNumber('Reviewed minimum per-stroke volume (µL)',updating?candidate.applicability?.min_volume_ul:'',`${requestedStroke} Enter the lowest reviewed stroke volume.`);
+    const maxVolume=methodNumber('Reviewed maximum per-stroke volume (µL)',updating?candidate.applicability?.max_volume_ul:'','Enter the highest reviewed single-stroke volume; for distribute, do not enter the combined total unless one aspiration actually uses it. Include air gaps in the effective tip-capacity check.');
+    const field=(label,input)=>el('label',{class:'field'},label,input);
+    identity.append(field('Method ID',idInput),field('Version',versionInput),field('Method title',titleInput),
+        field('Reagent family',reagentInput),minVolume.field,maxVolume.field);
+    form.append(identity,el('p',{class:'muted',style:'font-size:12px;margin:12px 0'},
+        `Active machine ${state.context.machine_id||'?'} · head ${state.context.head_type||'?'} · tip ${query.tip_id} · box ${query.tipbox_id} · source ${query.source_labware_id} · destination ${query.destination_labware_id||'same material'}. These identities come from this draft and its active catalog.`));
+    const tipPolicy=el('select',{},el('option',{value:''},'Select explicitly…'),
+        el('option',{value:'fresh_per_transfer'},'Fresh tip set for each transfer'),
+        el('option',{value:'fresh_per_source'},'Dedicated tip set for each source'),
+        el('option',{value:'reuse_within_source'},'Reuse only within one source'));
+    tipPolicy.value=candidate.tip_policy||'';
+    form.append(el('div',{class:'fields'},field('Tip use / contamination policy',tipPolicy)));
+    const phaseControls={};
+    for(const phase of ['aspirate','dispense']){
+        const prior=candidate[phase]||{},box=el('div',{class:'row-card',style:'margin-top:12px'});
+        const selector=el('select',{},el('option',{value:''},'Choose exact active liquid class…'),
+            ...choices.map(choice=>el('option',{value:choice.id},`${choice.row.name||choice.id} · ${choice.id}`)));
+        const priorId=prior.liquid_class_ref?.id;
+        if(choices.some(choice=>choice.id===priorId))selector.value=priorId;
+        else if(choices.length===1)selector.value=choices[0].id;
+        const numeric={};
+        const specs=phase==='aspirate'?[
+            ['distance_from_bottom_mm','Distance above source well bottom (mm)'],
+            ['pre_air_ul','Pre-aspirate air gap (µL)'],['post_air_ul','Post-aspirate air gap (µL)'],
+            ['dynamic_tip_extension','Dynamic tip extension (mm)']
+        ]:[
+            ['distance_from_bottom_mm','Distance above destination well bottom (mm)'],
+            ['blowout_ul','Blowout volume (µL)'],['dynamic_tip_retraction','Dynamic tip retraction (mm per µL)']
+        ];
+        const fields=el('div',{class:'fields'});
+        for(const [key,label] of specs){numeric[key]=methodNumber(label,prior[key]);fields.append(numeric[key].field);}
+        const touch=methodBoolean('Tip touch',prior.tip_touch);fields.append(touch.field);
+        const x=methodNumber('Well offset X (fraction of radius)',prior.well_offset?.x_fraction_of_well_radius,'Current compiler supports centered 0 only.');
+        const y=methodNumber('Well offset Y (fraction of radius)',prior.well_offset?.y_fraction_of_well_radius,'Current compiler supports centered 0 only.');
+        fields.append(x.field,y.field);
+        box.append(el('h3',{},phase==='aspirate'?'Aspirate settings':'Dispense settings'),
+            field('Pinned liquid class',selector),fields);
+        phaseControls[phase]={selector,numeric,touch:touch.select,x:x.input,y:y.input};
+        form.append(box);
+    }
+    const provenance=el('div',{class:'row-card',style:'margin-top:12px'});
+    form.append(provenance);
+    const attestations=new Map();
+    function showClassProvenance(){
+        provenance.replaceChildren(el('h3',{},'Liquid-class motion and provenance'),
+            el('p',{class:'muted'},'These values remain in the liquid-class catalog. Review the aspirate and dispense speeds and Z entry/exit motion below. A setting filled or inferred by software requires an individual attestation.'));
+        attestations.clear();
+        for(const id of [...new Set(Object.values(phaseControls).map(control=>control.selector.value).filter(Boolean))]){
+            const choice=choices.find(item=>item.id===id),origins=choice?.ref.source_field_origins||choice?.ref.field_origins||{};
+            if(!choice)continue;
+            provenance.append(el('strong',{},choice.row.name||id),el('small',{class:'muted',style:'display:block'},`Class ${id} · digest ${choice.ref.digest?.slice(0,12)||'missing'}`));
+            const table=el('div',{class:'table-wrap'},el('table',{},el('thead',{},el('tr',{},
+                el('th',{},'Setting'),el('th',{},'Current value'),el('th',{},'Source'),el('th',{},'Scientist attestation')))));
+            const body=el('tbody');
+            const inputs=new Map();
+            for(const [key,origin] of Object.entries(origins)){
+                const parts=key.split('.'),value=parts.length===2&&parts[0]==='equation'?
+                    textValue(choice.row.equation?.control_points):parts.length===2?
+                    textValue(choice.row[parts[0]]?.[parts[1]]):textValue(choice.row[key]);
+                const unknown=['normalizer_default_or_unknown','inferred_or_unknown'].includes(origin);
+                const check=unknown?el('input',{type:'checkbox','aria-label':`Verify ${key} for ${id}`}):null;
+                if(check)inputs.set(key,check);
+                body.append(el('tr',{},el('td',{},key),el('td',{class:'mono'},value),
+                    el('td',{},origin.replaceAll('_',' ')),el('td',{},check?el('label',{class:'check',style:'margin:0'},check,
+                        'I verified this exact value and its use with this tip'):'Recorded in class')));
+            }
+            table.querySelector('table').append(body);provenance.append(table);attestations.set(id,{origins,inputs});
+        }
+    }
+    for(const control of Object.values(phaseControls))control.selector.addEventListener('change',showClassProvenance);
+    showClassProvenance();
+    const reviewer=el('input',{type:'text',placeholder:'Scientist name'}),reviewDate=el('input',{type:'date'});
+    reviewDate.value=new Date().toISOString().slice(0,10);
+    const note=el('textarea',{placeholder:'State the source, why this class applies, and what you reviewed. Do not label it physically qualified without a qualification run.'});
+    const supportingUrl=el('input',{type:'text',placeholder:'https://vendor.example/method or paper (optional)'});
+    form.append(el('div',{class:'fields'},field('Reviewer',reviewer),field('Review date',reviewDate),
+        field('Source and review rationale',note),field('Supporting source URL (optional)',supportingUrl)));
+    const feedback=el('div',{role:'status','aria-live':'polite',class:'muted'});
+    const submit=el('button',{type:'submit',class:'primary'},updating?'Save reviewed version and use':'Save reviewed method and use');
+    form.append(el('div',{class:'actions'},submit),feedback);
+    form.addEventListener('submit',async event=>{
+        event.preventDefault();
+        try{
+            if(!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(idInput.value.trim()))throw new Error('Enter a stable method ID using letters, numbers, dots, underscores or hyphens.');
+            if(!/^\d+\.\d+\.\d+$/.test(versionInput.value.trim()))throw new Error('Enter a semantic version such as 1.0.0.');
+            if(!titleInput.value.trim()||!reagentInput.value.trim()||!reviewer.value.trim()||!reviewDate.value||!note.value.trim())
+                throw new Error('Method title, reagent family, reviewer, review date and source/rationale are required.');
+            const sourceUrl=supportingUrl.value.trim()?safeMethodSourceUrl(supportingUrl.value):null;
+            if(supportingUrl.value.trim()&&!sourceUrl)throw new Error('Supporting source URL must be an absolute http or https URL.');
+            if(!tipPolicy.value)throw new Error('Select the tip-use policy explicitly.');
+            const min=reviewedNumber(minVolume.input,'minimum method volume'),max=reviewedNumber(maxVolume.input,'maximum method volume');
+            if(max<=0||min>max)throw new Error('The reviewed volume range must have a positive maximum and minimum no greater than maximum.');
+            const phases={};
+            for(const [phase,control] of Object.entries(phaseControls)){
+                const choice=choices.find(item=>item.id===control.selector.value);
+                if(!choice)throw new Error(`Select an active ${phase} liquid class.`);
+                const provenanceRecord=attestations.get(choice.id),field_origins={};
+                for(const [key,checkbox] of provenanceRecord.inputs){
+                    if(!checkbox.checked)throw new Error(`Verify ${key} in liquid class ${choice.id}, or correct the class in the liquid-class editor.`);
+                    field_origins[key]=key==='tip_id'?'reviewed_inferred':'reviewed_default';
+                }
+                phases[phase]={liquid_class_ref:{id:choice.id,name:choice.row.name,digest:choice.ref.digest,field_origins},
+                    distance_from_bottom_mm:reviewedNumber(control.numeric.distance_from_bottom_mm.input,`${phase} height`),
+                    tip_touch:reviewedBoolean(control.touch,`${phase} tip touch`),
+                    well_offset:{x_fraction_of_well_radius:reviewedNumber(control.x,`${phase} X offset`),
+                        y_fraction_of_well_radius:reviewedNumber(control.y,`${phase} Y offset`)}};
+                if(phases[phase].well_offset.x_fraction_of_well_radius!==0||phases[phase].well_offset.y_fraction_of_well_radius!==0)
+                    throw new Error('Current method compiler supports centered 0 well offsets only.');
+                for(const [key,item] of Object.entries(control.numeric))if(key!=='distance_from_bottom_mm')
+                    phases[phase][key]=reviewedNumber(item.input,`${phase} ${key.replaceAll('_',' ')}`);
+            }
+            const method={method_id:idInput.value.trim(),version:versionInput.value.trim(),status:'reviewed',
+                title:titleInput.value.trim(),derived_from:{method_id:candidate.method_id,revision:candidate.revision},
+                applicability:{machine_ids:[state.context.machine_id],head_types:[state.context.head_type],
+                    tip_ids:[query.tip_id],tipbox_ids:[query.tipbox_id],source_labware_ids:[query.source_labware_id],
+                    destination_labware_ids:query.operation==='mix'?[]:[query.destination_labware_id],
+                    reagent_families:[reagentInput.value.trim()],operations:[query.operation],
+                    min_volume_ul:min,max_volume_ul:max},
+                aspirate:phases.aspirate,dispense:phases.dispense,tip_policy:tipPolicy.value,
+                evidence:[...list(candidate.evidence),{source_type:'local_review',reviewer:reviewer.value.trim(),
+                    reviewed_at:reviewDate.value,note:note.value.trim()},
+                    ...(sourceUrl?[{source_type:'publication',source_url:sourceUrl,
+                        note:'Scientist-supplied supporting source; local qualification is not implied.'}]:[])]};
+            submit.disabled=true;feedback.textContent='Saving reviewed method…';
+            const saved=await api('/methods',{method:'POST',body:JSON.stringify({method,
+                expected_registry_digest:registry.digest,
+                expected_method_revision:updating?candidate.revision:null})});
+            const [context,capabilities,newRegistry]=await Promise.all([api('/context'),api('/capabilities'),api('/methods')]);
+            state.context=context;state.capabilities=capabilities;state.methodsRegistry=newRegistry;
+            const alternatives=list(candidates).filter(item=>item.method_id!==candidate.method_id).slice(0,5)
+                .map(item=>`${item.method_id} (${item.execution_ready?'not selected':list(item.missing_fields).join(', ')||'incomplete'})`);
+            const selected={method_id:saved.method_id,revision:saved.revision};
+            const selectionReason=`Scientist ${reviewer.value.trim()} curated ${saved.method_id} from ${candidate.method_id}: ${note.value.trim()}. Other displayed candidates were not selected: ${alternatives.join('; ')||'none'}.`;
+            edit(path+'/method_ref',selected,{rerender:true});
+            decide(path+'/method_ref',selected,selectionReason);
+            recordMethodSelection(path,selected,candidates,selectionReason);
+            notify('Reviewed method saved and pinned to this draft. Save the protocol, then validate and strictly simulate before approval.');
+        }catch(error){feedback.textContent=error.message;feedback.className='notice error';}
+        finally{submit.disabled=false;}
+    });
+    container.replaceChildren(form);
+}
+function renderMethodSelection(step,path){
+    const panel=el('div',{class:'row-card',style:'grid-column:1/-1;margin:12px 0 0'},
+        el('h3',{},'Liquid-handling method'),
+        el('p',{class:'muted',style:'font-size:12px'},'Choose a versioned method for this action. The resolver checks the active head, tip, box, plate and volume; simulation remains required.'));
+    if(step.method_ref){
+        panel.append(el('p',{},'Pinned: ',el('code',{},step.method_ref.method_id+' · '+step.method_ref.revision.slice(0,12))),
+            el('button',{class:'small',onclick:()=>edit(path+'/method_ref',null,{rerender:true})},'Clear method'));
+        const method=list(state.methodsRegistry?.methods).find(item=>item.method_id===step.method_ref.method_id
+            &&item.revision===step.method_ref.revision);
+        if(method){
+            const aspirate=method.aspirate||{},dispense=method.dispense||{};
+            panel.append(el('details',{},el('summary',{},'Pinned per-step liquid settings'),
+                el('p',{class:'muted'},`Aspirate: ${aspirate.liquid_class_ref?.name||aspirate.liquid_class_ref?.id||'class missing'}; `+
+                    `${aspirate.distance_from_bottom_mm??'?'} mm above source bottom; `+
+                    `pre/post air ${aspirate.pre_air_ul??'?'} / ${aspirate.post_air_ul??'?'} µL; `+
+                    `dynamic extension ${aspirate.dynamic_tip_extension??'?'} mm; tip touch ${aspirate.tip_touch??'unset'}.`),
+                el('p',{class:'muted'},`Dispense: ${dispense.liquid_class_ref?.name||dispense.liquid_class_ref?.id||'class missing'}; `+
+                    `${dispense.distance_from_bottom_mm??'?'} mm above destination bottom; `+
+                    `blowout ${dispense.blowout_ul??'?'} µL; `+
+                    `dynamic retraction ${dispense.dynamic_tip_retraction??'?'} mm/µL; tip touch ${dispense.tip_touch??'unset'}.`),
+                el('p',{class:'muted'},`Tip policy: ${method.tip_policy||'unspecified'} · status ${method.status}.`)));
+        }else panel.append(el('p',{class:'issue error'},'Pinned method revision is not in the active registry. Reload and validate before use.'));
+    }
+    const available=list(state.session?.setup?.tip_rack_ids).map(id=>list(state.session?.plan?.materials).find(item=>item.id===id)).filter(Boolean);
+    const racks=available.length?available:list(state.session?.plan?.materials).filter(item=>item.role==='tips');
+    const rackField=el('label',{class:'field',style:'max-width:360px;margin-top:10px'},'Tip rack for lookup');
+    const rackSelect=el('select',{},el('option',{value:''},'Select the rack used for this action'),
+        ...racks.map(item=>el('option',{value:item.id},item.name||item.id)));
+    rackSelect.value=suggestedMethodRack(step);
+    rackField.append(rackSelect);
+    const result=el('div',{class:'muted',style:'margin-top:10px;font-size:12px'});
+    const button=el('button',{class:'small',onclick:async()=>{
+        const query=methodQuery(step,rackSelect.value);
+        if(!query){result.textContent='Complete the source, destination, volume, reagent material and selected tip rack before lookup.';return;}
+        button.disabled=true;result.textContent='Checking applicable methods…';
+        try{
+            const response=await api('/methods/lookup',{method:'POST',body:JSON.stringify(query)});
+            result.replaceChildren();
+            const curationHost=el('div',{class:'method-curation-host'});
+            for(const issue of list(response.issues))result.append(el('p',{class:'issue error'},issue.reason||issue.field));
+            if(response.shared_aspiration_feasible===false)result.append(el('p',{class:'issue warn'},
+                'The combined volume exceeds one tip/head stroke. Separate aspirate and dispense pairs are needed; validation and simulation will check the reviewed method and capacity.'));
+            for(const candidate of list(response.candidates).slice(0,6)){
+                const differences=list(candidate.mismatches).map(item=>`${item.field}: ${item.reason}`);
+                const card=el('div',{class:'row-card'},el('strong',{},candidate.title||candidate.method_id),
+                    el('span',{class:'badge'+(candidate.execution_ready?' good':' warn'),style:'margin-left:8px'},
+                        candidate.execution_ready?(candidate.match_kind==='exact'?'Exact match':'Closest compatible method'):'Not ready to run'),
+                    el('p',{class:'muted',style:'margin-top:6px'},candidate.method_id+' · version '+candidate.version+' · status '+candidate.status),
+                    el('p',{},differences.length?'Differences: '+differences.join('; '):'All recorded applicability fields match.'),
+                    !candidate.execution_ready?el('p',{class:'muted'},'Incomplete: '+list(candidate.missing_fields).join(', ')):null,
+                    methodEvidence(candidate),
+                    el('button',{class:'small',disabled:!candidate.execution_ready,onclick:()=>{
+                        edit(path+'/method_ref',candidate.method_ref,{rerender:true});
+                        const alternatives=list(response.candidates).filter(item=>item.method_id!==candidate.method_id).slice(0,5)
+                            .map(item=>`${item.method_id} (${item.execution_ready?'not selected':list(item.missing_fields).join(', ')||'incomplete'})`);
+                        const correction=$('correction-reason').value.trim();
+                        const selectionReason=`Scientist selected ${candidate.method_id}; other displayed candidates were not selected: ${alternatives.join('; ')||'none'}.${correction?' Reason: '+correction:''}`;
+                        decide(path+'/method_ref',candidate.method_ref,selectionReason);
+                        recordMethodSelection(path,candidate.method_ref,response.candidates,selectionReason);
+                        notify('Method pinned to this draft. Review any differences, then validate and simulate.');
+                    }},candidate.execution_ready?'Use this method':'Not ready to use'),
+                    el('button',{class:'small',style:'margin-left:8px',onclick:async()=>{
+                        try{
+                            const registry=await api('/methods');
+                            if(registry.digest!==response.registry_digest)throw new Error('The method registry changed. Search again before reviewing.');
+                            state.methodsRegistry=registry;
+                            renderMethodCuration(candidate,query,path,response.candidates,curationHost,registry);
+                            curationHost.scrollIntoView({behavior:'smooth',block:'start'});
+                        }catch(error){notify(error.message,true);}
+                    }},['reviewed','qualified'].includes(candidate.status)?'Review new version':'Review as new method'));
+                result.append(card);
+            }
+            if(list(response.candidates).length)result.append(curationHost);
+            if(!list(response.issues).length&&!list(response.candidates).length)result.textContent='No compatible method is recorded for this active setup.';
+        }catch(error){result.textContent=error.message;}finally{button.disabled=false;}
+    }},'Find applicable methods');
+    panel.append(rackField,el('div',{class:'actions'},button),result);
+    return panel;
+}
+function renderMethodPreview(){
+    const panel=$('method-preview'),plan=state.session?.plan;
+    if(!panel)return;
+    panel.hidden=!plan;
+    if(!plan)return;
+    panel.replaceChildren(el('h3',{},'Automatic method proposals'),
+        el('p',{class:'muted',style:'font-size:12px'},
+            'Read-only lookup of the saved plan. No method is pinned here; review each step or use Suggest liquid methods to apply proposals.'));
+    const preview=state.methodPreview;
+    if(!preview||preview.status==='loading'){
+        panel.append(el('p',{class:'muted'},'Checking complete liquid steps against the active method registry…'));
+        return;
+    }
+    if(state.dirty)panel.append(el('p',{class:'muted'},'This summary is for the last saved plan. Save edits to refresh it.'));
+    if(!preview.items.length){panel.append(el('p',{class:'muted'},'No liquid steps are present.'));return;}
+    for(const item of preview.items){
+        const label=`${item.path} · ${item.description||item.kind}`;
+        const explanation=item.status==='pinned'?`Pinned ${item.method_id}; inspect its per-step settings below.`:
+            item.status==='incomplete'?'Needs source, destination, volume, and a selected tip rack before lookup.':
+            item.status==='error'?`Lookup unavailable: ${item.message}`:
+            item.status==='needs_curation'?`Needs a reviewed method. ${item.message||'No execution-ready candidate is recorded.'}`:
+            `Review candidate ${item.method_id} (${item.match_kind==='exact'?'exact applicability':'closest compatible'}). ${item.message||''}`;
+        panel.append(el('p',{style:'margin:7px 0'},el('strong',{},label),` — ${explanation}`));
+    }
+}
+async function refreshMethodPreview(){
+    const plan=state.session?.plan;
+    if(!plan){state.methodPreview=null;state.methodPreviewKey=null;renderMethodPreview();return;}
+    const key=JSON.stringify([state.session.id,plan.steps,plan.materials,state.session.setup,
+        state.capabilities?.context_hash,state.methodsRegistry?.digest]);
+    if(key===state.methodPreviewKey)return;
+    state.methodPreviewKey=key;
+    const request=++state.methodPreviewRequest,items=[];
+    function visit(steps,base){
+        for(const [index,step] of list(steps).entries()){
+            const path=`${base}/${index}`;
+            if(step.kind==='repeat'){visit(step.steps,path+'/steps');continue;}
+            if(!['transfer','distribute','mix'].includes(step.kind))continue;
+            const item={path,description:step.description,kind:step.kind};
+            if(step.method_ref){items.push({...item,status:'pinned',method_id:step.method_ref.method_id});continue;}
+            const query=methodQuery(step,suggestedMethodRack(step));
+            items.push(query?{...item,status:'pending',query}:{...item,status:'incomplete'});
+        }
+    }
+    visit(plan.steps,'/steps');
+    state.methodPreview={status:'loading',items};renderMethodPreview();
+    const requests=new Map();
+    for(const item of items)if(item.query){
+        const identity=JSON.stringify(item.query);
+        if(!requests.has(identity))requests.set(identity,api('/methods/lookup',
+            {method:'POST',body:JSON.stringify(item.query)}).then(value=>({value}),error=>({error})));
+    }
+    await Promise.all(requests.values());
+    if(request!==state.methodPreviewRequest||key!==state.methodPreviewKey)return;
+    for(const item of items){
+        if(!item.query)continue;
+        const response=await requests.get(JSON.stringify(item.query));
+        delete item.query;
+        if(response.error){item.status='error';item.message=response.error.message;continue;}
+        const report=response.value,candidate=list(report.candidates).find(row=>row.execution_ready);
+        if(list(report.issues).length){item.status='needs_curation';item.message=list(report.issues).map(row=>row.reason||row.field).join('; ');}
+        else if(candidate){item.status='candidate';item.method_id=candidate.method_id;item.match_kind=candidate.match_kind;
+            item.message=list(candidate.mismatches).length?`Differences: ${candidate.mismatches.map(row=>row.field).join(', ')}.`:'';}
+        else{item.status='needs_curation';item.message=list(report.candidates).length?
+            'Only incomplete reference or imported records are available.':'No compatible method is recorded.';}
+    }
+    state.methodPreview={status:'ready',items};renderMethodPreview();
+}
+async function suggestMethods(){
+    const plan=state.session?.plan;
+    if(!plan)return;
+    let applied=0,closest=0,unresolved=0;
+    const visit=async(steps,base)=>{
+        for(const [index,step] of list(steps).entries()){
+            const path=`${base}/${index}`;
+            if(step.kind==='repeat'){await visit(step.steps,path+'/steps');continue;}
+            if(!['transfer','distribute','mix'].includes(step.kind)||step.method_ref)continue;
+            const query=methodQuery(step,suggestedMethodRack(step));
+            if(!query){unresolved++;continue;}
+            const report=await api('/methods/lookup',{method:'POST',body:JSON.stringify(query)});
+            const candidate=list(report.candidates).find(item=>item.execution_ready);
+            if(!candidate){unresolved++;continue;}
+            step.method_ref=clone(candidate.method_ref);
+            const reason=`Scientist invoked bulk method suggestion; the resolver proposed ${candidate.method_id}. This step still needs individual review, validation, and simulation.`;
+            decide(path+'/method_ref',candidate.method_ref,reason);
+            recordMethodSelection(path,candidate.method_ref,report.candidates,reason,'bulk_proposal');
+            applied++;
+            if(candidate.match_kind!=='exact')closest++;
+        }
+    };
+    await visit(plan.steps,'/steps');
+    if(applied){dirty();renderPlan();}
+    notify(`${applied} method${applied===1?'':'s'} proposed${closest?` (${closest} closest matches require difference review)`:''}; ${unresolved} action${unresolved===1?'':'s'} still need catalog or method information. Save, validate and simulate before approval.`);
+}
 function planSkeleton(){return {schema_version:'1',name:state.session?.name||$('protocol-name').value.trim()||'Untitled protocol',description:'',materials:[],steps:[],decisions:[],questions:[]};}
-function acceptSession(data){const session=data.session??data;if(!session.id)throw new Error('The server did not return a protocol session.');if(state.session?.id!==session.id||state.session?.revision!==session.revision){$('plan-reviewed').checked=false;$('deck-confirmed').checked=false;}state.session=session;state.dirty=false;localStorage.setItem('pybravo-protocol-session',session.id);const url=new URL(location.href);url.searchParams.set('session',session.id);history.replaceState(null,'',url);render();schedulePoll();}
+function acceptSession(data){const session=data.session??data;if(!session.id)throw new Error('The server did not return a protocol session.');if(state.session?.id!==session.id||state.session?.revision!==session.revision){$('plan-reviewed').checked=false;$('deck-confirmed').checked=false;}state.session=session;state.dirty=false;localStorage.setItem('pybravo-protocol-session',session.id);const url=new URL(location.href);url.searchParams.set('session',session.id);history.replaceState(null,'',url);render();refreshMethodPreview();schedulePoll();}
 async function save(){
     if(!state.session||!state.dirty)return;
     const invalid=[...document.querySelectorAll('input,textarea,select')].find(input=>{const disabled=input.disabled;input.disabled=false;const valid=input.checkValidity();input.disabled=disabled;return !valid;});
@@ -101,7 +523,7 @@ async function save(){
     acceptSession(await api('/'+encodeURIComponent(state.session.id),{method:'PATCH',body:JSON.stringify(payload)}));
 }
 
-function render(){const s=state.session;$('session-bar').hidden=!s;$('source-panel').hidden=!s;$('session-name').textContent=s?.plan?.name||s?.name||'Prepare a protocol for Bravo';if(s){$('protocol-name').value=s.name||s.plan?.name||'';$('publish-name').value=s.plan?.name||s.name||'';$('source-reviewed').checked=state.sourceReviewedKey===reviewKey();renderSource();}renderSetup();renderPlan();renderReview();gates();}
+function render(){const s=state.session;$('session-bar').hidden=!s;$('source-panel').hidden=!s;$('session-name').textContent=s?.plan?.name||s?.name||'Prepare a protocol for Bravo';if(s){$('protocol-name').value=s.name||s.plan?.name||'';$('publish-name').value=s.plan?.name||s.name||'';$('source-reviewed').checked=state.sourceReviewedKey===reviewKey();renderSource();}renderSetup();renderPlan();renderMethodPreview();renderReview();gates();}
 function renderSource(){const s=state.session;$('original-pdf').hidden=!s.source?.metadata?.original_pdf;$('original-pdf').href='/api/protocols/'+encodeURIComponent(s.id)+'/source-pdf';const paragraphs=list(s.source?.paragraphs);if(!s.selected_paragraph_ids)s.selected_paragraph_ids=paragraphs.map(item=>item.id);const selected=new Set(s.selected_paragraph_ids);$('source-description').textContent=`${paragraphs.length} passages · ${selected.size} selected${s.source?.name?' · '+s.source.name:''}`;$('source-paragraphs').replaceChildren(...paragraphs.map(p=>{const checkbox=el('input',{type:'checkbox',checked:selected.has(p.id),'aria-label':`Include ${p.id}${p.page?' on page '+p.page:''}`});checkbox.addEventListener('change',()=>{const chosen=new Set(s.selected_paragraph_ids);checkbox.checked?chosen.add(p.id):chosen.delete(p.id);s.selected_paragraph_ids=[...chosen];sourceSelectionChanged();});return el('label',{class:'source-row',id:'source-'+p.id},checkbox,el('span',{},el('span',{class:'source-meta'},`${p.id}${p.page?' · Page '+p.page:''}`),el('span',{class:'source-text'},p.text)));}));}
 function planningOnlyTipboxChoice(choice){return choice.execution_ready===false&&Array.isArray(choice.missing_metadata)&&choice.missing_metadata.length===1&&choice.missing_metadata[0]==='tip_length';}
 function verifiedTipboxChoices(){
@@ -216,6 +638,7 @@ function renderTipRackOrder(session){
     return panel;
 }
 const SETUP_LABELS={'/setup/head_mode':'Head footprint and corner','/setup/tip_strategy':'Tip strategy','/setup/tip_rack_ids':'Tip rack order','/setup/tip_disposal_id':'Tip disposal','/setup/liquid_class':'Liquid class','/setup/distance_from_bottom_mm':'Pipetting height','/setup/tip_reuse_reason':'Tip reuse assessment'};
+function recommendationRoot(path){return path.startsWith('/materials/')||path.startsWith('/steps/')?state.session?.plan:state.session;}
 function setupChoiceLabel(path){
     if(SETUP_LABELS[path])return SETUP_LABELS[path];
     const tipInventory=String(path||'').match(/^\/materials\/(\d+)\/available_tips$/);
@@ -223,6 +646,8 @@ function setupChoiceLabel(path){
         const material=state.session?.plan?.materials?.[Number(tipInventory[1])];
         return `Tip inventory · ${material?.name||material?.id||'rack '+tipInventory[1]}`;
     }
+    const deck=String(path||'').match(/^\/materials\/(\d+)\/deck_slot$/);
+    if(deck){const material=state.session?.plan?.materials?.[Number(deck[1])];return `Deck position · ${material?.name||material?.id||'material '+deck[1]}`;}
     return path||'Setup choice';
 }
 function suggestedValue(row){
@@ -238,6 +663,25 @@ function suggestedValue(row){
     }
     return textValue(row.value);
 }
+function renderRuntimeSnapshot(snapshot){
+    const panel=el('div',{class:'row-card',style:'margin:10px 0'},
+        el('strong',{},'Software-known deck and tip state'),
+        el('p',{class:'muted',style:'font-size:12px;margin:6px 0'},
+            'Advisory only: this is the controller’s software state, not a physically verified load. Inspect the deck and tip boxes before a run.'));
+    if(snapshot?.status!=='software_known_unverified'){
+        panel.append(el('p',{class:'muted'},'A controller software snapshot is unavailable.'));
+        return panel;
+    }
+    const occupied=list(snapshot.occupied_slots);
+    panel.append(el('p',{class:'muted'},occupied.length?
+        'Software-occupied positions: '+occupied.map(item=>`${item.slot} (${list(item.labware_names).join(', ')||'identity unknown'})`).join('; ')+'.':
+        'The controller reports no occupied positions. This does not prove the deck is empty.'));
+    const tips=list(snapshot.tipbox_inventory);
+    if(tips.length)panel.append(el('p',{class:'muted'},'Software tip-box counts: '+tips.map(item=>
+        `position ${item.slot} ${item.labware_name||'tip box'}${item.tip_id?' · '+item.tip_id:''}: `+
+        `${item.software_occupied_count??'?'} occupied${item.well_count?' of '+item.well_count:''} wells`).join('; ')+'.'));
+    return panel;
+}
 function renderSetupRecommendations(){
     const panel=$('setup-recommendations');
     if(!state.session?.plan||!state.capabilities){panel.hidden=true;return;}
@@ -247,8 +691,23 @@ function renderSetupRecommendations(){
     if(data.error){panel.append(el('p',{class:'muted'},'Recommendations are unavailable: '+data.error));return;}
     if(data.context_hash!==state.capabilities.context_hash){panel.append(el('p',{class:'muted'},'Instrument options changed. Refreshing the catalog before showing recommendations…'));return;}
     panel.append(el('p',{class:'muted',style:'font-size:12px'},'These are review-draft choices. Applying one does not validate or approve the experiment.'));
+    panel.append(renderRuntimeSnapshot(data.runtime_snapshot));
+    const deckRows=list(data.recommendations).filter(row=>/^\/materials\/\d+\/deck_slot$/.test(row.path));
+    if(deckRows.length)panel.append(el('button',{class:'small',onclick:()=>{
+        if(state.busy||!state.session?.plan)return;
+        let applied=0;
+        for(const row of deckRows){
+            const root=recommendationRoot(row.path),current=pointerGet(root,row.path);
+            if(current!=null&&current!=='')continue;
+            pointerSet(root,row.path,clone(row.value));
+            decide(row.path,row.value,`Accepted deck-slot proposal ${row.rule_id}; physical deck confirmation is still required`);
+            applied++;
+        }
+        if(applied){dirty();renderPlan();}
+        notify(`${applied} deck position${applied===1?'':'s'} added to the draft. Confirm the physical placement before approval.`);
+    }},'Apply all proposed deck positions'));
     for(const row of list(data.recommendations)){
-        const current=pointerGet(state.session,row.path);
+        const current=pointerGet(recommendationRoot(row.path),row.path);
         const same=JSON.stringify(current)===JSON.stringify(row.value);
         const conflict=current!=null&&current!==''&&!same;
         const block=el('div',{class:'setup-recommendation'},
@@ -263,11 +722,11 @@ function renderSetupRecommendations(){
         }
         block.append(el('div',{class:'actions',style:'margin-top:8px'},el('button',{type:'button',class:'small',disabled:state.busy||same||conflict,onclick:()=>{
             if(state.busy||!state.session?.plan)return;
-            const present=pointerGet(state.session,row.path);
+            const present=pointerGet(recommendationRoot(row.path),row.path);
             if(present!=null&&present!==''&&JSON.stringify(present)!==JSON.stringify(row.value))return;
-            pointerSet(state.session,row.path,clone(row.value));
+            pointerSet(recommendationRoot(row.path),row.path,clone(row.value));
             decide(row.path,row.value,`Accepted Bravo capability rule ${row.rule_id} as a draft choice; scientific review still required`);
-            dirty();renderSetup();renderQuestions();renderReview();
+            dirty();renderPlan();
             notify(`${setupChoiceLabel(row.path)} added to the draft. Review it and validate before approval.`);
         }},same?'Already selected':conflict?'Current choice differs':'Use in draft')));
         if(conflict)block.append(el('small',{class:'muted'},'A different choice is already selected. Change it directly if needed.'));
@@ -362,13 +821,29 @@ function renderSetup(){
     const columns=makeField('Footprint columns','/setup/head_mode/column_count',{type:'number',min:selectedMode?.column_count_range?.[0]??1,max:selectedMode?.column_count_range?.[1]??null,placeholder:geometry.columns?`${geometry.columns} derived from head`:''});
     rows.querySelector('input').disabled=!selectedMode?.required_fields?.includes('row_count');
     columns.querySelector('input').disabled=!selectedMode?.required_fields?.includes('column_count');
+    const liquidSteps=[];
+    function collectLiquid(steps){for(const step of list(steps)){
+        if(step.kind==='repeat')collectLiquid(step.steps);
+        else if(['transfer','distribute','mix'].includes(step.kind))liquidSteps.push(step);
+    }}
+    collectLiquid(s.plan?.steps);
+    const allMethodPinned=liquidSteps.length>0&&liquidSteps.every(step=>step.method_ref);
+    const fallbackFields=[
+        makeField('Fallback liquid class (steps without a method)','/setup/liquid_class',
+            {options:catalogOptions('liquid_classes'),help:'Used only for liquid steps without a pinned method. A per-step method supplies its own aspirate and dispense classes.'}),
+        makeField('Fallback distance from well bottom (mm)','/setup/distance_from_bottom_mm',
+            {type:'number',min:0,help:'Used only for steps without a pinned method; reviewed per-step methods specify their own heights.'}),
+    ];
+    const fallback=allMethodPinned?
+        el('details',{class:'wide'},el('summary',{},'Legacy liquid settings (unused while every liquid step has a method)'),
+            el('div',{class:'fields',style:'margin-top:10px'},...fallbackFields)):
+        el('div',{class:'fields wide'},...fallbackFields);
     const fields=[
         makeField('Setup name','/setup/name'),
         makeField('Head footprint','/setup/head_mode/subset_type',{options:[{value:'',label:'Select explicitly…'},...modeChoices]}),
         makeField('Head corner','/setup/head_mode/subset_config',{options:[{value:'',label:'Select explicitly…'},...cornerChoices]}),
         rows,columns,
-        makeField('Liquid class','/setup/liquid_class',{options:catalogOptions('liquid_classes'),help:'Select a class qualified for this fluid, tip, and active head.'}),
-        makeField('Distance from well bottom (mm)','/setup/distance_from_bottom_mm',{type:'number',min:0,help:'Well depth bounds this value, but does not determine a qualified pipetting height.'}),
+        fallback,
         makeField('Tip strategy','/setup/tip_strategy',{options:[{value:'',label:'Select explicitly…'},...strategyChoices]}),
         makeField('Tip reuse / contamination assessment','/setup/tip_reuse_reason',{help:'If tips are reused within a source, document why the path between destinations avoids unacceptable carryover.'}),
         makeField('Tip disposal','/setup/tip_disposal_id',{options:disposalOptions,help:'Returned tips are spent and cannot be selected again. Waste choices must be real waste materials.'}),
@@ -385,7 +860,7 @@ function verifiedFullTipCount(material){
     return Number.isInteger(rows)&&Number.isInteger(cols)&&rows>0&&cols>0
         &&rows*cols===wells&&wells<=1536 ? wells : null;
 }
-function renderPlan(){const plan=state.session?.plan;$('plan-content').hidden=!plan;$('no-plan').hidden=!!plan;if(!plan)return;const materialCards=list(plan.materials).map((m,index)=>{const base='/materials/'+index;const role=makeField('Role',base+'/role',{options:[{value:'liquid',label:'Liquid / plate'},{value:'tips',label:'Tips'},{value:'waste',label:'Waste'}]});role.querySelector('select').addEventListener('change',()=>{renderPlan();renderSetup();});const grid=el('div',{class:'fields four'},makeField('Material name',base+'/name'),role,makeField('Labware',base+'/labware_id',{options:catalogOptions('labware')}),makeField('Deck position',base+'/deck_slot',{type:'number',min:1,max:9,step:1}));if(m.role==='liquid')grid.append(makeField('Stack level',base+'/stack_order',{type:'number',min:0,step:1,help:'For plates sharing one position: bottom = 0, then 1, 2, 3. Leave blank for a single plate.'}));if(m.role==='liquid')grid.append(makeField('Starting volume per well (µL)',base+'/initial_volume_ul',{type:'number',min:0}),makeField('Dead volume per well (µL)',base+'/dead_volume_ul',{type:'number',min:0}));if(m.role==='tips')grid.append(makeField('Tip definition',base+'/tip_definition_id',{options:catalogOptions('tips')}));const advanced=el('details',{},el('summary',{},'Well-specific supply and source details'));if(m.role==='liquid'){const label=el('label',{class:'field'},'Starting volume overrides (one well: µL per line)');const input=el('textarea',{'aria-label':'Well volume overrides for '+m.name,placeholder:'A1: 500\nB1: 500'});input.value=Object.entries(m.well_volumes_ul??{}).map(([well,volume])=>`${well}: ${volume}`).join('\n');input.addEventListener('change',()=>{try{const values={};for(const line of input.value.split('\n').filter(value=>value.trim())){const match=line.match(/^\s*([A-Za-z]+\d+)\s*:\s*(\d+(?:\.\d+)?)\s*$/);if(!match)throw new Error('Use one well and non-negative volume per line, such as A1: 500.');values[match[1].toUpperCase()]=Number(match[2]);}input.setCustomValidity('');edit(base+'/well_volumes_ul',values);}catch(error){input.setCustomValidity(error.message);input.reportValidity();}});label.append(input);advanced.append(label);}if(m.role==='tips'){const label=el('label',{class:'field'},'Available tip wells (comma separated; full means inspected full; blank means unspecified)');const input=el('input',{placeholder:'A1, B1, C1','aria-label':'Available tips for '+m.name});input.value=m.available_tips==='full'?'full':list(m.available_tips).join(', ');input.addEventListener('change',()=>{const value=input.value.trim();edit(base+'/available_tips',value.toLowerCase()==='full'?'full':value?value.split(/[\s,]+/).filter(Boolean).map(x=>x.toUpperCase()):null);});label.append(input);advanced.append(label);}const fullCount=m.role==='tips'?verifiedFullTipCount(m):null;
+function renderPlan(){const plan=state.session?.plan;$('plan-content').hidden=!plan;$('no-plan').hidden=!!plan;if(!plan)return;const materialCards=list(plan.materials).map((m,index)=>{const base='/materials/'+index;const role=makeField('Role',base+'/role',{options:[{value:'liquid',label:'Liquid / plate'},{value:'tips',label:'Tips'},{value:'waste',label:'Waste'}]});role.querySelector('select').addEventListener('change',()=>{renderPlan();renderSetup();});const grid=el('div',{class:'fields four'},makeField('Material name',base+'/name'),role,makeField('Labware',base+'/labware_id',{options:catalogOptions('labware')}),makeField('Deck position',base+'/deck_slot',{type:'number',min:1,max:9,step:1}));if(m.role==='liquid')grid.append(makeField('Stack level',base+'/stack_order',{type:'number',min:0,step:1,help:'For plates sharing one position: bottom = 0, then 1, 2, 3. Leave blank for a single plate.'}));if(m.role==='liquid')grid.append(makeField('Reagent identity',base+'/reagent_id',{placeholder:'e.g. buffer A'}),makeField('Reagent family',base+'/reagent_family',{placeholder:'e.g. aqueous, viscous, volatile'}));if(m.role==='liquid')grid.append(makeField('Starting volume per well (µL)',base+'/initial_volume_ul',{type:'number',min:0}),makeField('Dead volume per well (µL)',base+'/dead_volume_ul',{type:'number',min:0}));if(m.role==='tips')grid.append(makeField('Tip definition',base+'/tip_definition_id',{options:catalogOptions('tips')}));const advanced=el('details',{},el('summary',{},'Well-specific supply and source details'));if(m.role==='liquid'){const label=el('label',{class:'field'},'Starting volume overrides (one well: µL per line)');const input=el('textarea',{'aria-label':'Well volume overrides for '+m.name,placeholder:'A1: 500\nB1: 500'});input.value=Object.entries(m.well_volumes_ul??{}).map(([well,volume])=>`${well}: ${volume}`).join('\n');input.addEventListener('change',()=>{try{const values={};for(const line of input.value.split('\n').filter(value=>value.trim())){const match=line.match(/^\s*([A-Za-z]+\d+)\s*:\s*(\d+(?:\.\d+)?)\s*$/);if(!match)throw new Error('Use one well and non-negative volume per line, such as A1: 500.');values[match[1].toUpperCase()]=Number(match[2]);}input.setCustomValidity('');edit(base+'/well_volumes_ul',values);}catch(error){input.setCustomValidity(error.message);input.reportValidity();}});label.append(input);advanced.append(label);}if(m.role==='tips'){const label=el('label',{class:'field'},'Available tip wells (comma separated; full means inspected full; blank means unspecified)');const input=el('input',{placeholder:'A1, B1, C1','aria-label':'Available tips for '+m.name});input.value=m.available_tips==='full'?'full':list(m.available_tips).join(', ');input.addEventListener('change',()=>{const value=input.value.trim();edit(base+'/available_tips',value.toLowerCase()==='full'?'full':value?value.split(/[\s,]+/).filter(Boolean).map(x=>x.toUpperCase()):null);});label.append(input);advanced.append(label);}const fullCount=m.role==='tips'?verifiedFullTipCount(m):null;
 const inventoryAction=m.role==='tips'?el('div',{class:'actions'},
     el('button',{type:'button',class:'small',disabled:!fullCount,onclick:()=>{
         if(!fullCount)return;
@@ -396,8 +871,8 @@ const inventoryAction=m.role==='tips'?el('div',{class:'actions'},
     el('span',{class:'muted',style:'font-size:11px'},fullCount
         ? 'Use only after confirming every well in this physical rack contains the selected tip.'
         : 'Select a verified rack / tip pair before recording a full inventory.')):null;
-const remove=el('button',{class:'small danger',onclick:()=>{plan.materials.splice(index,1);decide('/materials',plan.materials);dirty();renderPlan();renderSetup();}},'Remove');return el('div',{class:'row-card'},el('div',{class:'row-top'},el('h3',{},m.name||'Unnamed material'),el('span',{class:'badge'},m.id),el('span',{class:'spacer'}),remove),grid,inventoryAction,advanced);});$('materials').replaceChildren(...(materialCards.length?materialCards:[el('p',{class:'muted'},'No materials yet. Add the actual plates, reagent reservoirs, tip racks, and waste.') ]));$('steps').replaceChildren(...renderSteps(list(plan.steps),'/steps'));renderQuestions();renderSetup();renderReview();gates();}
-function renderSteps(steps,base){return steps.map((step,index)=>{const path=base+'/'+index;const kind=makeField('Operation',path+'/kind',{options:operationOptions()});kind.querySelector('select').addEventListener('change',()=>renderPlan());const fields=el('div',{class:'fields'},kind,makeField('Description',path+'/description',{wide:true}));if(step.kind==='transfer')fields.append(makeField('Source',path+'/source',{options:materialOptions('liquid')}),makeField('Source anchor well',path+'/source_anchor',{placeholder:'A1'}),makeField('Volume per channel (µL)',path+'/volume_ul',{type:'number',min:0}),makeField('Destination',path+'/destination',{options:materialOptions('liquid')}),makeField('Destination anchor well',path+'/destination_anchor',{placeholder:'A1'}));if(step.kind==='transfer')fields.append(el('p',{class:'muted',style:'grid-column:1/-1;font-size:12px;margin:0'},'One transfer becomes two separate Bravo operations after validation: aspirate the stated volume from the source, then dispense that volume into the destination.'));if(step.kind==='mix')fields.append(makeField('Material',path+'/material',{options:materialOptions('liquid')}),makeField('Anchor well',path+'/anchor',{placeholder:'A1'}),makeField('Volume per channel (µL)',path+'/volume_ul',{type:'number',min:0}),makeField('Mix cycles',path+'/cycles',{type:'number',min:1}));if(step.kind==='manual')fields.append(makeField('Operator instruction',path+'/message',{type:'textarea',wide:true}));if(step.kind==='wait')fields.append(makeField('Duration (seconds)',path+'/duration_s',{type:'number',min:0}));if(['move_plate','destack_plate','stack_plate'].includes(step.kind))fields.append(makeField('Material',path+'/material',{options:materialOptions()}),makeField('Destination position',path+'/destination_slot',{type:'number',min:1,max:9,step:1}));if(step.kind==='repeat')fields.append(makeField('Repeat count',path+'/repeat',{type:'number',min:1}));const top=el('div',{class:'row-top'},el('h3',{},`${index+1}. ${step.description||step.kind}`),el('span',{class:'badge'},step.id),el('span',{class:'spacer'}),el('button',{class:'small',disabled:index===0,'aria-label':'Move step up',onclick:()=>{[steps[index-1],steps[index]]=[steps[index],steps[index-1]];decide(base,steps);dirty();renderPlan();}},'↑'),el('button',{class:'small',disabled:index===steps.length-1,'aria-label':'Move step down',onclick:()=>{[steps[index+1],steps[index]]=[steps[index],steps[index+1]];decide(base,steps);dirty();renderPlan();}},'↓'),el('button',{class:'small danger',onclick:()=>{steps.splice(index,1);decide(base,steps);dirty();renderPlan();}},'Remove'));const citations=el('div',{class:'citations'});for(const id of list(step.source_paragraph_ids))citations.append(el('button',{onclick:()=>showSource(id)},id));if(!citations.childElementCount)citations.append(el('span',{class:'muted',style:'font-size:11px'},'No source citation — record the reason for this scientist-authored step.'));const card=el('div',{class:'row-card'},top,fields,citations,evidenceEditor(step,path));const sourceDetails=list(step.source_values);if(sourceDetails.length)card.append(el('details',{},el('summary',{},'Extracted source quantities'),...sourceDetails.map(item=>el('p',{class:'muted',style:'font-size:12px;margin-top:6px'},`${item.field}: ${textValue(item.value)} ${item.unit||''} · ${item.paragraph_id||'uncited'}`))));if(step.kind==='repeat'){step.steps??=[];card.append(el('div',{class:'nested'},...renderSteps(step.steps,path+'/steps'),el('button',{class:'small',onclick:()=>{step.steps.push(newStep());dirty();renderPlan();}},'Add repeated step')));}return card;});}
+const remove=el('button',{class:'small danger',onclick:()=>{plan.materials.splice(index,1);decide('/materials',plan.materials);dirty();renderPlan();renderSetup();}},'Remove');return el('div',{class:'row-card'},el('div',{class:'row-top'},el('h3',{},m.name||'Unnamed material'),el('span',{class:'badge'},m.id),el('span',{class:'spacer'}),remove),grid,inventoryAction,advanced);});$('materials').replaceChildren(...(materialCards.length?materialCards:[el('p',{class:'muted'},'No materials yet. Add the actual plates, reagent reservoirs, tip racks, and waste.') ]));$('steps').replaceChildren(...renderSteps(list(plan.steps),'/steps'));renderQuestions();renderSetup();renderMethodPreview();renderReview();gates();}
+function renderSteps(steps,base){return steps.map((step,index)=>{const path=base+'/'+index;const kind=makeField('Operation',path+'/kind',{options:operationOptions()});kind.querySelector('select').addEventListener('change',()=>renderPlan());const fields=el('div',{class:'fields'},kind,makeField('Description',path+'/description',{wide:true}));if(['transfer','distribute','mix'].includes(step.kind))fields.append(makeField('Reagent identity override',path+'/reagent_id',{placeholder:'If different from the source material'}),makeField('Reagent family override',path+'/reagent_family',{placeholder:'If different from the source material'}));if(step.kind==='transfer')fields.append(makeField('Source',path+'/source',{options:materialOptions('liquid')}),makeField('Source anchor well',path+'/source_anchor',{placeholder:'A1'}),makeField('Volume per channel (µL)',path+'/volume_ul',{type:'number',min:0}),makeField('Destination',path+'/destination',{options:materialOptions('liquid')}),makeField('Destination anchor well',path+'/destination_anchor',{placeholder:'A1'}));if(step.kind==='transfer')fields.append(el('p',{class:'muted',style:'grid-column:1/-1;font-size:12px;margin:0'},'One transfer becomes two separate Bravo operations after validation: aspirate the stated volume from the source, then dispense that volume into the destination.'));if(step.kind==='distribute'){fields.append(makeField('Source',path+'/source',{options:materialOptions('liquid')}),makeField('Source anchor well',path+'/source_anchor',{placeholder:'A1'}));step.dispenses??=[];const targets=el('div',{class:'wide'},el('h3',{},'Ordered dispenses'));for(let targetIndex=0;targetIndex<step.dispenses.length;targetIndex++){const targetPath=path+'/dispenses/'+targetIndex;targets.append(el('div',{class:'fields row-card'},makeField('Destination',targetPath+'/destination',{options:materialOptions('liquid')}),makeField('Destination anchor well',targetPath+'/destination_anchor',{placeholder:'A1'}),makeField('Dispense per channel (µL)',targetPath+'/volume_ul',{type:'number',min:0}),el('button',{class:'small danger',onclick:()=>{step.dispenses.splice(targetIndex,1);decide(path+'/dispenses',step.dispenses);dirty();renderPlan();}},'Remove target')));}targets.append(el('button',{class:'small',onclick:()=>{step.dispenses.push({destination:'',destination_anchor:'',volume_ul:0});dirty();renderPlan();}},'Add dispense target'));fields.append(targets);}if(step.kind==='mix')fields.append(makeField('Material',path+'/material',{options:materialOptions('liquid')}),makeField('Anchor well',path+'/anchor',{placeholder:'A1'}),makeField('Volume per channel (µL)',path+'/volume_ul',{type:'number',min:0}),makeField('Mix cycles',path+'/cycles',{type:'number',min:1}));if(step.kind==='manual')fields.append(makeField('Operator instruction',path+'/message',{type:'textarea',wide:true}));if(step.kind==='wait')fields.append(makeField('Duration (seconds)',path+'/duration_s',{type:'number',min:0}));if(['move_plate','destack_plate','stack_plate'].includes(step.kind))fields.append(makeField('Material',path+'/material',{options:materialOptions()}),makeField('Destination position',path+'/destination_slot',{type:'number',min:1,max:9,step:1}));if(step.kind==='repeat')fields.append(makeField('Repeat count',path+'/repeat',{type:'number',min:1}));const top=el('div',{class:'row-top'},el('h3',{},`${index+1}. ${step.description||step.kind}`),el('span',{class:'badge'},step.id),el('span',{class:'spacer'}),el('button',{class:'small',disabled:index===0,'aria-label':'Move step up',onclick:()=>{[steps[index-1],steps[index]]=[steps[index],steps[index-1]];decide(base,steps);dirty();renderPlan();}},'↑'),el('button',{class:'small',disabled:index===steps.length-1,'aria-label':'Move step down',onclick:()=>{[steps[index+1],steps[index]]=[steps[index],steps[index+1]];decide(base,steps);dirty();renderPlan();}},'↓'),el('button',{class:'small danger',onclick:()=>{steps.splice(index,1);decide(base,steps);dirty();renderPlan();}},'Remove'));const citations=el('div',{class:'citations'});for(const id of list(step.source_paragraph_ids))citations.append(el('button',{onclick:()=>showSource(id)},id));if(!citations.childElementCount)citations.append(el('span',{class:'muted',style:'font-size:11px'},'No source citation — record the reason for this scientist-authored step.'));const card=el('div',{class:'row-card'},top,fields,citations,evidenceEditor(step,path));if(['transfer','distribute','mix'].includes(step.kind))card.append(renderMethodSelection(step,path));const sourceDetails=list(step.source_values);if(sourceDetails.length)card.append(el('details',{},el('summary',{},'Extracted source quantities'),...sourceDetails.map(item=>el('p',{class:'muted',style:'font-size:12px;margin-top:6px'},`${item.field}: ${textValue(item.value)} ${item.unit||''} · ${item.paragraph_id||'uncited'}`))));if(step.kind==='repeat'){step.steps??=[];card.append(el('div',{class:'nested'},...renderSteps(step.steps,path+'/steps'),el('button',{class:'small',onclick:()=>{step.steps.push(newStep());dirty();renderPlan();}},'Add repeated step')));}return card;});}
 function evidenceEditor(step,path){
     const details=el('details',{},el('summary',{},'Review or correct source references'));
     const selected=new Set(step.source_paragraph_ids??[]);
@@ -518,9 +993,44 @@ function tipInventoryLabel(material){
     return Array.isArray(material.available_tips)
         ? material.available_tips.length+' available tips' : 'Availability unspecified';
 }
-function renderReview(){const s=state.session,plan=s?.plan;const summary=s?.validation?.summary;$('validation-summary').textContent=summary?`${summary.channels??0} channels · ${summary.tips_required??0} tips required · ${summary.compiled_operations??0} compiled operations · ${summary.manual_checkpoints??0} manual handoffs${Object.keys(summary.reagent_consumption_ul??{}).length?' · Reagent use: '+Object.entries(summary.reagent_consumption_ul).map(([id,volume])=>id+' '+volume+' µL').join(', '):''}`:'';$('validation-status').textContent=s?.validation?(s.validation.ok?'Passed':'Needs attention'):'Not validated';$('simulation-status').textContent=({running:'Running…',passed:'Passed',failed:'Failed'})[s?.simulation?.status]||'Not simulated';$('approval-status').textContent=s?.approval?'Approved':'Needs review';for(const id of ['validation-status','simulation-status','approval-status'])$(id).style.color='';if(s?.validation?.ok)$('validation-status').style.color='var(--green)';if(s?.simulation?.status==='passed')$('simulation-status').style.color='var(--green)';if(s?.simulation?.status==='failed')$('simulation-status').style.color='var(--red)';if(s?.approval)$('approval-status').style.color='var(--green)';const issues=s?.validation?.issues??s?.issues??[];$('issues').replaceChildren(...list(issues).map(issue=>el('div',{class:'issue'+(issue.severity==='error'?' error':'')},issue.message||issue.code,issue.path?el('code',{},issue.path):null)));$('simulation-details').hidden=!s?.simulation;$('simulation-events').textContent=list(s?.simulation?.events).map(event=>typeof event==='string'?event:JSON.stringify(event)).join('\n')+(s?.simulation?.error?'\n'+s.simulation.error:'');const materials=list(plan?.materials);renderDeckRunSheet(materials);const table=el('table',{},el('thead',{},el('tr',{},...['Material','Starting supply','Dead volume / tips'].map(text=>el('th',{},text)))));table.append(el('tbody',{},...materials.map(item=>el('tr',{},el('td',{},item.name||item.id,el('small',{},materialDeckLabel(item))),el('td',{},item.role==='liquid'?`${item.initial_volume_ul??'Unspecified'} µL per well`:item.role==='tips'?item.tip_definition_id||'Tip type unspecified':'Waste',Object.keys(item.well_volumes_ul??{}).length?el('small',{},'Well overrides: '+Object.entries(item.well_volumes_ul).map(([well,v])=>`${well} ${v} µL`).join(', ')):null),el('td',{},item.role==='liquid'?`${item.dead_volume_ul??'Unspecified'} µL per well`:item.role==='tips'?tipInventoryLabel(item):'—')))));$('supplies').replaceChildren(materials.length?el('div',{class:'table-wrap'},table):el('p',{class:'muted'},plan?'This protocol does not use deck materials.':'Materials will appear after interpretation.'));$('run-steps').replaceChildren(plan?runList(list(plan.steps)):el('p',{class:'muted'},'No steps yet.'));const approval=s?.approval;$('approval-record').textContent=approval?`Approved by ${approval.scientist||'scientist'} · ${approval.created_at||approval.approved_at||''} · ${approval.qualification||''}${approval.notes?' · '+approval.notes:''}`:'';const history=list(s?.history??s?.revisions);$('history').replaceChildren(...history.map(item=>el('div',{class:'history-row'},el('strong',{},`${item.action||item.event||'Revision'} ${item.revision??''}`),' ',el('time',{},item.created_at||item.timestamp||item.time||''),item.summary?el('p',{},item.summary):null,el('details',{},el('summary',{},'Record details'),el('pre',{},JSON.stringify(item,null,2))))),...list(plan?.decisions).map(item=>el('div',{class:'history-row'},el('strong',{},item.path),' → '+textValue(item.value),el('p',{class:'muted'},item.reason||'Scientist decision'))));if(!$('history').childElementCount)$('history').append(el('p',{class:'muted'},'Saved revisions and scientist corrections will appear here.'));}
-function runList(steps){return el('ol',{class:'step-list'},...steps.map(step=>{const parts={transfer:`Aspirate ${step.volume_ul??'?'} µL per channel from ${step.source??'?'} / ${step.source_anchor??'?'}; then dispense ${step.volume_ul??'?'} µL into ${step.destination??'?'} / ${step.destination_anchor??'?'}.`,mix:`Mix ${step.material??'?'} / ${step.anchor??'?'}: ${step.cycles??'?'} cycles of ${step.volume_ul??'?'} µL.`,manual:`Manual handoff: ${step.message||step.description||'Instruction required'}`,wait:`Wait ${step.duration_s??'?'} seconds.`,move_plate:`Move ${step.material??'?'} to position ${step.destination_slot??'?'}.`,destack_plate:'Destack '+(step.material??'?')+' to empty position '+(step.destination_slot??'?')+'.',stack_plate:'Stack '+(step.material??'?')+' onto position '+(step.destination_slot??'?')+'.',repeat:`Repeat ${step.repeat??'?'} times.`};return el('li',{},parts[step.kind]||step.description,step.description?el('small',{},step.description):null,step.kind==='repeat'?runList(list(step.steps)):null);}));}
-function gates(){const s=state.session;const plan=!!s?.plan;const busy=state.busy;const running=s?.simulation?.status==='running';$('session-status').textContent=s?`Revision ${s.revision??1}${state.dirty?' · unsaved':s.approval?' · approved':' · draft'}`:'No protocol loaded';$('session-status').className='badge'+(s?.approval&&!state.dirty?' good':'');$('save-status').textContent=state.dirty?'Unsaved changes. Saving invalidates previous checks and approval.':s?`All changes saved · session ${s.id}`:'No session';$('save').disabled=busy||!state.dirty;$('reload').disabled=busy||!s;$('extract').disabled=busy||!s||!list(s.selected_paragraph_ids).length||!$('source-reviewed').checked;$('validate').disabled=busy||!plan;$('simulate').disabled=busy||!s?.validation?.ok||state.dirty||running;$('approve').disabled=busy||state.dirty||!s?.validation?.ok||s?.simulation?.status!=='passed'||!$('plan-reviewed').checked||!$('deck-confirmed').checked||!$('scientist').value.trim()||!$('approval-notes').value.trim();$('export').disabled=busy||state.dirty||!s?.approval;$('publish').disabled=busy||state.dirty||!s?.approval||!$('publish-name').value.trim();$('apply-setup').disabled=busy||!s||!$('setup-picker').value;$('save-setup').disabled=busy||!s||!$('setup-name').value.trim();if($('add-compatible-tipbox'))$('add-compatible-tipbox').disabled=busy||!s||!$('setup-tipbox-select').value;$('prepare-deck').disabled=busy||!s;$('add-material').disabled=busy||!s;$('add-step').disabled=busy||!plan;$('from-text').disabled=busy||!$('protocol-text').value.trim();$('ingest').disabled=busy||!$('protocol-file').files.length;freezeBusyControls();}
+function reviewMethodValue(value){
+    if(value==null)return 'not specified';
+    if(Array.isArray(value))return value.length?value.map(reviewMethodValue).join(', '):'none recorded';
+    if(typeof value==='object'&&('min_volume_ul' in value||'max_volume_ul' in value))
+        return `${value.min_volume_ul??'?'}–${value.max_volume_ul??'?'} µL per stroke`;
+    return textValue(value);
+}
+function renderValidationIssue(issue){
+    const detail=el('div',{class:'issue'+(issue.severity==='error'?' error':'')},
+        el('strong',{},issue.message||issue.code),issue.path?el('code',{},issue.path):null);
+    if(issue.code==='method_mismatch'){
+        const names={reagent_families:'Reagent family',source_labware_ids:'Source labware',
+            destination_labware_ids:'Destination labware',tipbox_ids:'Tip box',
+            operations:'Operation',volume_ul:'Volume'};
+        detail.append(el('p',{style:'margin:7px 0 4px'},'Recorded method applicability differences:'),
+            el('ul',{},...list(issue.differences).map(row=>{
+                const location=[row.phase,row.target_index!=null?`target ${Number(row.target_index)+1}`:null,
+                    row.destination?`destination ${row.destination}`:null].filter(Boolean).join(', ');
+                return el('li',{},`${names[row.field]||row.field||'Setting'}${location?' ('+location+')':''}: `,
+                    `this experiment ${reviewMethodValue(row.actual)}; method record ${reviewMethodValue(row.method)}.`);
+            })));
+    }
+    if(issue.code==='distribute_calibration_fallback'){
+        const reasons={split_calibration:'Combined aspiration correction differs from the sum of separately corrected dispenses.',
+            nominal_tip_capacity:'Combined requested aspiration exceeds nominal tip capacity.',
+            commanded_tip_capacity:'Corrected combined aspiration plus air gaps exceeds tip capacity.'};
+        detail.append(el('p',{style:'margin:7px 0 4px'},'Why separate aspiration/dispense pairs are required:'),
+            el('ul',{},...list(issue.reasons).map(reason=>el('li',{},reasons[reason]||reason))));
+        if(issue.commanded_total_ul!=null||list(issue.commanded_dispenses_ul).length)detail.append(
+            el('p',{class:'mono',style:'margin:6px 0 0'},
+                `Commanded combined aspiration: ${reviewMethodValue(issue.commanded_total_ul)} µL; `+
+                `ordered commanded dispenses: ${list(issue.commanded_dispenses_ul).map(reviewMethodValue).join(', ')||'not specified'} µL.`));
+    }
+    return detail;
+}
+function renderReview(){const s=state.session,plan=s?.plan;const summary=s?.validation?.summary;$('validation-summary').textContent=summary?`${summary.channels??0} channels · ${summary.tips_required??0} tips required · ${summary.compiled_operations??0} compiled operations · ${summary.manual_checkpoints??0} manual handoffs${Object.keys(summary.reagent_consumption_ul??{}).length?' · Reagent use: '+Object.entries(summary.reagent_consumption_ul).map(([id,volume])=>id+' '+volume+' µL').join(', '):''}`:'';$('validation-status').textContent=s?.validation?(s.validation.ok?'Passed':'Needs attention'):'Not validated';$('simulation-status').textContent=({running:'Running…',passed:'Passed',failed:'Failed'})[s?.simulation?.status]||'Not simulated';$('approval-status').textContent=s?.approval?'Approved':'Needs review';for(const id of ['validation-status','simulation-status','approval-status'])$(id).style.color='';if(s?.validation?.ok)$('validation-status').style.color='var(--green)';if(s?.simulation?.status==='passed')$('simulation-status').style.color='var(--green)';if(s?.simulation?.status==='failed')$('simulation-status').style.color='var(--red)';if(s?.approval)$('approval-status').style.color='var(--green)';const issues=s?.validation?.issues??s?.issues??[];const hasMethodDifferences=list(issues).some(issue=>['method_mismatch','distribute_calibration_fallback'].includes(issue.code));$('method-differences-label').hidden=!hasMethodDifferences;if(!hasMethodDifferences)$('method-differences').checked=false;$('issues').replaceChildren(...list(issues).map(renderValidationIssue));$('simulation-details').hidden=!s?.simulation;$('simulation-events').textContent=list(s?.simulation?.events).map(event=>typeof event==='string'?event:JSON.stringify(event)).join('\n')+(s?.simulation?.error?'\n'+s.simulation.error:'');const materials=list(plan?.materials);renderDeckRunSheet(materials);const table=el('table',{},el('thead',{},el('tr',{},...['Material','Starting supply','Dead volume / tips'].map(text=>el('th',{},text)))));table.append(el('tbody',{},...materials.map(item=>el('tr',{},el('td',{},item.name||item.id,el('small',{},materialDeckLabel(item))),el('td',{},item.role==='liquid'?`${item.initial_volume_ul??'Unspecified'} µL per well`:item.role==='tips'?item.tip_definition_id||'Tip type unspecified':'Waste',Object.keys(item.well_volumes_ul??{}).length?el('small',{},'Well overrides: '+Object.entries(item.well_volumes_ul).map(([well,v])=>`${well} ${v} µL`).join(', ')):null),el('td',{},item.role==='liquid'?`${item.dead_volume_ul??'Unspecified'} µL per well`:item.role==='tips'?tipInventoryLabel(item):'—')))));$('supplies').replaceChildren(materials.length?el('div',{class:'table-wrap'},table):el('p',{class:'muted'},plan?'This protocol does not use deck materials.':'Materials will appear after interpretation.'));$('run-steps').replaceChildren(plan?runList(list(plan.steps)):el('p',{class:'muted'},'No steps yet.'));const approval=s?.approval;$('approval-record').textContent=approval?`Approved by ${approval.scientist||'scientist'} · ${approval.created_at||approval.approved_at||''} · ${approval.qualification||''}${approval.notes?' · '+approval.notes:''}`:'';const history=list(s?.history??s?.revisions);$('history').replaceChildren(...history.map(item=>el('div',{class:'history-row'},el('strong',{},`${item.action||item.event||'Revision'} ${item.revision??''}`),' ',el('time',{},item.created_at||item.timestamp||item.time||''),item.summary?el('p',{},item.summary):null,el('details',{},el('summary',{},'Record details'),el('pre',{},JSON.stringify(item,null,2))))),...list(plan?.decisions).map(item=>el('div',{class:'history-row'},el('strong',{},item.path),' → '+textValue(item.value),el('p',{class:'muted'},item.reason||'Scientist decision'))));if(!$('history').childElementCount)$('history').append(el('p',{class:'muted'},'Saved revisions and scientist corrections will appear here.'));}
+function runList(steps){return el('ol',{class:'step-list'},...steps.map(step=>{const parts={distribute:`Aspirate ${list(step.dispenses).reduce((sum,target)=>sum+Number(target.volume_ul||0),0)} µL per channel from ${step.source??'?'} / ${step.source_anchor??'?'}; then ${list(step.dispenses).map(target=>'dispense '+(target.volume_ul??'?')+' µL into '+(target.destination??'?')+' / '+(target.destination_anchor??'?')).join('; ')}.`,transfer:`Aspirate ${step.volume_ul??'?'} µL per channel from ${step.source??'?'} / ${step.source_anchor??'?'}; then dispense ${step.volume_ul??'?'} µL into ${step.destination??'?'} / ${step.destination_anchor??'?'}.`,mix:`Mix ${step.material??'?'} / ${step.anchor??'?'}: ${step.cycles??'?'} cycles of ${step.volume_ul??'?'} µL.`,manual:`Manual handoff: ${step.message||step.description||'Instruction required'}`,wait:`Wait ${step.duration_s??'?'} seconds.`,move_plate:`Move ${step.material??'?'} to position ${step.destination_slot??'?'}.`,destack_plate:'Destack '+(step.material??'?')+' to empty position '+(step.destination_slot??'?')+'.',stack_plate:'Stack '+(step.material??'?')+' onto position '+(step.destination_slot??'?')+'.',repeat:`Repeat ${step.repeat??'?'} times.`};return el('li',{},parts[step.kind]||step.description,step.description?el('small',{},step.description):null,step.kind==='repeat'?runList(list(step.steps)):null);}));}
+function gates(){const s=state.session;const plan=!!s?.plan;const busy=state.busy;const running=s?.simulation?.status==='running';$('session-status').textContent=s?`Revision ${s.revision??1}${state.dirty?' · unsaved':s.approval?' · approved':' · draft'}`:'No protocol loaded';$('session-status').className='badge'+(s?.approval&&!state.dirty?' good':'');$('save-status').textContent=state.dirty?'Unsaved changes. Saving invalidates previous checks and approval.':s?`All changes saved · session ${s.id}`:'No session';$('save').disabled=busy||!state.dirty;$('reload').disabled=busy||!s;$('extract').disabled=busy||!s||!list(s.selected_paragraph_ids).length||!$('source-reviewed').checked;$('validate').disabled=busy||!plan;$('simulate').disabled=busy||!s?.validation?.ok||state.dirty||running;$('approve').disabled=busy||state.dirty||!s?.validation?.ok||s?.simulation?.status!=='passed'||!$('plan-reviewed').checked||!$('deck-confirmed').checked||!$('scientist').value.trim()||!$('approval-notes').value.trim()||(!$('method-differences-label').hidden&&!$('method-differences').checked);$('export').disabled=busy||state.dirty||!s?.approval;$('publish').disabled=busy||state.dirty||!s?.approval||!$('publish-name').value.trim();$('apply-setup').disabled=busy||!s||!$('setup-picker').value;$('save-setup').disabled=busy||!s||!$('setup-name').value.trim();if($('add-compatible-tipbox'))$('add-compatible-tipbox').disabled=busy||!s||!$('setup-tipbox-select').value;$('prepare-deck').disabled=busy||!s;$('suggest-methods').disabled=busy||!plan;$('add-material').disabled=busy||!s;$('add-step').disabled=busy||!plan;$('from-text').disabled=busy||!$('protocol-text').value.trim();$('ingest').disabled=busy||!$('protocol-file').files.length;freezeBusyControls();}
 function schedulePoll(){clearTimeout(state.poll);if(state.session?.simulation?.status==='running'){const sessionId=state.session.id;state.poll=setTimeout(async()=>{try{const data=await api('/'+encodeURIComponent(sessionId));if(state.session?.id!==sessionId)return;const next=data.session??data;if(state.dirty){state.session.simulation=next.simulation;renderReview();gates();schedulePoll();}else acceptSession(next);}catch(error){notify('Simulation status could not be refreshed: '+error.message,true);schedulePoll();}},1200);}}
 async function refreshLibrary(){try{const data=await api('/library');const items=list(data.items??data.protocols??data);$('library').replaceChildren(...(items.length?items.map(item=>el('article',{class:'library-item'},el('h3',{},item.name||item.plan?.name||item.id),el('p',{},item.description||item.plan?.description||'Approved reusable protocol'),el('p',{},`${item.approval?.scientist?'Reviewed by '+item.approval.scientist+' · ':''}${item.created_at||item.updated_at||item.updated||item.created||''}`),el('button',{class:'small',onclick:()=>action(async()=>{const session=await api('/library/'+encodeURIComponent(item.id)+'/reuse',{method:'POST',body:'{}'});acceptSession(session);show('plan');notify('A new draft was created from the approved protocol. Review the setup for this experiment.');})},'Reuse as new draft'))):[el('p',{class:'empty'},'No approved protocols yet. Publish an approved revision from Verify & approve.') ]));}catch(error){$('library').replaceChildren(el('p',{class:'notice error'},error.message));}}
 async function refreshSetups(){const data=await api('/setups');state.setups=list(data.items??data.setups??data);$('setup-picker').replaceChildren(el('option',{value:''},'Choose a saved setup'),...state.setups.map(item=>el('option',{value:item.id},item.name||item.id)));}
@@ -539,12 +1049,13 @@ $('ingest').addEventListener('click',()=>action(async()=>{
 $('new-session').addEventListener('click',()=>{if(state.dirty){notify('Save your current changes before starting another protocol.',true);return;}clearTimeout(state.poll);state.session=null;localStorage.removeItem('pybravo-protocol-session');history.replaceState(null,'',location.pathname);$('protocol-name').value='';$('protocol-text').value='';$('protocol-file').value='';$('source-reviewed').checked=false;render();show('source');notify('');});
 $('select-all').addEventListener('click',()=>{state.session.selected_paragraph_ids=list(state.session.source.paragraphs).map(item=>item.id);sourceSelectionChanged();renderSource();});$('select-none').addEventListener('click',()=>{state.session.selected_paragraph_ids=[];sourceSelectionChanged();renderSource();});$('source-reviewed').addEventListener('change',()=>{state.sourceReviewedKey=$('source-reviewed').checked?reviewKey():null;gates();});
 $('extract').addEventListener('click',()=>action(async()=>{const reviewed=$('source-reviewed').checked;await save();acceptSession(await api('/'+encodeURIComponent(state.session.id)+'/extract',{method:'POST',body:JSON.stringify({revision:state.session.revision,selected_paragraph_ids:state.session.selected_paragraph_ids,instructions:$('extraction-instructions').value})}));$('source-reviewed').checked=reviewed;show('plan');notify('Interpretation ready. Review every material and step, then resolve the open questions.');},'Interpreting the selected procedure with the local LLM…'));
+$('suggest-methods').addEventListener('click',()=>action(suggestMethods,'Looking up methods for liquid steps…'));
 $('prepare-deck').addEventListener('click',()=>{if(!state.session.plan){state.session.plan=planSkeleton();dirty();renderPlan();}$('materials').scrollIntoView({behavior:'smooth',block:'center'});});
 $('add-material').addEventListener('click',()=>{state.session.plan??=planSkeleton();state.session.plan.materials.push({id:'material_'+randomFragment(),name:'New material',role:'liquid',labware_id:null,deck_slot:null,initial_volume_ul:null,dead_volume_ul:null,well_volumes_ul:{}});dirty();renderPlan();});$('add-step').addEventListener('click',()=>{state.session.plan.steps.push(newStep());dirty();renderPlan();});
 $('save').addEventListener('click',()=>action(save));$('reload').addEventListener('click',()=>action(async()=>{acceptSession(await api('/'+encodeURIComponent(state.session.id)));notify('Reloaded the saved version.');}));$('validate').addEventListener('click',()=>action(async()=>{await save();const result=await api('/'+encodeURIComponent(state.session.id)+'/validate',{method:'POST',body:'{}'});if((result.session??result).id)acceptSession(result);else acceptSession(await api('/'+encodeURIComponent(state.session.id)));renderQuestions();notify(state.session.validation?.ok?'Validation passed. Run the strict simulation next.':'Validation found requirements to resolve. Review the listed issues.',!state.session.validation?.ok);}));$('simulate').addEventListener('click',()=>action(async()=>{const result=await api('/'+encodeURIComponent(state.session.id)+'/simulate',{method:'POST',body:JSON.stringify({revision:state.session.revision})});if((result.session??result).id)acceptSession(result);else{state.session.simulation=result.simulation??result;renderReview();schedulePoll();}notify('Strict simulation started. Any task error prevents approval.');}));
-for(const id of ['scientist','approval-notes','plan-reviewed','deck-confirmed','publish-name','setup-name','setup-picker','protocol-text','protocol-file'])$(id).addEventListener('input',gates);
-$('approve').addEventListener('click',()=>action(async()=>{const result=await api('/'+encodeURIComponent(state.session.id)+'/approve',{method:'POST',body:JSON.stringify({revision:state.session.revision,scientist:$('scientist').value.trim(),notes:$('approval-notes').value.trim(),qualification:$('qualification').value,reviewed:$('plan-reviewed').checked,deck_confirmed:$('deck-confirmed').checked})});if((result.session??result).id)acceptSession(result);else acceptSession(await api('/'+encodeURIComponent(state.session.id)));notify('This saved revision is approved. Open it in Designer to review the compiled workflow and conduct the qualification run.');}));$('export').addEventListener('click',()=>action(async()=>{const result=await api('/'+encodeURIComponent(state.session.id)+'/export-workflow',{method:'POST',body:'{}'});const id=result.workflow_id??result.id;if(!id)throw new Error('The workflow export did not return an ID.');window.location.assign('/designer?workflow='+encodeURIComponent(id));}));$('publish').addEventListener('click',()=>action(async()=>{await api('/'+encodeURIComponent(state.session.id)+'/publish',{method:'POST',body:JSON.stringify({name:$('publish-name').value.trim()})});notify('Approved protocol added to the reusable library.');await refreshLibrary();}));$('refresh-library').addEventListener('click',()=>action(refreshLibrary));$('apply-setup').addEventListener('click',applySetup);$('save-setup').addEventListener('click',()=>action(async()=>{await save();await api('/setups',{method:'POST',body:JSON.stringify({name:$('setup-name').value.trim(),setup:state.session.setup,materials:state.session.plan?.materials??[]})});await refreshSetups();notify('Reusable setup saved with its current deck materials.');}));$('print').addEventListener('click',()=>window.print());window.addEventListener('beforeunload',event=>{if(state.dirty){event.preventDefault();event.returnValue='';}});
-async function init(){setBusy(true,'Loading instrument context…');try{const results=await Promise.allSettled([api('/context'),api('/capabilities'),refreshSetups()]);if(results[0].status==='rejected')throw results[0].reason;state.context=results[0].value;if(results[1].status==='fulfilled')state.capabilities=results[1].value;if(results[2].status==='rejected')notify('Saved setups could not be loaded: '+results[2].reason.message,true);const sessionId=new URLSearchParams(location.search).get('session')||localStorage.getItem('pybravo-protocol-session');if(sessionId){try{acceptSession(await api('/'+encodeURIComponent(sessionId)));}catch(error){notify('The previous session could not be loaded: '+error.message,true);}}render();}catch(error){notify('Protocol Assistant could not load the instrument context: '+error.message,true);}finally{setBusy(false);}}
+for(const id of ['scientist','approval-notes','plan-reviewed','deck-confirmed','method-differences','qualification','publish-name','setup-name','setup-picker','protocol-text','protocol-file'])$(id).addEventListener('input',gates);
+$('approve').addEventListener('click',()=>action(async()=>{const result=await api('/'+encodeURIComponent(state.session.id)+'/approve',{method:'POST',body:JSON.stringify({revision:state.session.revision,scientist:$('scientist').value.trim(),notes:$('approval-notes').value.trim(),qualification:$('qualification').value,reviewed:$('plan-reviewed').checked,deck_confirmed:$('deck-confirmed').checked,method_differences_accepted:$('method-differences').checked})});if((result.session??result).id)acceptSession(result);else acceptSession(await api('/'+encodeURIComponent(state.session.id)));notify('This saved revision is approved. Open the compiled workflow in Designer and follow the recorded release basis.');}));$('export').addEventListener('click',()=>action(async()=>{const result=await api('/'+encodeURIComponent(state.session.id)+'/export-workflow',{method:'POST',body:'{}'});const id=result.workflow_id??result.id;if(!id)throw new Error('The workflow export did not return an ID.');window.location.assign('/designer?workflow='+encodeURIComponent(id));}));$('publish').addEventListener('click',()=>action(async()=>{await api('/'+encodeURIComponent(state.session.id)+'/publish',{method:'POST',body:JSON.stringify({name:$('publish-name').value.trim()})});notify('Approved protocol added to the reusable library.');await refreshLibrary();}));$('refresh-library').addEventListener('click',()=>action(refreshLibrary));$('apply-setup').addEventListener('click',applySetup);$('save-setup').addEventListener('click',()=>action(async()=>{await save();await api('/setups',{method:'POST',body:JSON.stringify({name:$('setup-name').value.trim(),setup:state.session.setup,materials:state.session.plan?.materials??[]})});await refreshSetups();notify('Reusable setup saved with its current deck materials.');}));$('print').addEventListener('click',()=>window.print());window.addEventListener('beforeunload',event=>{if(state.dirty){event.preventDefault();event.returnValue='';}});
+async function init(){setBusy(true,'Loading instrument context…');try{const results=await Promise.allSettled([api('/context'),api('/capabilities'),refreshSetups(),api('/methods')]);if(results[0].status==='rejected')throw results[0].reason;state.context=results[0].value;if(results[1].status==='fulfilled')state.capabilities=results[1].value;if(results[3].status==='fulfilled')state.methodsRegistry=results[3].value;if(results[2].status==='rejected')notify('Saved setups could not be loaded: '+results[2].reason.message,true);const sessionId=new URLSearchParams(location.search).get('session')||localStorage.getItem('pybravo-protocol-session');if(sessionId){try{acceptSession(await api('/'+encodeURIComponent(sessionId)));}catch(error){notify('The previous session could not be loaded: '+error.message,true);}}render();}catch(error){notify('Protocol Assistant could not load the instrument context: '+error.message,true);}finally{setBusy(false);}}
 init();
 </script>
 </body>

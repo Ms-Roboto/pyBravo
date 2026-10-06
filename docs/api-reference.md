@@ -1467,7 +1467,11 @@ See [Protocol Assistant](protocol-assistant.md) for the scientist workflow and c
 |---|---|---|
 | `GET` | `/api/protocols/context` | Active profile, head, calibration and catalogs with configuration fingerprints |
 | `GET` | `/api/protocols/capabilities` | Read-only [Bravo Capability Manifest](bravo-capability-manifest.md) of model-selectable intents, compiler operations, catalog choices, and review rules for the active profile |
-| `POST` | `/api/protocols/setup-recommendations` | `{plan, setup?, session_id?}` evaluates the current draft against the active manifest and returns evidence-tagged `recommendations`, `unresolved`, and `blocked` choices without saving or approving them |
+| `GET` | `/api/protocols/methods` | Read-only, versioned [method registry](bravo-method-knowledge.md) with method statuses, evidence and registry digest for the active profile |
+| `POST` | `/api/protocols/methods` | Save a scientist-reviewed method version with `{expected_registry_digest, expected_method_revision?, method}`; rejects stale or incomplete reviews instead of promoting imported or published candidates automatically |
+| `POST` | `/api/protocols/methods/lookup` | Read-only typed `MethodQuery` with `operation`, `tip_id`, optional `tipbox_id`, labware IDs, reagent family, `volume_ul`, and for distribution ordered `dispense_volumes_ul`; returns ranked candidates, hard-constraint issues, explicit mismatches, and whether a shared aspiration fits |
+| `GET` | `/api/protocols/recipes` | Read-only versioned recipe catalog with triggers, planning intents, operations and review points; recipes are hints, not qualified methods |
+| `POST` | `/api/protocols/setup-recommendations` | `{plan, setup?, session_id?}` evaluates the current draft against the active manifest and returns evidence-tagged `recommendations`, `unresolved`, and `blocked` choices without saving or approving them; `runtime_snapshot` is a sanitized, software-known, physically unverified deck/tip-box advisory |
 | `GET` | `/api/protocols` | Session summaries in `items` |
 | `POST` | `/api/protocols/chat` | `{message, session_id?, revision?}` proposes a cited plan from a conversation turn and returns `{session, reply, preview}`; follow-ups require the current revision |
 | `POST` | `/api/protocols/from-text` | `{text, name?}` creates a session; maximum 200,000 characters |
@@ -1479,7 +1483,7 @@ See [Protocol Assistant](protocol-assistant.md) for the scientist workflow and c
 | `POST` | `/api/protocols/{id}/extract` | Optional `{revision, selected_paragraph_ids, instructions}` extracts a structured plan with bounded repair and records model metadata |
 | `POST` | `/api/protocols/{id}/validate` | No body; returns the updated session with blocking issues, questions and run sheet |
 | `POST` | `/api/protocols/{id}/simulate` | No body; starts strict simulation and returns a session with `simulation.status: "running"`; poll `GET /api/protocols/{id}` |
-| `POST` | `/api/protocols/{id}/approve` | Requires `scientist`, `qualification`, `reviewed: true`, `deck_confirmed: true`; optional `notes` and expected `revision` |
+| `POST` | `/api/protocols/{id}/approve` | Requires `scientist`, `qualification`, `reviewed: true`, `deck_confirmed: true`; `notes` is required for a reviewed adaptation, and `method_differences_accepted: true` is required when validation reports `method_mismatch` |
 | `POST` | `/api/protocols/{id}/export-workflow` | No body; requires approval and returns `workflow_id`, `name`, and designer `url` |
 | `POST` | `/api/protocols/{id}/publish` | `{name}` publishes an approved library entry |
 | `GET` | `/api/protocols/library` | Approved entries in `items` |
@@ -1487,8 +1491,18 @@ See [Protocol Assistant](protocol-assistant.md) for the scientist workflow and c
 | `GET` | `/api/protocols/setups` | Saved experiment setups in `items` |
 | `POST` | `/api/protocols/setups` | `{name, setup, materials?}` saves a reusable setup with its configuration fingerprint |
 
-Approval qualification is `qualification_run` for a supervised qualification run or
-`previously_qualified`; the latter requires a reference in `notes`. Approval requires a successful
+External MCP clients can run `python -m pybravo.workflow.protocols.mcp_discovery`
+as a stdio server while the pyBravo web server is running. Its four tools
+proxy the capabilities, method registry, recipe catalog and method lookup routes above. Set
+`PYBRAVO_MCP_BASE_URL` to the pyBravo HTTP origin when it is not
+`http://127.0.0.1:8000`. This surface is read-only and uses the active server
+profile; it does not report live deck contents or grant execution permission.
+
+Approval qualification is `qualification_run` for a supervised qualification run,
+`previously_qualified` with a reference in `notes`, or
+`scientist_reviewed_simulated` for an adaptation whose differences and rationale
+the scientist reviewed after strict simulation. The latter does not label the
+method qualified. Approval requires a successful
 strict simulation for the current source, selected passages, plan, setup and machine configuration.
 Strict simulation runs the task logic on a separate simulator, skips elapsed waits, records manual
 checkpoints and times out after 180 seconds. Its terminal status is `passed` or `failed`. A server

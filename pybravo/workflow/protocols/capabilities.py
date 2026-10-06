@@ -17,7 +17,7 @@ from pybravo.types import HeadType
 from .tipbox_choices import compatible_tipbox_choices, tipbox_catalog_candidates
 
 STANDARD = "pybravo.bravo-capability-manifest"
-SCHEMA_VERSION = "0.2.0"
+SCHEMA_VERSION = "0.3.0"
 
 _LABWARE_FIELDS = (
     "id", "name", "kind", "base_class", "wells", "rows", "cols",
@@ -59,6 +59,15 @@ def _rows(context: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
     return [row for row in value if isinstance(row, Mapping)] if isinstance(value, list) else []
 
 
+def _status_counts(rows: list[dict[str, Any]], field: str = "status") -> dict[str, int]:
+    """Summarize catalog evidence without promoting an entry to a run approval."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        status = str(row.get(field) or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _positive(value: Any) -> bool:
     return isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
 
@@ -77,13 +86,21 @@ _OPERATION_SPECS: tuple[tuple[str, str, tuple[dict[str, Any], ...], tuple[str, .
                               tuple[str, ...], tuple[str, ...]], ...] = (
     ("transfer", "Move a per-channel volume between addressed source and destination wells.",
      (_P("source"), _P("destination"), _P("source_anchor"), _P("destination_anchor"),
-      _P("volume_ul", "number", unit="uL")),
+      _P("volume_ul", "number", unit="uL"), _P("method_ref", "object", required=False)),
      ("disposable_head", "compatible_tip_pair", "confirmed_tip_inventory", "approved_liquid_class",
       "reachable_wells", "source_and_destination_capacity"),
      ("source_volume_decreased", "destination_volume_increased"),
      ("liquid/Aspirate", "liquid/Dispense")),
+    ("distribute", "Dispense ordered volumes from one source; the compiler selects a safe aspiration pattern.",
+     (_P("source"), _P("source_anchor"), _P("dispenses", "array"),
+      _P("method_ref", "object", required=False)),
+     ("disposable_head", "compatible_tip_pair", "confirmed_tip_inventory", "approved_liquid_class",
+      "reachable_wells", "source_and_destination_capacity", "distribute_volume_accounting"),
+     ("source_volume_decreased", "destination_volume_increased"),
+     ("liquid/Aspirate", "liquid/Dispense")),
     ("mix", "Aspirate and dispense repeatedly within one addressed material.",
-     (_P("material"), _P("anchor"), _P("volume_ul", "number", unit="uL"), _P("cycles", "integer")),
+     (_P("material"), _P("anchor"), _P("volume_ul", "number", unit="uL"), _P("cycles", "integer"),
+      _P("method_ref", "object", required=False)),
      ("disposable_head", "compatible_tip_pair", "confirmed_tip_inventory", "approved_liquid_class",
       "reachable_wells", "source_and_destination_capacity"),
      ("material_mixed",), ("liquid/Mix",)),
@@ -131,6 +148,7 @@ _CONSTRAINTS = {
     "approved_liquid_class": "The chosen liquid class must match the active machine, head and selected tip.",
     "reachable_wells": "Head footprint and selected anchors must fit each plate's verified grid and pitch.",
     "source_and_destination_capacity": "Source stays above dead volume; destination stays below per-well capacity.",
+    "distribute_volume_accounting": "One shared aspiration requires a permitting method, effective tip capacity and calibrated command volume; otherwise the compiler uses safe paired actions or reports a validation error.",
     "configured_gripper": "The active profile must provide the Bravo gripper axes.",
     "top_plate_access": "Only the top plate of a stack may be addressed or moved.",
     "deck_destination_available": "A plate move or destack requires an empty destination position.",
@@ -188,7 +206,7 @@ def _head(context: Mapping[str, Any]) -> tuple[HeadType | None, dict[str, Any]]:
 def _assistant_operations(head: HeadType | None, has_gripper: bool) -> list[dict[str, Any]]:
     operations = []
     for identity, description, parameters, preconditions, effects, lowering in _OPERATION_SPECS:
-        if identity in {"transfer", "mix"}:
+        if identity in {"transfer", "distribute", "mix"}:
             selectable = bool(head and head.is_disposable)
         elif identity in {"move_plate", "destack_plate", "stack_plate"}:
             selectable = has_gripper
@@ -525,6 +543,39 @@ def build_capability_manifest(context: dict) -> dict:
             liquid_classes.append(item)
     liquid_classes.sort(key=lambda item: item["id"])
 
+    # The method registry is a separate, versioned knowledge layer.  BCM
+    # advertises where to query it and its digest, never its numeric setpoints.
+    from .methods import method_registry
+
+    registry = method_registry(context)
+    method_summaries = registry.get("methods") or []
+    method_reference = {
+        "standard": registry["standard"],
+        "schema_version": registry["schema_version"],
+        "digest": registry["digest"],
+        "registry_url": "/api/protocols/methods",
+        "lookup_url": "/api/protocols/methods/lookup",
+        "method_count": len(method_summaries),
+        "status_counts": _status_counts(method_summaries),
+    }
+
+    class_summaries = [
+        {"status": "identity_complete" if all(item.get(key) for key in
+         ("id", "machine_id", "head_type", "tip_id")) else "incomplete"}
+        for item in liquid_classes
+    ]
+    catalog_summary = {
+        "labware": {"count": len(labware), "status_counts": _status_counts(labware, "catalog_status"),
+                    "provenance": "active_labware_catalog"},
+        "tip_definitions": {"count": len(tips), "status_counts": _status_counts(tips, "catalog_status"),
+                            "provenance_sources": sorted({str(item["source"]) for item in tips
+                                                          if item.get("source")})},
+        "tipbox_pairs": {"count": len(choices), "status_counts": _status_counts(choices),
+                         "provenance": "active_head_catalog_pair"},
+        "liquid_classes": {"count": len(liquid_classes), "status_counts": _status_counts(class_summaries),
+                           "provenance": "active_liquid_class_store"},
+    }
+
     robot_operations = []
     for identity, description in _ROBOT_DESCRIPTIONS.items():
         if identity.startswith(("tips/", "liquid/")):
@@ -548,6 +599,8 @@ def build_capability_manifest(context: dict) -> dict:
         "setup_decision_rules": _setup_decision_rules(head),
         "transfer_patterns": _transfer_patterns(head, labware),
         "tip_plate_compatibility": _tip_plate_compatibility(head, labware, tips, choices),
+        "catalog_summary": catalog_summary,
+        "method_registry": method_reference,
         "constraints": [{"id": identity, "description": description}
                         for identity, description in _CONSTRAINTS.items()],
         "review_requirements": [{"id": identity, "description": description}
@@ -571,6 +624,8 @@ def compact_capability_options(manifest: dict) -> dict:
     return {
         "schema_version": manifest.get("schema_version"),
         "context_hash": manifest.get("context_hash"),
+        "method_registry": {key: manifest.get("method_registry", {}).get(key)
+                            for key in ("schema_version", "digest", "lookup_url")},
         "machine": {key: manifest.get("machine", {}).get(key) for key in ("head_type", "geometry", "has_gripper")},
         "assistant_operations": operations,
         "setup_options": {

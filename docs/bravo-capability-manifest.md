@@ -1,4 +1,4 @@
-# Bravo Capability Manifest, version 0.2
+# Bravo Capability Manifest, version 0.3
 
 The Bravo Capability Manifest (BCM) gives a protocol-planning model a finite,
 typed set of choices for the **configured** pyBravo instrument. It describes
@@ -7,11 +7,11 @@ which catalog resources may be selected. It is discovery data, not a command
 interface or permission to operate hardware.
 
 The normative JSON Schema is
-[`schemas/bravo-capability-manifest-v0.2.schema.json`](../schemas/bravo-capability-manifest-v0.2.schema.json).
-The [example](../schemas/examples/bravo-capability-manifest-v0.2.example.json)
-shows a 384ST simulation profile. Version 0.1 remains available in the same
-directories for consumers of the earlier format. The identifier
-`schema_version: "0.2.0"`
+[`schemas/bravo-capability-manifest-v0.3.schema.json`](../schemas/bravo-capability-manifest-v0.3.schema.json).
+The [example](../schemas/examples/bravo-capability-manifest-v0.3.example.json)
+shows a 384ST simulation profile. Versions 0.1 and 0.2 remain available in the
+same directories for consumers of the earlier formats. The identifier
+`schema_version: "0.3.0"`
 describes this document's format; it is independent of the `ProtocolPlan`
 schema version and the instrument's firmware or controller protocol.
 
@@ -20,6 +20,16 @@ manifest. Fetch it again after changing the head, profile, labware catalog,
 tips, or liquid classes. Protocol Assistant sends a bounded subset of these
 choices to the local model and checks returned action IDs against it; the
 full endpoint is useful for external planners and catalog review.
+
+`method_registry` points to `GET /api/protocols/methods` and typed
+`POST /api/protocols/methods/lookup`. Its digest and status counts let a client
+detect changes without copying method settings into the manifest. The lookup
+endpoint is read-only: it ranks applicable methods and reports evidence and
+mismatches; it cannot edit settings or authorize hardware execution. The
+method record and its referenced liquid class hold numeric pipetting settings.
+`catalog_summary` reports static catalog status and provenance, not physical
+deck contents or method qualification. See [Bravo method knowledge](bravo-method-knowledge.md)
+for the separation of catalogs, method records, skills, recipes, and inventory.
 
 ## Model Hardware Standard relationship
 
@@ -45,6 +55,8 @@ producer MUST publish these top-level fields:
 | `tipbox_catalog_candidates` | Plausible incomplete rack records for catalog maintenance, never verified choices. |
 | `tip_plate_compatibility` | Exact tip ID to catalog plate ID planning rules, including explicit incompatibilities. These rules do not qualify a run. |
 | `labware`, `tip_definitions`, `liquid_classes` | Compact catalog entries with stable IDs and known values. A listed entry does not establish physical presence on the deck. |
+| `catalog_summary` | Counts by catalog status, with provenance of the configured stores. `identity_complete` for a liquid class means its machine, head and tip identifiers exist; it does not mean the class has been calibrated. |
+| `method_registry` | Version, digest, status counts, and discovery URLs for the separate method library. No motion setpoints or asserted live inventory are embedded. |
 | `setup_decision_rules` | Conditional, evidence-tagged recommendations for setup fields. These are planning suggestions, not completed scientist decisions. |
 | `constraints`, `review_requirements` | Stable rule IDs and human-readable explanations. The server enforces rules; the descriptions help a model ask useful questions. |
 
@@ -149,15 +161,16 @@ validation rules; the scientist confirms physical state before a run.
 
 ## Intent versus robot operation
 
-An **assistant operation** is a scientific planning intent. In version 0.2,
-`transfer` means one source-to-destination movement and lowers to a distinct
-`liquid/Aspirate` followed by `liquid/Dispense` at the same volume. Thus two
-5 µL transfers currently mean two 5 µL aspirations and two 5 µL dispenses.
-The Protocol Assistant does **not** yet express one 10 µL aspiration followed
-by two 5 µL dispenses, even though the Designer has separate robot nodes. The
-manifest MUST NOT advertise that multidispense pattern as an assistant choice
-until the plan schema, compiler, volume accounting, validation, and simulation
-all support it.
+An **assistant operation** is a scientific planning intent. `transfer` means
+one source-to-destination movement and lowers to a distinct `liquid/Aspirate`
+followed by `liquid/Dispense` at the same volume. `distribute` addresses one
+source and an ordered list of destination/volume pairs. It lowers to one
+aspiration followed by ordered, distinct dispenses only when the selected
+method, effective tip capacity and calibrated command volumes permit it.
+Otherwise the compiler uses separate aspiration/dispense pairs when safe, or
+reports a validation error. A consumer MUST NOT
+assume that `lowers_to` is a fixed node count: it lists node *types*. The
+reviewed DAG shows every actual aspiration and dispense.
 
 `selectable: true` means the Protocol Assistant has a plan representation for
 that intent. `availability` reports the active profile's coarse status:
@@ -226,8 +239,9 @@ clearances. Validation and strict simulation precede any executable export.
 3. A consumer MAY rank valid choices or propose values, but MUST preserve
    unknowns and cite the scientist's source text for quantitative steps.
 4. The server MUST validate the proposed plan against current context and
-   reject stale IDs, incompatible rack-tip-head-plate combinations, and
-   unresolved setup. Simulation and scientist approval are separate gates.
+   reject stale IDs, incompatible rack-tip-head-plate combinations, stale
+   method versions, and unresolved setup. Simulation and scientist approval
+   are separate gates.
 5. A producer MUST NOT set `execution_ready: true` for provisional pairs or
    infer missing associations from a rack name. A consumer MUST NOT promote a
    catalog candidate into a selectable pair.

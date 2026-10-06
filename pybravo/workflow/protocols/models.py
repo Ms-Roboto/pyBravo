@@ -39,6 +39,8 @@ class ProtocolMaterial(StrictModel):
     id: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=300)
     role: Literal["liquid", "tips", "waste"] = "liquid"
+    reagent_id: str | None = None
+    reagent_family: str | None = None
     labware_id: str | None = None
     deck_slot: int | None = None
     # Bottom plate is 0. Materials sharing a deck slot must form a contiguous
@@ -53,19 +55,34 @@ class ProtocolMaterial(StrictModel):
     tip_definition_id: str | None = None
 
 
+class ProtocolMethodRef(StrictModel):
+    method_id: str = Field(min_length=1, max_length=200)
+    revision: str = Field(min_length=1, max_length=128)
+
+
+class ProtocolDispense(StrictModel):
+    destination: str = Field(min_length=1, max_length=100)
+    destination_anchor: str = Field(min_length=1, max_length=32)
+    volume_ul: float
+
+
 class ProtocolStep(StrictModel):
     id: str = Field(min_length=1, max_length=100)
-    kind: Literal["transfer", "mix", "manual", "wait", "move_plate", "stack_plate", "destack_plate", "repeat"]
+    kind: Literal["transfer", "distribute", "mix", "manual", "wait", "move_plate", "stack_plate", "destack_plate", "repeat"]
     description: str = ""
     source_paragraph_ids: list[str] = Field(default_factory=list)
     source_values: list[NumericEvidence] = Field(default_factory=list)
     source: str | None = None
     destination: str | None = None
+    dispenses: list[ProtocolDispense] = Field(default_factory=list)
+    reagent_id: str | None = None
+    reagent_family: str | None = None
     material: str | None = None
     source_anchor: str | None = None
     destination_anchor: str | None = None
     anchor: str | None = None
     volume_ul: float | None = None
+    method_ref: ProtocolMethodRef | None = None
     cycles: int | None = None
     duration_s: float | None = None
     destination_slot: int | None = None

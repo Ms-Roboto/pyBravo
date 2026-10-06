@@ -1,0 +1,33 @@
+# Composable planning patterns, not executable or hardware-qualified methods.
+version: 1
+recipes:
+  - id: four_384_to_1536_quadrants
+    version: 1.0.0
+    status: synthetic_pattern
+    title: Four 384-well sources into 1536-well quadrants
+    triggers: ["384", "1536", "quadrant"]
+    trigger_match: all
+    intent: Keep four sources distinct; map each source to the same disjoint quadrant on each named destination.
+    operations: [destack_plate, transfer, stack_plate]
+    source_path: docs/bravo-capability-manifest.md
+    review_points: [source_stack_order, quadrant_mapping, dedicated_tip_supply, split_aspiration_capacity]
+  - id: serial_dilution
+    version: 1.0.0
+    status: synthetic_pattern
+    title: Serial dilution across a plate
+    triggers: ["serial dilution", "dilute"]
+    trigger_match: any
+    intent: Preserve dilution factors, source carryover policy, mixing, and ordered transfers.
+    operations: [transfer, mix]
+    source_path: examples/protocols/benchmark.json
+    review_points: [dilution_factor, per_well_volume, mixing_method, tip_reuse]
+  - id: distribute_to_destinations
+    version: 1.0.0
+    status: synthetic_pattern
+    title: One source aliquoted into several destinations
+    triggers: ["distribute", "aliquot", "dispense into"]
+    trigger_match: any
+    intent: Keep a single aspiration and each ordered dispense distinct when effective tip capacity permits.
+    operations: [distribute]
+    source_path: docs/bravo-method-knowledge.md
+    review_points: [total_aspirate_volume, air_gap, residual_volume, contamination]

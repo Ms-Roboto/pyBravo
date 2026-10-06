@@ -1,0 +1,899 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pybravo:bravo-method-lookup:1.0.0",
+  "title": "Bravo Method Lookup Response 1.0",
+  "description": "Read-only ranked method candidates with hard issues and explicit mismatches; no execution approval.",
+  "type": "object",
+  "required": [
+    "registry_digest",
+    "query",
+    "issues",
+    "candidates"
+  ],
+  "properties": {
+    "registry_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "query": {
+      "properties": {
+        "operation": {
+          "default": "transfer",
+          "enum": [
+            "transfer",
+            "mix",
+            "distribute"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "machine_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Machine Id"
+        },
+        "head_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Head Type"
+        },
+        "tip_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tip Id"
+        },
+        "tipbox_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tipbox Id"
+        },
+        "source_labware_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Labware Id"
+        },
+        "destination_labware_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Destination Labware Id"
+        },
+        "reagent_family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reagent Family"
+        },
+        "volume_ul": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Volume Ul"
+        },
+        "dispense_volumes_ul": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dispense Volumes Ul"
+        },
+        "source_anchor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Anchor"
+        },
+        "destination_anchor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Destination Anchor"
+        }
+      },
+      "type": "object"
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "field",
+          "reason"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LookupCandidate"
+      }
+    },
+    "shared_aspiration_feasible": {
+      "type": "boolean"
+    },
+    "planning_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "AspirateSettings": {
+      "properties": {
+        "liquid_class_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiquidClassRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "distance_from_bottom_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Distance From Bottom Mm"
+        },
+        "pre_air_ul": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pre Air Ul"
+        },
+        "post_air_ul": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Post Air Ul"
+        },
+        "dynamic_tip_extension": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dynamic Tip Extension"
+        },
+        "tip_touch": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tip Touch"
+        },
+        "well_offset": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Well Offset"
+        }
+      },
+      "title": "AspirateSettings",
+      "type": "object"
+    },
+    "DispenseSettings": {
+      "properties": {
+        "liquid_class_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiquidClassRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "distance_from_bottom_mm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Distance From Bottom Mm"
+        },
+        "blowout_ul": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blowout Ul"
+        },
+        "dynamic_tip_retraction": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dynamic Tip Retraction"
+        },
+        "tip_touch": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tip Touch"
+        },
+        "well_offset": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Well Offset"
+        }
+      },
+      "title": "DispenseSettings",
+      "type": "object"
+    },
+    "LiquidClassRef": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "field_origins": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Field Origins",
+          "type": "object"
+        },
+        "source_field_origins": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Source Field Origins",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "LiquidClassRef",
+      "type": "object"
+    },
+    "MethodApplicability": {
+      "properties": {
+        "machine_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Machine Ids",
+          "type": "array"
+        },
+        "head_types": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Head Types",
+          "type": "array"
+        },
+        "tip_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tip Ids",
+          "type": "array"
+        },
+        "tipbox_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tipbox Ids",
+          "type": "array"
+        },
+        "source_labware_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Labware Ids",
+          "type": "array"
+        },
+        "destination_labware_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Destination Labware Ids",
+          "type": "array"
+        },
+        "reagent_families": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reagent Families",
+          "type": "array"
+        },
+        "operations": {
+          "items": {
+            "enum": [
+              "transfer",
+              "mix",
+              "distribute"
+            ],
+            "type": "string"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "min_volume_ul": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Volume Ul"
+        },
+        "max_volume_ul": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Volume Ul"
+        }
+      },
+      "title": "MethodApplicability",
+      "type": "object"
+    },
+    "MethodProvenance": {
+      "properties": {
+        "source_type": {
+          "enum": [
+            "local_config",
+            "local_review",
+            "local_qualification",
+            "publication",
+            "synthetic_example"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Path"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
+        },
+        "source_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Digest"
+        },
+        "retrieved_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retrieved At"
+        },
+        "reviewer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewer"
+        },
+        "reviewed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed At"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "source_type"
+      ],
+      "title": "MethodProvenance",
+      "type": "object"
+    },
+    "MethodSourceRef": {
+      "properties": {
+        "method_id": {
+          "title": "Method Id",
+          "type": "string"
+        },
+        "revision": {
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method_id",
+        "revision"
+      ],
+      "title": "MethodSourceRef",
+      "type": "object"
+    },
+    "RegistryMethod": {
+      "properties": {
+        "method_id": {
+          "title": "Method Id",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "reference_candidate",
+            "imported_unverified",
+            "reviewed",
+            "qualified"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "derived_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MethodSourceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "applicability": {
+          "$ref": "#/$defs/MethodApplicability"
+        },
+        "aspirate": {
+          "$ref": "#/$defs/AspirateSettings"
+        },
+        "dispense": {
+          "$ref": "#/$defs/DispenseSettings"
+        },
+        "tip_policy": {
+          "anyOf": [
+            {
+              "enum": [
+                "fresh_per_source",
+                "fresh_per_transfer",
+                "reuse_within_source"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tip Policy"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/MethodProvenance"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "missing_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "execution_ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "method_id",
+        "version",
+        "status",
+        "title",
+        "applicability",
+        "revision",
+        "missing_fields",
+        "execution_ready"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "LookupCandidate": {
+      "properties": {
+        "method_id": {
+          "title": "Method Id",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "reference_candidate",
+            "imported_unverified",
+            "reviewed",
+            "qualified"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "derived_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MethodSourceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "applicability": {
+          "$ref": "#/$defs/MethodApplicability"
+        },
+        "aspirate": {
+          "$ref": "#/$defs/AspirateSettings"
+        },
+        "dispense": {
+          "$ref": "#/$defs/DispenseSettings"
+        },
+        "tip_policy": {
+          "anyOf": [
+            {
+              "enum": [
+                "fresh_per_source",
+                "fresh_per_transfer",
+                "reuse_within_source"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tip Policy"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/MethodProvenance"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "missing_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "execution_ready": {
+          "type": "boolean"
+        },
+        "method_ref": {
+          "type": "object",
+          "required": [
+            "method_id",
+            "revision"
+          ],
+          "properties": {
+            "method_id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "additionalProperties": false
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "match_kind": {
+          "enum": [
+            "exact",
+            "closest"
+          ]
+        },
+        "mismatches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "field",
+              "requested",
+              "method",
+              "reason"
+            ],
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "requested": {},
+              "method": {},
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "method_id",
+        "version",
+        "status",
+        "title",
+        "applicability",
+        "revision",
+        "missing_fields",
+        "execution_ready",
+        "method_ref",
+        "score",
+        "match_kind",
+        "mismatches"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    }
+  }
+}

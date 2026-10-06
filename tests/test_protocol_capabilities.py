@@ -35,12 +35,18 @@ def test_live_context_manifest_is_sanitized_and_tracks_compiler_contract():
     assert "profile" not in manifest
     assert "tip_offsets" not in manifest
     assert "connected" not in manifest
+    assert manifest["schema_version"] == "0.3.0"
+    assert manifest["method_registry"]["lookup_url"] == "/api/protocols/methods/lookup"
+    assert manifest["method_registry"]["standard"] == "pybravo.bravo-method-registry"
+    assert manifest["catalog_summary"]["labware"]["count"] == len(manifest["labware"])
+    assert "z_in_velocity_mm_s" not in json.dumps(manifest["method_registry"])
     assert {row["id"] for row in manifest["assistant_operations"]} == set(
         get_args(ProtocolStep.model_fields["kind"].annotation)
     )
     assert {node for row in manifest["assistant_operations"] for node in row["lowers_to"]} <= ALLOWED_NODE_TYPES
     assert all(not row["model_selectable"] for row in manifest["robot_operations"])
     assert _operations(manifest)["transfer"]["lowers_to"] == ["liquid/Aspirate", "liquid/Dispense"]
+    assert _operations(manifest)["distribute"]["lowers_to"] == ["liquid/Aspirate", "liquid/Dispense"]
     assert "aspirate" not in _operations(manifest)
     assert "dispense" not in _operations(manifest)
     # Catalog tuples and mappings are returned as JSON-native, detached data.
@@ -75,7 +81,7 @@ def test_configured_head_and_gripper_gate_only_relevant_assistant_intents():
     context = {"head_type": "HT_384_PINTOOL", "has_gripper": False, "context_hash": "pin-tool"}
     manifest = build_capability_manifest(context)
     operations = _operations(manifest)
-    for identity in ("transfer", "mix", "move_plate", "stack_plate", "destack_plate"):
+    for identity in ("transfer", "distribute", "mix", "move_plate", "stack_plate", "destack_plate"):
         assert operations[identity]["selectable"] is False
         assert operations[identity]["availability"] == "unavailable"
     for identity in ("wait", "manual", "repeat"):
@@ -122,6 +128,8 @@ def test_compact_options_fit_small_local_model_budget_without_catalog_duplicatio
     assert "tip_definitions" not in compact
     assert "tipbox_choices" not in compact
     assert "robot_operations" not in compact
+    assert compact["method_registry"]["lookup_url"] == "/api/protocols/methods/lookup"
+    assert "methods" not in compact
     assert compact["assistant_operations"][0]["lowers_to"] == ["liquid/Aspirate", "liquid/Dispense"]
     assert compact["setup_decision_rules"]
     assert all("provenance" not in row and row.get("rationale") and row.get("required_evidence")
@@ -243,10 +251,10 @@ def test_setup_rules_expose_grounded_choices_and_keep_experiment_values_open():
 def test_setup_rules_match_published_schema_and_example():
     jsonschema = pytest.importorskip("jsonschema")
     root = Path(__file__).resolve().parents[1]
-    schema = json.loads((root / "schemas/bravo-capability-manifest-v0.2.schema.json").read_text())
+    schema = json.loads((root / "schemas/bravo-capability-manifest-v0.3.schema.json").read_text())
     validator = jsonschema.Draft202012Validator(schema)
     validator.check_schema(schema)
-    example = json.loads((root / "schemas/examples/bravo-capability-manifest-v0.2.example.json").read_text())
+    example = json.loads((root / "schemas/examples/bravo-capability-manifest-v0.3.example.json").read_text())
     assert not list(validator.iter_errors(example))
     assert {row["id"] for row in example["setup_decision_rules"]} == {
         row["id"] for row in build_capability_manifest({"head_type": "HT_384_D_70"})["setup_decision_rules"]
@@ -268,3 +276,7 @@ def test_previous_manifest_schema_and_example_remain_compatible():
     assert example["schema_version"] == "0.1.0"
     assert "setup_decision_rules" not in example
     assert not list(jsonschema.Draft202012Validator(schema).iter_errors(example))
+    old_schema = json.loads((root / "schemas/bravo-capability-manifest-v0.2.schema.json").read_text())
+    old_example = json.loads((root / "schemas/examples/bravo-capability-manifest-v0.2.example.json").read_text())
+    assert old_example["schema_version"] == "0.2.0"
+    assert not list(jsonschema.Draft202012Validator(old_schema).iter_errors(old_example))

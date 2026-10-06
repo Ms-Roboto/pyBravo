@@ -1,0 +1,44 @@
+# Reviewed methods are authored here. Liquid classes are imported separately
+# as incomplete search candidates until a scientist specifies applicability,
+# technique, provenance, and an exact tip identity for a method.
+version: 1
+methods:
+  - method_id: reference:agilent-384st10-1536
+    version: 1.0.0
+    status: reference_candidate
+    title: Agilent 384ST10 access to 1536-well plates
+    applicability:
+      head_types: [HT_384_D_70, HT_384_D_70_S2]
+      tip_ids: [st_10ul]
+      operations: [transfer, distribute]
+    evidence:
+      - source_type: publication
+        source_url: https://www.agilent.com/cs/library/brochures/brochure-pipette-and-microplate-5994-5118en-agilent.pdf
+        retrieved_at: '2026-10-05'
+        note: Vendor consumable compatibility reference; no local liquid-handling method or deck qualification supplied.
+      - source_type: publication
+        source_url: https://automation.help.agilent.com/AutomationSolutionsKB13/vworks4_ug/08_LiquidHandling.12.15.html
+        retrieved_at: '2026-10-05'
+        note: Vendor example of quadrant mapping from four 384-well sources to a 1536-well destination; no motion settings asserted here.
+  - method_id: reference:agilent-aspirate-task
+    version: 1.0.0
+    status: reference_candidate
+    title: Agilent Bravo aspirate task parameters
+    applicability:
+      operations: [transfer, mix, distribute]
+    evidence:
+      - source_type: publication
+        source_url: https://automation.help.agilent.com/AutomationSolutionsKB14/Bravo%20User%20Guide/QuickRef.11.11.html
+        retrieved_at: '2026-10-05'
+        note: Documents selectable aspirate task parameters; it is not a qualified method for any reagent.
+  - method_id: reference:agilent-dispense-task
+    version: 1.0.0
+    status: reference_candidate
+    title: Agilent Bravo dispense task parameters
+    applicability:
+      operations: [transfer, distribute]
+    evidence:
+      - source_type: publication
+        source_url: https://automation.help.agilent.com/AutomationSolutionsKB14/Bravo%20User%20Guide/QuickRef.11.12.html
+        retrieved_at: '2026-10-05'
+        note: Documents selectable dispense task parameters; it is not a qualified method for any reagent.

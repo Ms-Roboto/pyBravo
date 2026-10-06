@@ -52,5 +52,8 @@ logs/
 *.rej
 *.bak
 
+# Sidecar lock for atomic scientist-reviewed method updates
+config/protocol_methods.yaml.lock
+
 # Agent / assistant local settings
 .claude/settings.local.json

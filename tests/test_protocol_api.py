@@ -72,7 +72,7 @@ async def test_full_review_release_library_and_setup_lifecycle(environment):
         manifest_response = await client.get("/api/protocols/capabilities")
         assert manifest_response.status_code == 200
         manifest = manifest_response.json()
-        assert manifest["schema_version"] == "0.2.0"
+        assert manifest["schema_version"] == "0.3.0"
         assert manifest["context_hash"] == context["context_hash"]
         assert "profile" not in manifest
         assert next(row for row in manifest["assistant_operations"] if row["id"] == "transfer")["lowers_to"] == [
@@ -113,9 +113,10 @@ async def test_setup_recommendations_use_active_context_without_saving_draft(env
         observed_source_ids = []
         original_recommend = setup_recommendations_module.recommend_setup
 
-        def capture_selected_source(plan, setup, manifest, *, source=None):
+        def capture_selected_source(plan, setup, manifest, *, source=None, runtime_snapshot=None):
             observed_source_ids.append([paragraph["id"] for paragraph in source["paragraphs"]])
-            return original_recommend(plan, setup, manifest, source=source)
+            return original_recommend(plan, setup, manifest, source=source,
+                                      runtime_snapshot=runtime_snapshot)
 
         monkeypatch.setattr(setup_recommendations_module, "recommend_setup", capture_selected_source)
         response = await client.post("/api/protocols/setup-recommendations", json={
@@ -141,6 +142,45 @@ async def test_setup_recommendations_use_active_context_without_saving_draft(env
             "session_id": "missing-session", "plan": unsaved_plan,
         })
         assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_setup_recommendations_expose_read_only_unverified_runtime_evidence(environment, monkeypatch):
+    snapshot = {
+        "deck": {"4": ["Configured plate"]},
+        "tipbox_inventory": {"2": {"labware_name": "Configured rack", "tip_id": "st_10ul",
+                                   "rows": 16, "cols": 24, "occupied": ["0:0"]}},
+        "positions": {"X": 123},
+    }
+    monkeypatch.setattr(environment, "get_state", lambda: snapshot)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+        response = await client.post("/api/protocols/setup-recommendations", json={
+            "plan": {"name": "Inspect", "materials": [], "steps": [
+                {"id": "inspect", "kind": "manual", "message": "Inspect the deck."}]},
+        })
+        assert response.status_code == 200, response.text
+        advisory = response.json()["runtime_snapshot"]
+        assert advisory["status"] == "software_known_unverified"
+        assert advisory["physically_verified"] is False
+        assert advisory["occupied_slots"] == [
+            {"slot": 2, "labware_names": ["Configured rack"], "source": "software_tipbox_inventory"},
+            {"slot": 4, "labware_names": ["Configured plate"], "source": "software_deck_state"},
+        ]
+        assert advisory["tipbox_inventory"][0]["software_occupied_count"] == 1
+        assert "positions" not in advisory
+        manifest = (await client.get("/api/protocols/capabilities")).json()
+        assert "runtime_snapshot" not in manifest
+
+        def unavailable_state():
+            raise RuntimeError("software snapshot unavailable")
+
+        monkeypatch.setattr(environment, "get_state", unavailable_state)
+        response = await client.post("/api/protocols/setup-recommendations", json={
+            "plan": {"name": "Inspect", "materials": [], "steps": [
+                {"id": "inspect", "kind": "manual", "message": "Inspect the deck."}]},
+        })
+        assert response.status_code == 200, response.text
+        assert response.json()["runtime_snapshot"]["status"] == "unavailable"
 
 
 @pytest.mark.asyncio

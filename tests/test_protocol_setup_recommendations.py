@@ -40,6 +40,8 @@ def _fixture() -> tuple[dict, dict, dict]:
          "tip_definition_id": pair["tip_definition_id"], "available_tips": None}
         for number in (2, 1)
     ]
+    for slot, material in enumerate(materials, start=1):
+        material["deck_slot"] = slot
     steps = [
         {"id": f"source_{source}_to_destination_{destination}", "kind": "transfer",
          "description": "Transfer every source well into its destination quadrant.",
@@ -93,6 +95,17 @@ def test_full_quadrant_plan_yields_rule_backed_setup_proposals_and_scientist_inp
     assert _values(next_result)["/setup/tip_disposal_id"] == "return_to_source_rack"
     assert next(row for row in next_result["recommendations"] if row["path"] == "/setup/tip_rack_ids")["evidence_level"] == "heuristic"
     assert "/setup/tip_reuse_reason" in {row["path"] for row in next_result["unresolved"]}
+
+
+def test_pinned_methods_do_not_request_protocol_wide_liquid_settings():
+    plan, setup, manifest = _fixture()
+    for step in plan["steps"]:
+        step["method_ref"] = {"method_id": "reviewed:test", "revision": "pinned"}
+    result = recommend_setup(plan, setup, manifest)
+    unresolved_paths = {row["path"] for row in result["unresolved"]}
+    assert "/setup/liquid_class" not in unresolved_paths
+    assert "/setup/distance_from_bottom_mm" not in unresolved_paths
+    assert "/materials/4/available_tips" in unresolved_paths
 
 
 def test_empty_destinations_do_not_authorize_tip_reuse_or_invent_assessment():
@@ -349,3 +362,137 @@ def test_intervening_plate_move_blocks_claim_of_one_tip_set_per_source():
     assert "/setup/tip_strategy" not in _values(result)
     assert "/setup/tip_rack_ids" not in _values(result)
     assert any("handoff or plate move" in item for row in result["blocked"] for item in row["missing"])
+
+
+def test_deck_slots_are_suggested_only_for_unplaced_catalog_materials_and_reserve_moves():
+    plan, setup, manifest = _fixture()
+    for index in (0, 2, 4):
+        plan["materials"][index]["deck_slot"] = None
+    plan["steps"].append({"id": "park", "kind": "move_plate", "material": "source_1",
+                          "destination_slot": 7})
+    result = recommend_setup(plan, setup, manifest)
+    deck = {row["path"]: row for row in result["recommendations"]
+            if row["path"].endswith("/deck_slot")}
+    assert {path: row["value"] for path, row in deck.items()} == {
+        "/materials/0/deck_slot": 5,
+        "/materials/2/deck_slot": 3,
+        "/materials/4/deck_slot": 1,
+    }
+    assert all(row["requires_confirmation"] and row["evidence_level"] == "heuristic"
+               for row in deck.values())
+    assert all(7 in row["evidence"][0]["reserved_move_slots"] for row in deck.values())
+    assert plan["materials"][1]["deck_slot"] == 2
+
+
+def test_software_deck_state_reserves_unassigned_slots_without_confirming_tip_inventory():
+    plan, setup, manifest = _fixture()
+    plan["materials"][4]["deck_slot"] = None
+    original_manifest = copy.deepcopy(manifest)
+    snapshot = {
+        "deck": {"5": ["Software-assigned rack"], "6": ["Existing rack"]},
+        "tipbox_inventory": {
+            "5": {"labware_name": "Software-assigned rack", "tip_id": "st_10ul",
+                  "rows": 16, "cols": 24, "occupied": ["0:0", "0:1"]},
+            "6": {"labware_name": "Existing rack", "tip_id": "st_10ul",
+                  "rows": 16, "cols": 24, "occupied": ["0:0"]},
+        },
+    }
+    result = recommend_setup(plan, setup, manifest, runtime_snapshot=snapshot)
+    deck = next(row for row in result["recommendations"]
+                if row["path"] == "/materials/4/deck_slot")
+    assert deck["value"] == 7
+    assert deck["evidence"][0]["software_occupied_unassigned_slots"] == [5]
+    assert deck["requires_confirmation"] is True
+    runtime = result["runtime_snapshot"]
+    assert runtime["status"] == "software_known_unverified"
+    assert runtime["physically_verified"] is False
+    assert {row["slot"] for row in runtime["occupied_slots"]} == {5, 6}
+    assert runtime["tipbox_inventory"][0]["software_occupied_count"] == 2
+    assert runtime["tipbox_inventory"][0]["occupied_wells"] == ["0:0", "0:1"]
+    tip_questions = {row["path"]: row for row in result["unresolved"]
+                     if row["path"].endswith("/available_tips")}
+    assert set(tip_questions) == {"/materials/4/available_tips", "/materials/5/available_tips"}
+    assert tip_questions["/materials/4/available_tips"]["evidence"] == []
+    assert tip_questions["/materials/5/available_tips"]["evidence"][0]["matched_by"] == "draft_deck_slot_only"
+    assert tip_questions["/materials/5/available_tips"]["evidence"][0]["physically_verified"] is False
+    assert all(row["available_tips"] is None for row in plan["materials"] if row["role"] == "tips")
+    assert manifest == original_manifest
+
+
+def test_explicitly_ordered_four_source_stack_shares_one_suggested_slot():
+    plan, setup, manifest = _four_source_fixture()
+    for material in plan["materials"]:
+        material["deck_slot"] = None
+        if material["id"].startswith("source_"):
+            material["stack_order"] = int(material["id"].split("_")[1]) - 1
+    plan["steps"].extend([
+        {"id": "reserve_7", "kind": "move_plate", "material": "source_1", "destination_slot": 7},
+        {"id": "reserve_8", "kind": "destack_plate", "material": "source_2", "destination_slot": 8},
+    ])
+    result = recommend_setup(plan, setup, manifest)
+    deck = {row["path"]: row["value"] for row in result["recommendations"]
+            if row["path"].endswith("/deck_slot")}
+    assert len(deck) == 10
+    for index, material in enumerate(plan["materials"]):
+        if material["id"].startswith("source_"):
+            assert deck[f"/materials/{index}/deck_slot"] == 9
+    assert {deck[f"/materials/{index}/deck_slot"] for index, material in enumerate(plan["materials"])
+            if material["role"] == "tips"} == {1, 2, 3, 4}
+    assert {deck[f"/materials/{index}/deck_slot"] for index, material in enumerate(plan["materials"])
+            if material["id"].startswith("destination_")} == {5, 6}
+
+
+def test_deck_recommender_abstains_for_unverified_rack_or_ambiguous_stack():
+    plan, setup, manifest = _fixture()
+    plan["materials"][4]["deck_slot"] = None
+    plan["materials"][4]["tip_definition_id"] = "unknown-tip"
+    result = recommend_setup(plan, setup, manifest)
+    assert "/materials/4/deck_slot" not in _values(result)
+    assert any(row["path"] == "/materials/4/deck_slot" for row in result["blocked"])
+
+    plan, setup, manifest = _fixture()
+    plan["materials"][0]["deck_slot"] = None
+    plan["materials"][0]["stack_order"] = 1
+    result = recommend_setup(plan, setup, manifest)
+    assert "/materials/0/deck_slot" not in _values(result)
+    assert any("Stack levels" in row["reason"] for row in result["blocked"])
+
+
+def test_deck_recommender_does_not_partially_fill_overfull_layout():
+    plan, setup, manifest = _four_source_fixture()
+    for material in plan["materials"]:
+        material["deck_slot"] = None
+    plan["steps"].append({"id": "park", "kind": "move_plate", "material": "source_1",
+                          "destination_slot": 9})
+    result = recommend_setup(plan, setup, manifest)
+    assert not any(row["path"].endswith("/deck_slot") for row in result["recommendations"])
+    assert len([row for row in result["blocked"] if row["path"].endswith("/deck_slot")]) == 10
+
+
+def test_distribute_sources_count_for_tip_rack_order_and_capacity():
+    plan, setup, manifest = _fixture()
+    plan["steps"] = [
+        {"id": f"distribute_{source}", "kind": "distribute", "source": f"source_{source}",
+         "source_anchor": "A1", "dispenses": [
+             {"destination": f"destination_{destination}", "destination_anchor": anchor,
+              "volume_ul": 5.0}
+             for destination in (1, 2)
+         ]}
+        for source, anchor in ((2, "A2"), (1, "A1"))
+    ]
+    for decision in plan["decisions"]:
+        decision["value"]["plan_fingerprint"] = setup_plan_fingerprint(plan)
+    setup["tip_strategy"] = "fresh_each_source"
+    result = recommend_setup(plan, setup, manifest)
+    assert _values(result)["/setup/tip_rack_ids"] == ["tips_source_2", "tips_source_1"]
+    assert "/setup/head_mode" in _values(result)
+    assert not any(row["path"] == "/setup/tip_rack_ids" for row in result["blocked"])
+
+    plan["steps"][0]["dispenses"][0]["volume_ul"] = 6.0
+    result = recommend_setup(plan, setup, manifest)
+    assert _values(result)["/setup/tip_rack_ids"] == ["tips_source_2", "tips_source_1"]
+
+    plan["steps"][0]["dispenses"][0]["volume_ul"] = 11.0
+    result = recommend_setup(plan, setup, manifest)
+    assert "/setup/tip_rack_ids" not in _values(result)
+    assert any("capacity" in item for row in result["blocked"] for item in row["missing"])

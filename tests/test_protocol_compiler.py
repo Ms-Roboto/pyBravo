@@ -58,6 +58,235 @@ def test_deterministic_compile_has_only_connected_allowlisted_nodes_and_sources(
     assert summary["final_volumes_ul"]["samples"]["H12"] == 20.0
 
 
+def test_distribute_uses_one_aspiration_and_ordered_distinct_dispenses():
+    plan, setup, context, sources = protocol_fixture()
+    plan["materials"].append({"id": "samples-2", "name": "Second empty plate", "labware_id": "plate",
+                              "deck_slot": 5, "initial_volume_ul": 0.0, "dead_volume_ul": 0.0})
+    plan["steps"] = [{"id": "distribute-1", "kind": "distribute", "source": "buffer", "source_anchor": "A1",
+                      "dispenses": [{"destination": "samples", "destination_anchor": "A1", "volume_ul": 5.0},
+                                    {"destination": "samples-2", "destination_anchor": "A1", "volume_ul": 5.0}],
+                      "source_paragraph_ids": ["p1"],
+                      "source_values": [{"field": "volume_ul", "value": 5.0, "unit": "uL", "paragraph_id": "p1"}]}]
+    sources[0]["text"] = "Distribute 5 uL of buffer to each of two empty plates."
+    workflow = compile_plan(plan, setup, context, sources=sources)
+    liquid_nodes = [node for node in workflow["graph"]["nodes"] if node["type"].startswith("liquid/")]
+    assert [node["type"] for node in liquid_nodes] == ["liquid/Aspirate", "liquid/Dispense", "liquid/Dispense"]
+    assert [node["properties"]["volume"] for node in liquid_nodes] == [10.0, 5.0, 5.0]
+    assert [node["properties"].get("empty_tips") for node in liquid_nodes] == [None, False, True]
+    summary = workflow["protocol"]["run_sheet"]
+    assert summary["tips_required"] == 96
+    assert summary["reagent_consumption_ul"] == {"buffer": 960.0}
+    assert summary["final_volumes_ul"]["buffer"]["H12"] == 90.0
+    assert summary["final_volumes_ul"]["samples"]["H12"] == 5.0
+    assert summary["final_volumes_ul"]["samples-2"]["H12"] == 5.0
+    assert summary["run_steps"][0]["aspirate_volume_ul"] == 10.0
+
+    context["tip_definitions"][0]["capacity_ul"] = 9.0
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"]
+    assert "distribute_calibration_fallback" in codes(report)
+    paired = compile_plan(plan, setup, context, sources=sources)
+    assert [node["type"] for node in paired["graph"]["nodes"] if node["type"].startswith("liquid/")] == [
+        "liquid/Aspirate", "liquid/Dispense", "liquid/Aspirate", "liquid/Dispense"]
+    assert paired["protocol"]["run_sheet"]["run_steps"][0]["strategy"] == "paired_fallback"
+    context["tip_definitions"][0]["capacity_ul"] = 4.0
+    assert "tip_volume_exceeded" in codes(validate_plan(plan, setup, context, sources=sources))
+    plan["materials"][0]["initial_volume_ul"] = 19.0
+    assert "insufficient_reagent" in codes(validate_plan(plan, setup, context, sources=sources))
+
+
+def test_distribute_rejects_overlapping_partial_head_targets_before_paired_fallback():
+    plan, setup, context, sources = protocol_fixture()
+    setup["head_mode"] = {"subset_type": "rectangle", "subset_config": "back_left",
+                          "row_count": 2, "column_count": 2}
+    context["tip_definitions"][0]["capacity_ul"] = 9.0
+    plan["steps"] = [{"id": "overlap", "kind": "distribute", "source": "buffer", "source_anchor": "A1",
+                      "dispenses": [{"destination": "samples", "destination_anchor": "A1", "volume_ul": 5.0},
+                                    {"destination": "samples", "destination_anchor": "A2", "volume_ul": 5.0}],
+                      "source_paragraph_ids": ["p1"],
+                      "source_values": [{"field": "volume_ul", "value": 5.0, "unit": "uL", "paragraph_id": "p1"}]}]
+    sources[0]["text"] = "Distribute 5 uL of buffer into both A1 and A2 regions of an empty plate."
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert "distribute_calibration_fallback" in codes(report)
+    assert "overlapping_dispense" in codes(report)
+    assert not report["valid"]
+    with pytest.raises(ProtocolCompilationError):
+        compile_plan(plan, setup, context, sources=sources)
+
+
+def test_pinned_step_method_overrides_legacy_class_and_reports_adaptations(monkeypatch):
+    from pybravo.workflow.protocols import methods
+    from pybravo.workflow.protocols.store import digest
+
+    plan, setup, context, sources = protocol_fixture()
+    context["machine_id"] = "machine-1"
+    liquid_class = {"id": "water", "name": "Water", "machine_id": "machine-1",
+                    "head_type": "HT_96_D_200", "tip_id": "tips-200"}
+    context["liquid_classes"] = [liquid_class]
+    plan["materials"][0].update(reagent_id="reagent-buffer", reagent_family="buffer")
+    method = {"method_id": "buffer-20", "version": "1.0.0", "status": "reviewed", "title": "Reviewed buffer transfer",
+              "applicability": {"machine_ids": ["machine-1"], "head_types": ["HT_96_D_200"],
+                                "tip_ids": ["tips-200"], "tipbox_ids": ["rack"],
+                                "source_labware_ids": ["plate"], "destination_labware_ids": ["plate"],
+                                "reagent_families": ["buffer"], "operations": ["transfer"],
+                                "min_volume_ul": 1.0, "max_volume_ul": 20.0},
+              "aspirate": {"liquid_class_ref": {"id": "water", "name": "Water", "digest": digest(liquid_class)},
+                           "distance_from_bottom_mm": 2.0, "pre_air_ul": 0.0, "post_air_ul": 0.0,
+                           "dynamic_tip_extension": 0.0, "tip_touch": False},
+              "dispense": {"liquid_class_ref": {"id": "water", "name": "Water", "digest": digest(liquid_class)},
+                           "distance_from_bottom_mm": 1.5, "blowout_ul": 0.0,
+                           "dynamic_tip_retraction": 0.0, "tip_touch": False},
+              "tip_policy": "fresh_per_transfer", "evidence": [{"source_type": "synthetic_example"}]}
+    record = {**method, "revision": "a" * 64, "execution_ready": True, "missing_fields": []}
+    monkeypatch.setattr(methods, "get_method", lambda _context, identity, revision=None:
+                        record if identity == record["method_id"] and revision in (None, record["revision"]) else None)
+    plan["steps"][0]["method_ref"] = {"method_id": record["method_id"], "revision": record["revision"]}
+    setup["liquid_class"] = None
+    setup["distance_from_bottom_mm"] = None
+    workflow = compile_plan(plan, setup, context, sources=sources)
+    nodes = [node for node in workflow["graph"]["nodes"] if node["type"].startswith("liquid/")]
+    assert [node["properties"]["distance_from_bottom"] for node in nodes] == [2.0, 1.5]
+    assert all(node["properties"]["_method_ref"]["revision"] == record["revision"] for node in nodes)
+    summary = workflow["protocol"]["run_sheet"]
+    assert summary["methods_used"][0]["method_id"] == "buffer-20"
+    assert summary["run_steps"][0]["method_ref"]["digest"] == record["revision"]
+
+    plan["steps"][0].update(reagent_id="step-reagent", reagent_family="buffer")
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"]
+    assert report["summary"]["run_steps"][0]["reagent_id"] == "step-reagent"
+    assert not any(issue["code"] == "method_mismatch" for issue in report["issues"])
+
+    plan["materials"][0]["reagent_family"] = "viscous_buffer"
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"]
+    assert not any(issue["code"] == "method_mismatch" for issue in report["issues"])
+    plan["steps"][0]["reagent_family"] = "viscous_buffer"
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"]
+    assert any(issue["code"] == "method_mismatch" and issue["severity"] == "warning"
+               for issue in report["issues"])
+    record["applicability"]["max_volume_ul"] = 8.0
+    liquid_class["equation"] = {"control_points": [
+        {"desired_ul": 0.0, "commanded_ul": 0.0},
+        {"desired_ul": 25.0, "commanded_ul": 25.0},
+    ]}
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"]
+    assert any(difference.get("phase") == "aspirate" and difference["actual"] == 20.0
+               for issue in report["issues"] if issue["code"] == "method_mismatch"
+               for difference in issue["differences"])
+    liquid_class["equation"]["control_points"][-1] = {"desired_ul": 8.0, "commanded_ul": 8.0}
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert not report["valid"]
+    assert "method_calibration_limit" in codes(report)
+    record["applicability"]["max_volume_ul"] = 20.0
+    liquid_class["equation"]["control_points"][-1] = {"desired_ul": 20.0, "commanded_ul": 205.0}
+    assert "tip_volume_exceeded" in codes(validate_plan(plan, setup, context, sources=sources))
+    liquid_class["equation"]["control_points"][-1] = {"desired_ul": 20.0, "commanded_ul": 20.0}
+    record["aspirate"]["pre_air_ul"] = 190.0
+    assert "method_calibration_limit" in codes(validate_plan(plan, setup, context, sources=sources))
+    liquid_class.pop("equation")
+    assert "tip_volume_exceeded" in codes(validate_plan(plan, setup, context, sources=sources))
+    record["aspirate"]["pre_air_ul"] = 0.0
+    record["dispense"]["blowout_ul"] = 1.0
+    assert "method_blowout_unavailable" in codes(validate_plan(plan, setup, context, sources=sources))
+    record["aspirate"]["pre_air_ul"] = 2.0
+    assert "method_blowout_unavailable" not in codes(validate_plan(plan, setup, context, sources=sources))
+    record["aspirate"]["pre_air_ul"] = 0.0
+    original_step = plan["steps"][0]
+    original_text = sources[0]["text"]
+    record["dispense"]["distance_from_bottom_mm"] = 2.0
+    plan["steps"][0] = {"id": "mix-1", "kind": "mix", "material": "buffer", "anchor": "A1",
+                        "volume_ul": 20.0, "cycles": 3,
+                        "method_ref": {"method_id": record["method_id"], "revision": record["revision"]},
+                        "source_paragraph_ids": ["p1"],
+                        "source_values": [{"field": "volume_ul", "value": 20.0, "unit": "uL", "paragraph_id": "p1"},
+                                          {"field": "cycles", "value": 3.0, "unit": "count", "paragraph_id": "p1"}]}
+    sources[0]["text"] = "Mix 20 uL of buffer 3 times."
+    assert "method_blowout_unavailable" in codes(validate_plan(plan, setup, context, sources=sources))
+    record["dispense"]["blowout_ul"] = 0.0
+    record["aspirate"]["dynamic_tip_extension"] = 1.0
+    assert "method_mix_unsupported" in codes(validate_plan(plan, setup, context, sources=sources))
+    record["aspirate"]["dynamic_tip_extension"] = 0.0
+    plan["steps"][0] = original_step
+    sources[0]["text"] = original_text
+    record["dispense"]["distance_from_bottom_mm"] = 1.5
+    record["dispense"]["blowout_ul"] = 0.0
+    plan["steps"][0]["method_ref"]["revision"] = "stale-revision"
+    assert "method_reference" in codes(validate_plan(plan, setup, context, sources=sources))
+    with pytest.raises(ProtocolCompilationError):
+        compile_plan(plan, setup, context, sources=sources)
+
+
+def test_distribute_with_pinned_method_audits_one_aspiration_and_two_dispenses(monkeypatch):
+    from pybravo.workflow.protocols import methods
+
+    plan, setup, context, sources = protocol_fixture()
+    context["machine_id"] = "machine-1"
+    context["liquid_classes"] = [{"id": "water", "name": "Water", "machine_id": "machine-1",
+                                  "head_type": "HT_96_D_200", "tip_id": "tips-200"}]
+    plan["materials"][0]["reagent_family"] = "buffer"
+    plan["materials"].append({"id": "samples-2", "name": "Second empty plate", "labware_id": "plate",
+                              "deck_slot": 5, "initial_volume_ul": 0.0, "dead_volume_ul": 0.0})
+    plan["steps"] = [{"id": "distribute-1", "kind": "distribute", "source": "buffer", "source_anchor": "A1",
+                      "dispenses": [{"destination": "samples", "destination_anchor": "A1", "volume_ul": 5.0},
+                                    {"destination": "samples-2", "destination_anchor": "A1", "volume_ul": 5.0}],
+                      "method_ref": {"method_id": "buffer-multi", "revision": "b" * 64},
+                      "source_paragraph_ids": ["p1"],
+                      "source_values": [{"field": "volume_ul", "value": 5.0, "unit": "uL", "paragraph_id": "p1"}]}]
+    sources[0]["text"] = "Distribute 5 uL of buffer to each of two empty plates."
+    setup.update(tip_strategy="fresh_each_source", tip_reuse_reason="One source and two initially empty destinations",
+                 liquid_class=None, distance_from_bottom_mm=None)
+    record = {"method_id": "buffer-multi", "version": "1.0.0", "revision": "b" * 64,
+              "status": "reviewed", "execution_ready": True, "missing_fields": [],
+              "applicability": {"machine_ids": ["machine-1"], "head_types": ["HT_96_D_200"],
+                                "tip_ids": ["tips-200"], "tipbox_ids": ["rack"],
+                                "source_labware_ids": ["plate"], "destination_labware_ids": ["plate"],
+                                "reagent_families": ["buffer"], "operations": ["distribute"],
+                                "min_volume_ul": 1.0, "max_volume_ul": 10.0},
+              "aspirate": {"liquid_class_ref": {"id": "water"}, "distance_from_bottom_mm": 2.0,
+                           "pre_air_ul": 0.0, "post_air_ul": 0.0, "dynamic_tip_extension": 0.0, "tip_touch": False},
+              "dispense": {"liquid_class_ref": {"id": "water"}, "distance_from_bottom_mm": 1.5,
+                           "blowout_ul": 0.0, "dynamic_tip_retraction": 0.0, "tip_touch": False},
+              "tip_policy": "reuse_within_source"}
+    monkeypatch.setattr(methods, "get_method", lambda _context, identity, revision=None:
+                        record if identity == record["method_id"] and revision == record["revision"] else None)
+    workflow = compile_plan(plan, setup, context, sources=sources)
+    liquid_nodes = [node for node in workflow["graph"]["nodes"] if node["type"].startswith("liquid/")]
+    assert [node["properties"]["volume"] for node in liquid_nodes] == [10.0, 5.0, 5.0]
+    assert [node["properties"]["distance_from_bottom"] for node in liquid_nodes] == [2.0, 1.5, 1.5]
+    assert all(node["properties"]["_method_ref"]["method_id"] == "buffer-multi" for node in liquid_nodes)
+    assert not any(issue["code"] == "method_mismatch" for issue in validate_plan(plan, setup, context, sources=sources)["issues"])
+    record["applicability"]["min_volume_ul"] = 8.0
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"]
+    assert sum(difference.get("phase") == "dispense" for issue in report["issues"]
+               if issue["code"] == "method_mismatch" for difference in issue["differences"]) == 2
+    record["applicability"]["min_volume_ul"] = 1.0
+    record["dispense"]["blowout_ul"] = 1.0
+    assert "method_distribute_unsupported" in codes(validate_plan(plan, setup, context, sources=sources))
+    original_targets = plan["steps"][0]["dispenses"]
+    plan["steps"][0]["dispenses"] = original_targets[:1]
+    assert "method_distribute_unsupported" in codes(validate_plan(plan, setup, context, sources=sources))
+    plan["steps"][0]["dispenses"] = original_targets
+    record["dispense"]["blowout_ul"] = 0.0
+    record["aspirate"]["pre_air_ul"] = 1.0
+    assert "method_distribute_air_gap" in codes(validate_plan(plan, setup, context, sources=sources))
+    record["aspirate"]["pre_air_ul"] = 0.0
+    record["aspirate"]["post_air_ul"] = 1.0
+    assert "method_distribute_air_gap" in codes(validate_plan(plan, setup, context, sources=sources))
+    record["aspirate"]["post_air_ul"] = 0.0
+    context["tip_definitions"][0]["capacity_ul"] = 9.0
+    context["liquid_classes"].append({"id": "water-dispense", "name": "Water dispense",
+                                      "machine_id": "machine-1", "head_type": "HT_96_D_200",
+                                      "tip_id": "tips-200", "equation": {"control_points": [
+                                          {"desired_ul": 0.0, "commanded_ul": 0.0},
+                                          {"desired_ul": 10.0, "commanded_ul": 10.04}]}})
+    record["dispense"]["liquid_class_ref"] = {"id": "water-dispense"}
+    assert "distribute_calibration" in codes(validate_plan(plan, setup, context, sources=sources))
+
+
 def test_missing_data_becomes_questions_and_never_executable():
     plan, setup, context, sources = protocol_fixture()
     plan["steps"][0]["volume_ul"] = None
@@ -362,6 +591,53 @@ def test_four_stacked_384_sources_fill_both_1536_plates_with_four_isolated_st10_
     assert "Before every run" in checkpoints[0]
     assert "returned spent tips" in checkpoints[1]
     assert summary["spent_tip_rack_ids"] == [f"rack-{n}" for n in range(1, 5)]
+
+
+def test_nonlinear_st10_distribute_uses_paired_fallback_without_extra_tipboxes():
+    plan, setup, context, sources = _four_source_quadrant_fixture()
+    context["liquid_classes"][0]["equation"] = {"control_points": [
+        {"desired_ul": 0.0, "commanded_ul": 0.0},
+        {"desired_ul": 5.0, "commanded_ul": 5.5},
+        {"desired_ul": 10.0, "commanded_ul": 10.0},
+    ]}
+    revised = []
+    for index, step in enumerate(plan["steps"]):
+        if step["kind"] == "transfer" and step["destination"] == "dest-a":
+            other = plan["steps"][index + 1]
+            revised.append({"id": f"distribute-{step['source']}", "kind": "distribute",
+                            "source": step["source"], "source_anchor": "A1",
+                            "dispenses": [
+                                {"destination": transfer["destination"],
+                                 "destination_anchor": transfer["destination_anchor"], "volume_ul": 5.0}
+                                for transfer in (step, other)],
+                            "source_paragraph_ids": ["p1"], "source_values": step["source_values"]})
+        elif step["kind"] != "transfer":
+            revised.append(step)
+    plan["steps"] = revised
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"], report["issues"]
+    assert sum(issue["code"] == "distribute_calibration_fallback" for issue in report["issues"]) == 4
+    workflow = compile_plan(plan, setup, context, sources=sources)
+    liquid_nodes = [node for node in workflow["graph"]["nodes"] if node["type"].startswith("liquid/")]
+    assert [node["type"] for node in liquid_nodes[:4]] == [
+        "liquid/Aspirate", "liquid/Dispense", "liquid/Aspirate", "liquid/Dispense"]
+    assert [node["properties"]["volume"] for node in liquid_nodes[:4]] == [5.0] * 4
+    summary = workflow["protocol"]["run_sheet"]
+    assert summary["tips_required"] == 4 * 384
+    assert all(step["strategy"] == "paired_fallback" and step["aspiration_sequence_ul"] == [5.0, 5.0]
+               for step in summary["run_steps"] if step["kind"] == "distribute")
+    assert all(volume == 5.0 for destination in ("dest-a", "dest-b")
+               for volume in summary["final_volumes_ul"][destination].values())
+    context["liquid_classes"][0]["equation"]["control_points"][-1]["commanded_ul"] = 11.0
+    report = validate_plan(plan, setup, context, sources=sources)
+    assert report["valid"]
+    assert any("commanded_tip_capacity" in issue["reasons"] for issue in report["issues"]
+               if issue["code"] == "distribute_calibration_fallback")
+    assert compile_plan(plan, setup, context, sources=sources)["protocol"]["run_sheet"]["tips_required"] == 4 * 384
+    next(material for material in plan["materials"] if material["id"] == "dest-a")["initial_volume_ul"] = 1.0
+    assert "distribute_calibration" in codes(validate_plan(plan, setup, context, sources=sources))
+    with pytest.raises(ProtocolCompilationError):
+        compile_plan(plan, setup, context, sources=sources)
 
 
 def test_stacked_sources_require_explicit_top_first_moves_and_unshared_racks():
