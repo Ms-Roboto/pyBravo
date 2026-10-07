@@ -4743,6 +4743,33 @@ function renderPropertiesPanel(node) {
         return;
     }
 
+    // Frames already expose their separately rendered properties.title below.
+    if (node.type !== 'flow/Frame') {
+        const titleField = document.createElement('div');
+        titleField.style.cssText = 'margin-bottom: 10px;';
+        const titleLabel = document.createElement('label');
+        titleLabel.htmlFor = 'node-title-input';
+        titleLabel.style.cssText = 'display: block; font-size: 9px; color: var(--text-dimmer); margin-bottom: 3px;';
+        titleLabel.textContent = 'Title';
+        const titleInput = document.createElement('input');
+        titleInput.id = 'node-title-input';
+        titleInput.type = 'text';
+        titleInput.value = node.title || '';
+        titleInput.style.cssText = 'width: 100%; padding: 4px 8px; font-size: 11px; font-family: var(--sans); background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); outline: none;';
+        titleInput.addEventListener('change', () => {
+            const nextTitle = titleInput.value.trim();
+            if (!nextTitle) { titleInput.value = node.title || ''; return; }
+            titleInput.value = nextTitle;
+            if (nextTitle === node.title) return;
+            node.title = nextTitle;
+            title.textContent = nextTitle;
+            node.setDirtyCanvas(true, true);
+            markActiveDirty();
+        });
+        titleField.append(titleLabel, titleInput);
+        body.appendChild(titleField);
+    }
+
     // Tips Off: surface the inherited head_mode (and offer optional anchor
     // override) BEFORE the property loop so the operator sees the inherit
     // story at the top of the panel. Returns true if a Tips Off section
