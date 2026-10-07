@@ -35,7 +35,10 @@ from pybravo.evals.text2wetlab.planning import OT2Plan, plan_to_prompt
 from pybravo.evals.text2wetlab.planning_runtime import run_grounded_plan
 from pybravo.evals.text2wetlab.reaction import PipetteRange, Stroke, audit_strokes
 from pybravo.evals.text2wetlab.rubric_audit import RUBRIC_IDS, audit_rubric_coverage
-from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
+from pybravo.evals.text2wetlab.source_context import (
+    prepare_planning_source,
+    prepare_scientific_source,
+)
 from pybravo.evals.text2wetlab.source_fidelity import (
     SOURCE_FIDELITY_GUIDANCE,
     audit_direct_source_delivery,
@@ -1101,9 +1104,19 @@ async def generate_ot2_protocol(
     patch_complete = patch_completion or (structured_json if completion is None else None)
     accepted_plan: OT2Plan | None = None
     if evidence_planning:
+        planning_context = (prepare_planning_source(
+            scientific_source, task_instruction=instruction,
+        ) if scientific_source and scientific_source.strip() else None)
+        if planning_context is not None:
+            trace["planning_scientific_source"] = {
+                "strategy": planning_context.strategy,
+                "source_sha256": planning_context.source_sha256,
+                "excerpt_sha256": planning_context.excerpt_sha256,
+                "line_spans": planning_context.line_spans,
+            }
         planned = await run_grounded_plan(
             instruction=instruction,
-            scientific_source=method_text,
+            scientific_source=planning_context.text if planning_context else None,
             geometry=geometry,
             directory=directory,
             completion=complete,

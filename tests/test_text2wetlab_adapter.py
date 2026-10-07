@@ -494,6 +494,37 @@ async def test_generation_uses_verbatim_methods_passage_with_source_digest(tmp_p
     assert trace["scientific_source"]["strategy"] == "verbatim_methods_section"
 
 
+@pytest.mark.asyncio
+async def test_optional_planning_uses_separate_bounded_paper_excerpt(tmp_path, monkeypatch):
+    from pybravo.evals.text2wetlab.source_context import SourceContext
+
+    paper = "Methods\nUse 40 µL beads.\nResults\n"
+    excerpt = SourceContext("Methods\nUse 40 µL beads.", "bounded", "source-digest",
+                            "excerpt-digest", None, None, ((1, 2),))
+    monkeypatch.setattr(adapter, "prepare_planning_source", lambda source, **kwargs: excerpt)
+    monkeypatch.setattr(adapter, "labware_geometry_context", lambda *args, **kwargs: {})
+    monkeypatch.setattr(adapter, "simulate_protocol",
+                        lambda *args, **kwargs: adapter.SimulationResult("passed", "ok"))
+
+    async def fake_plan(**kwargs):
+        assert kwargs["scientific_source"] == excerpt.text
+        return PlanningResult(None, ())
+
+    async def completion(messages, schema, **kwargs):
+        assert "Use 40 µL beads." in messages[1]["content"]
+        return StructuredResponse({"code": VALID_PROTOCOL}, {"model": "local-qwen"})
+
+    monkeypatch.setattr(adapter, "run_grounded_plan", fake_plan)
+    result = await adapter.generate_ot2_protocol(
+        "Clean up plate.", tmp_path, scientific_source=paper,
+        evidence_planning=True, completion=completion,
+        event_reader=lambda _: adapter.EventLog([], {}),
+    )
+    trace = json.loads(result.trace_path.read_text())
+    assert trace["planning_scientific_source"]["excerpt_sha256"] == "excerpt-digest"
+    assert trace["scientific_source"]["excerpt_sha256"] != "excerpt-digest"
+
+
 def test_event_gate_rejects_reusing_tip_across_specimen_wells():
     log = adapter.EventLog([
         _event("pick"),
