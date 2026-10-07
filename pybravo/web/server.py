@@ -2466,6 +2466,8 @@ async def get_designer_workflow(workflow_id: str):
 async def create_designer_workflow(request: Request):
     """Create a new designer workflow."""
     body = await request.json()
+    if isinstance(body, dict) and body.get("protocol_compiled_preview"):
+        raise HTTPException(status_code=409, detail="Compiled protocol previews cannot be saved as Designer workflows.")
     return _get_workflow_storage().create_workflow(body)
 
 
@@ -2473,6 +2475,11 @@ async def create_designer_workflow(request: Request):
 async def update_designer_workflow(workflow_id: str, request: Request):
     """Update an existing designer workflow."""
     body = await request.json()
+    existing = _get_workflow_storage().get_workflow(workflow_id)
+    if (isinstance(body, dict) and body.get("protocol_compiled_preview")) or (
+        existing and existing.get("protocol_compiled_preview")
+    ):
+        raise HTTPException(status_code=409, detail="Compiled protocol previews cannot be saved as Designer workflows.")
     result = _get_workflow_storage().update_workflow(workflow_id, body)
     if result is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -2492,6 +2499,9 @@ async def import_designer_workflow(file: UploadFile = File(...)):
     """Import a designer workflow from a JSON file."""
     content = await file.read()
     try:
+        data = json.loads(content)
+        if isinstance(data, dict) and data.get("protocol_compiled_preview"):
+            raise HTTPException(status_code=409, detail="Compiled protocol previews cannot be imported as Designer workflows.")
         return _get_workflow_storage().import_workflow(content)
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -2635,6 +2645,8 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
     # Chat builds a structural DAG so scientists can see and revise the plan
     # before setup. Its review nodes are not robot tasks. Refuse both preview
     # simulation and execution even if a saved copy loses its draft marker.
+    if data.get("protocol_compiled_preview"):
+        raise HTTPException(status_code=409, detail="Compiled protocol previews are read-only and cannot run in Designer.")
     if data.get("protocol_chat_draft") or any(
         node.get("type") == "review/ProtocolStep"
         for node in (data.get("graph") or {}).get("nodes", [])

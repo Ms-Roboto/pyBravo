@@ -607,6 +607,39 @@ def _require_passed(record: dict, capabilities: dict) -> tuple[str, dict]:
     return fingerprint, workflow
 
 
+@router.get("/api/protocols/{identity}/designer-preview")
+async def designer_preview(identity: str):
+    """Return the simulated compiler graph for inspection, without releasing it.
+
+    The preview is rebuilt from the saved revision and current catalog. It is
+    deliberately never persisted as a Designer workflow or approval record.
+    """
+    record = _record(identity)
+    capabilities = machine_context(_bravo())
+    fingerprint, workflow = _require_passed(record, capabilities)
+    workflow = copy.deepcopy(workflow)
+    workflow.update(
+        protocol_compiled_preview=True,
+        protocol_session_id=identity,
+        protocol_revision=record["revision"],
+    )
+    return {
+        "workflow": workflow,
+        "preview": {
+            "status": "simulation_only" if (record.get("setup") or {}).get("simulation_only_liquid_assumption")
+                      else "unapproved",
+            "session_id": identity,
+            "revision": record["revision"],
+            "context_hash": capabilities["context_hash"],
+            "record_hash": fingerprint,
+            "workflow_hash": workflow_digest(workflow),
+            "read_only": True,
+            "executable": False,
+            "approved": False,
+        },
+    }
+
+
 def _require_releasable_liquid_method(record: dict) -> None:
     if (record.get("setup") or {}).get("simulation_only_liquid_assumption") is not None:
         raise HTTPException(
@@ -686,9 +719,14 @@ async def publish(identity: str, request: PublishRequest):
 
 def check_execution_release(workflow_id: str, workflow: dict, bravo) -> dict | None:
     """Called before initialize or any motion; stored release survives stripped markers."""
+    if workflow.get("protocol_compiled_preview"):
+        raise HTTPException(409, "A compiled protocol preview is read-only and cannot run. Review and approve it in Protocol Assistant.")
     release = _store.get("releases", workflow_id)
     identity = workflow.get("protocol_session_id") or (release or {}).get("session_id")
     if not identity:
+        if any("_protocol_step_id" in (node.get("properties") or {})
+               for node in (workflow.get("graph") or {}).get("nodes", [])):
+            raise HTTPException(409, "A compiled protocol graph needs an approved release before execution.")
         return None
     record = _record(identity)
     capabilities = machine_context(bravo)

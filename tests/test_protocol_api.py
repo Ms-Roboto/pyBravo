@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 from unittest.mock import AsyncMock
 
 import httpx
@@ -131,6 +132,72 @@ async def test_simulation_only_liquid_assumption_cannot_be_approved_or_released(
         published = await client.post(f"/api/protocols/{identity}/publish", json={"name": "Unsafe release"})
         assert published.status_code == 409
         assert "simulation-only liquid assumption" in published.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_strictly_simulated_protocol_can_be_previewed_without_approval_or_storage(environment):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+        session = await session_with_plan(client)
+        identity = session["id"]
+        no_simulation = await client.get(f"/api/protocols/{identity}/designer-preview")
+        assert no_simulation.status_code == 409
+
+        response = await client.post(f"/api/protocols/{identity}/simulate")
+        assert response.status_code == 200, response.text
+        await asyncio.wait_for(api._simulations[identity], timeout=10)
+        before = (await client.get(f"/api/protocols/{identity}")).json()
+        assert before["simulation"]["status"] == "passed"
+        assert before["approval"] is None
+
+        preview_response = await client.get(f"/api/protocols/{identity}/designer-preview")
+        assert preview_response.status_code == 200, preview_response.text
+        payload = preview_response.json()
+        preview = payload["preview"]
+        workflow = payload["workflow"]
+        assert preview["session_id"] == identity
+        assert preview["revision"] == before["revision"]
+        assert preview["read_only"] is True
+        assert preview["executable"] is False
+        assert preview["approved"] is False
+        assert preview["status"] == "unapproved"
+        assert workflow["protocol_compiled_preview"] is True
+        assert workflow["protocol_session_id"] == identity
+        assert workflow["protocol_revision"] == before["revision"]
+        assert [node["type"] for node in workflow["graph"]["nodes"]] == [
+            "flow/Start", "system/Manual", "system/Wait", "flow/End",
+        ]
+        assert (await client.get(f"/api/protocols/{identity}")).json() == before
+        assert server._get_workflow_storage().list_workflows() == []
+
+        save = await client.post("/api/workflows", json=workflow)
+        assert save.status_code == 409
+        imported = await client.post("/api/workflows/import-json", files={
+            "file": ("compiled-preview.json", json.dumps(workflow), "application/json"),
+        })
+        assert imported.status_code == 409
+        assert server._get_workflow_storage().list_workflows() == []
+        ordinary = await client.post("/api/workflows", json={"name": "Unrelated workflow", "graph": {"nodes": []}})
+        assert ordinary.status_code == 200
+        replace = await client.put(f"/api/workflows/{ordinary.json()['id']}", json=workflow)
+        assert replace.status_code == 409
+        assert (await client.get(f"/api/workflows/{ordinary.json()['id']}")).json()["name"] == "Unrelated workflow"
+        with pytest.raises(HTTPException) as denied:
+            api.check_execution_release("copied-preview", workflow, environment)
+        assert denied.value.status_code == 409
+        forced = server._get_workflow_storage().create_workflow({**copy.deepcopy(workflow), "id": "forced-preview"})
+        cannot_run = await client.post(f"/api/workflows/{forced['id']}/simulate")
+        assert cannot_run.status_code == 409
+        cannot_remove_marker = await client.put(f"/api/workflows/{forced['id']}", json={"protocol_compiled_preview": False})
+        assert cannot_remove_marker.status_code == 409
+
+        changed = copy.deepcopy(before["plan"])
+        changed["name"] = "Changed after simulation"
+        edited = await client.patch(f"/api/protocols/{identity}", json={
+            "revision": before["revision"], "plan": changed,
+        })
+        assert edited.status_code == 200
+        stale = await client.get(f"/api/protocols/{identity}/designer-preview")
+        assert stale.status_code == 409
 
 
 @pytest.mark.asyncio
