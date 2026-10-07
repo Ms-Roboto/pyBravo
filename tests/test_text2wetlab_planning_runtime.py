@@ -13,7 +13,7 @@ from pybravo.evals.text2wetlab.planning_runtime import (
     _parse_feedback,
     run_grounded_plan,
 )
-from pybravo.workflow.protocols.llm import ProtocolLLMError, StructuredResponse
+from pybravo.workflow.protocols.llm import LocalLLMConfig, ProtocolLLMError, StructuredResponse
 
 INSTRUCTION = "Move the reaction plate to a thermocycler by hand."
 
@@ -105,6 +105,22 @@ async def test_local_planning_timeout_falls_back_to_source_without_cloud(tmp_pat
         "number": 1, "status": "model_failed",
         "error": "ProtocolLLMError: Local Qwen request timed out",
     },)
+
+
+@pytest.mark.asyncio
+async def test_optional_planning_limits_each_local_request_without_retries(tmp_path):
+    async def completion(messages, schema, **kwargs):
+        assert kwargs["config"].timeout_s == 240
+        assert kwargs["config"].retries == 0
+        raise ProtocolLLMError("Local Qwen request timed out")
+
+    result = await run_grounded_plan(
+        instruction=INSTRUCTION, scientific_source=None, geometry=None,
+        directory=tmp_path, completion=completion,
+        config=LocalLLMConfig(timeout_s=300, retries=2),
+    )
+    assert result.plan is None
+    assert len(result.attempts) == 1
 
 
 @pytest.mark.asyncio

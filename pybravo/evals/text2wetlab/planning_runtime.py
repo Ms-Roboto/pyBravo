@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 
@@ -128,11 +128,16 @@ async def run_grounded_plan(
                                        + "\n\n" + SOURCE_FIDELITY_GUIDANCE)},
         {"role": "user", "content": user_text},
     ]
+    base_config = config or LocalLLMConfig.from_env()
+    # Planning is optional. One bounded local HTTP request per plan revision
+    # leaves time for the source-grounded code drafter when the model is slow.
+    planning_config = replace(base_config, timeout_s=min(base_config.timeout_s, 240),
+                              retries=0)
     records: list[dict[str, Any]] = []
     for number in range(1, max_attempts + 1):
         try:
             response = await completion(
-                messages, PLAN_SCHEMA, config=config, schema_name="ot2_evidence_plan",
+                messages, PLAN_SCHEMA, config=planning_config, schema_name="ot2_evidence_plan",
                 http_client=http_client,
             )
         except ProtocolLLMError as exc:
