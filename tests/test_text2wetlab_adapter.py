@@ -400,6 +400,9 @@ async def test_failed_static_gate_never_simulates_and_never_leaves_stale_output(
     assert trace["static_validation_passed"] is False
     assert trace["event_validation_passed"] is False
     assert trace["attempts"][0]["validation"] == "failed"
+    rejected = tmp_path / "rejected_attempt_1.py.txt"
+    assert rejected.read_text(encoding="utf-8").startswith("import os\n")
+    assert trace["attempts"][0]["rejected_source_path"] == str(rejected)
     assert not list(tmp_path.glob("candidate_attempt_*.py"))
 
 

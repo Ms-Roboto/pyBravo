@@ -1069,6 +1069,9 @@ async def generate_ot2_protocol(
     for prior_candidate in directory.glob("candidate_attempt_*.py"):
         if re.fullmatch(r"candidate_attempt_\d+(?:_patch_\d+)?\.py", prior_candidate.name):
             prior_candidate.unlink()
+    for prior_rejected in directory.glob("rejected_attempt_*.py.txt"):
+        if re.fullmatch(r"rejected_attempt_\d+\.py\.txt", prior_rejected.name):
+            prior_rejected.unlink()
     for prior_patch in directory.glob("patch_attempt_*.json"):
         if re.fullmatch(r"patch_attempt_\d+_\d+\.json", prior_patch.name):
             prior_patch.unlink()
@@ -1196,6 +1199,10 @@ async def generate_ot2_protocol(
                 "validation": "passed" if failure is None else "failed",
             }
             if failure is not None:
+                if code:
+                    rejected = directory / f"rejected_attempt_{index + 1}.py.txt"
+                    rejected.write_text(code, encoding="utf-8")
+                    attempt["rejected_source_path"] = str(rejected)
                 attempt["error"] = failure
                 trace["attempts"].append(attempt)
                 prior_code, prior_error = code, failure
