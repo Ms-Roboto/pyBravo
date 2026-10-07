@@ -1426,6 +1426,9 @@ async def get_tipbox_legal_anchors(
     tipbox_cols: int = 12,
     purpose: str = "pickup",
     occupied_cells: str | None = None,
+    fresh_cells: str | None = None,
+    row_stride: int = 1,
+    col_stride: int = 1,
 ):
     """Return the design-time legal anchor positions for the given head mode
     over a tipbox of `tipbox_rows × tipbox_cols`. Used by the workflow
@@ -1443,7 +1446,15 @@ async def get_tipbox_legal_anchors(
       tipbox is FULL (occupied=all); 'return' assumes it is EMPTY (occupied=∅).
       Used as fallbacks when the caller can't simulate occupancy.
     """
-    from pybravo.head_mode import legal_tipbox_anchors, normalize_head_mode
+    from dataclasses import replace
+
+    from pybravo.head_mode import (
+        TipAnchor,
+        legal_tipbox_anchors,
+        normalize_head_mode,
+        selected_tip_wells,
+        tipbox_selection,
+    )
     bravo = get_bravo()
     try:
         mode = normalize_head_mode(
@@ -1459,13 +1470,14 @@ async def get_tipbox_legal_anchors(
         raise HTTPException(status_code=400, detail="tipbox_rows and tipbox_cols must be positive")
     if purpose not in ("pickup", "return"):
         raise HTTPException(status_code=400, detail="purpose must be 'pickup' or 'return'")
+    if row_stride < 1 or col_stride < 1:
+        raise HTTPException(400, 'Tip strides must be positive integers')
 
     occupied: set[tuple[int, int]]
     if occupied_cells is not None:
         # Explicit occupancy from the caller (typically the designer's
-        # simulator). Parse "r:c,r:c,..." into a set of tuples. Silently
-        # drops malformed tokens — the picker degrades to a less-accurate
-        # but still-functional view rather than 500-ing.
+        # simulator). Invalid occupancy cannot become an apparently empty
+        # return rack or a fresh supply; refuse it before choosing an anchor.
         occupied = set()
         for token in occupied_cells.split(","):
             token = token.strip()
@@ -1476,19 +1488,54 @@ async def get_tipbox_legal_anchors(
                 r, c = int(r_str), int(c_str)
                 if 0 <= r < tipbox_rows and 0 <= c < tipbox_cols:
                     occupied.add((r, c))
-            except (ValueError, TypeError):
-                continue
+                else:
+                    raise ValueError('Cell outside the rack')
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(400, 'occupied_cells must contain row:col pairs inside the rack') from exc
     elif purpose == "pickup":
         occupied = {(r, c) for r in range(tipbox_rows) for c in range(tipbox_cols)}
     else:
         occupied = set()
     anchors = legal_tipbox_anchors(tipbox_rows, tipbox_cols, mode, occupied, purpose=purpose)
+    if (row_stride, col_stride) != (1, 1):
+        # Match native explicit interleaved selection bookkeeping rather than
+        # treating a 96-channel quadrant as 96 contiguous rack holes. Physical
+        # reachability and clearance remain native rehearsal checks.
+        anchors = []
+        for row in range(max(0, tipbox_rows - (mode.row_count - 1) * row_stride)):
+            for col in range(max(0, tipbox_cols - (mode.column_count - 1) * col_stride)):
+                selection = replace(tipbox_selection(0, row, col, mode), row_stride=row_stride, col_stride=col_stride)
+                wells = set(selected_tip_wells(tipbox_rows, tipbox_cols, selection))
+                if wells and ((purpose == 'pickup' and wells <= occupied) or (purpose == 'return' and not wells & occupied)):
+                    anchors.append(TipAnchor(row, col, mode.row_count, mode.column_count,
+                                             selection.mirror_corner, selection.head_anchor))
+    fresh = set(occupied)
+    if fresh_cells is not None:
+        fresh = set()
+        for token in fresh_cells.split(','):
+            if not token.strip():
+                continue
+            try:
+                row, col = map(int, token.split(':'))
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(400, 'fresh_cells must contain row:col pairs') from exc
+            if not (0 <= row < tipbox_rows and 0 <= col < tipbox_cols) or (row, col) not in occupied:
+                raise HTTPException(400, 'Fresh cells must be physically occupied wells inside the rack')
+            fresh.add((row, col))
+    if purpose == 'pickup':
+        anchors = [anchor for anchor in anchors if set(selected_tip_wells(
+            tipbox_rows, tipbox_cols, replace(tipbox_selection(0, anchor.row, anchor.col, mode),
+                                            row_stride=row_stride, col_stride=col_stride)
+        )).issubset(fresh)]
     return {
         "head_mode": mode.to_dict(),
         "tipbox_rows": tipbox_rows,
         "tipbox_cols": tipbox_cols,
         "purpose": purpose,
         "occupied_cells_count": len(occupied),
+        "fresh_cells_count": len(fresh),
+        "row_stride": row_stride,
+        "col_stride": col_stride,
         "legal_anchors": [anchor.to_dict() for anchor in anchors],
     }
 
@@ -2850,7 +2897,13 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
         invalid_nodes = _validate_workflow_liquid_classes(graph_data, validation_bravo)
         if generated_rehearsal:
             invalid_nodes.extend(_missing_generated_liquid_methods(graph_data))
-        logger.info("Pre-flight validation found %d invalid liquid references", len(invalid_nodes))
+            from pybravo.physics.planning import mechanical_issues
+            from pybravo.workflow.protocols.context import machine_context
+
+            class_error_nodes = {item['node_id'] for item in invalid_nodes if item['field'] == 'liquid_class'}
+            invalid_nodes.extend(item for item in mechanical_issues(data, catalog_context=machine_context(validation_bravo))
+                                 if not (item['value'] == 'UNKNOWN_LIQUID_CLASS' and item['node_id'] in class_error_nodes))
+        logger.info("Pre-flight validation found %d catalog or mechanical errors", len(invalid_nodes))
         if invalid_nodes:
             summary = ", ".join(
                 f"{item['node_title']} ({item['field']}='{item['value']}')"
@@ -2860,9 +2913,9 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
                 status_code=400,
                 detail={
                     "message": (
-                        f"Workflow has {len(invalid_nodes)} invalid reference(s) "
+                        f"Workflow has {len(invalid_nodes)} catalog or mechanical error(s) "
                         f"for the current tip/head context: {summary}. "
-                        "Open each node and pick a valid class, or switch tips."
+                        "Review the highlighted tasks and their diagnostic reasons."
                     ),
                     "invalid_nodes": invalid_nodes,
                 },
@@ -2895,8 +2948,9 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
         on_event=broadcast_event,
         runtime_state=runtime_snapshot,
         preview_animation=(mode != "execute"),
+        physical_simulation=(mode == "simulate"),
         library_src=data.get("library", "") or "",
-        **({"strict_validation": True} if generated_rehearsal else {}),
+        **({"strict_validation": True} if mode == "simulate" else {}),
         **({"reviewed_protocol": True} if release_run else {}),
     )
     _active_workflow_executor = executor
@@ -2911,6 +2965,8 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
 
     asyncio.ensure_future(run())
     result = {"status": "started", "workflow_id": workflow_id, "mode": mode}
+    if mode == "simulate":
+        result['physical_engine'] = 'SuperDex'
     if generated_rehearsal:
         result.update(simulation_kind="draft_rehearsal", qualification_granted=False)
         if simulation_target:
@@ -2922,6 +2978,29 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
 async def simulate_designer_workflow(workflow_id: str):
     """Run a workflow in simulation mode (no hardware)."""
     return await _run_designer_workflow(workflow_id, mode="simulate")
+
+
+@app.get("/api/workflows/{workflow_id}/mechanical-readiness", tags=["Designer"])
+async def designer_mechanical_readiness(workflow_id: str):
+    """Inspect saved native task and tip/deck choices without any robot motion."""
+    from pybravo.physics.planning import mechanical_issues
+    from pybravo.workflow.protocols.context import machine_context
+
+    data = _get_workflow_storage().get_workflow(workflow_id)
+    if data is None:
+        raise HTTPException(404, 'Workflow not found')
+    if _bravo is None:
+        raise HTTPException(409, 'Load an instrument profile before checking its mechanical plan')
+    profile = copy.deepcopy(_bravo.profile)
+    target = data.get('protocol_simulation_target')
+    if target:
+        _apply_generated_simulation_target(profile, target)
+    context = machine_context(Bravo(profile=profile, mode='simulation'))
+    issues = mechanical_issues(data, catalog_context=context)
+    return {'workflow_id': workflow_id, 'context_hash': context['context_hash'],
+            'mechanical_plan_valid': not issues, 'issues': issues,
+            'checks': 'static_catalog_deck_and_tip_lifecycle', 'motion_performed': False,
+            'qualification_granted': False}
 
 
 @app.post("/api/workflows/{workflow_id}/walkthrough", tags=["Designer"])

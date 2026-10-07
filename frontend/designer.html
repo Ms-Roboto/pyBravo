@@ -965,6 +965,10 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
             <div class="progress-bar" style="margin-top: 6px;">
                 <div class="progress-bar-fill" id="progress-fill"></div>
             </div>
+            <details id="physical-report" hidden style="margin-top:8px;font-size:11px;">
+                <summary>Physical collision checks</summary>
+                <div id="physical-report-body" style="white-space:pre-wrap;margin-top:6px;"></div>
+            </details>
             <!-- Barcode / plate event trail populated by workflow:barcode_read
                  and workflow:plate_pick/place events. Hidden until first entry. -->
             <div id="barcode-results" class="hidden" style="margin-top: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-input); max-height: 120px; overflow-y: auto;">
@@ -2183,18 +2187,22 @@ function tipboxCellsForAnchor(tipboxGeom, headMode, anchor) {
     const normalized = normalizeHeadModeForUi(designerState.headType, headMode);
     const rowCount = Math.max(1, Number(anchor.row_count || normalized.row_count || 1));
     const colCount = Math.max(1, Number(anchor.column_count || normalized.column_count || 1));
-    const r0 = Math.max(0, Math.min(tipboxGeom.rows - rowCount, Number(anchor.row) || 0));
-    const c0 = Math.max(0, Math.min(tipboxGeom.cols - colCount, Number(anchor.col) || 0));
+    const rowStride = Math.max(1, Math.floor(Number(anchor.row_stride) || 1));
+    const colStride = Math.max(1, Math.floor(Number(anchor.col_stride) || 1));
+    const rowSpan = (rowCount - 1) * rowStride + 1;
+    const colSpan = (colCount - 1) * colStride + 1;
+    const r0 = Math.max(0, Math.min(tipboxGeom.rows - rowSpan, Number(anchor.row) || 0));
+    const c0 = Math.max(0, Math.min(tipboxGeom.cols - colSpan, Number(anchor.col) || 0));
     const selected = new Set();
-    for (let r = r0; r < r0 + rowCount; r++) {
-        for (let c = c0; c < c0 + colCount; c++) selected.add(`${r}:${c}`);
+    for (let r = 0; r < rowCount; r++) {
+        for (let c = 0; c < colCount; c++) selected.add(`${r0 + r * rowStride}:${c0 + c * colStride}`);
     }
     // Anchor cell = the corner of the selected region that the head's
     // physical anchor barrel touches. Driven by `head_anchor` (or the
     // legacy `mirror_corner` fallback for older callers).
     const headAnchor = String(anchor.head_anchor || anchor.mirror_corner || 'back_left');
-    const anchorR = headAnchor.startsWith('front') ? r0 + rowCount - 1 : r0;
-    const anchorC = headAnchor.endsWith('right') ? c0 + colCount - 1 : c0;
+    const anchorR = headAnchor.startsWith('front') ? r0 + rowSpan - 1 : r0;
+    const anchorC = headAnchor.endsWith('right') ? c0 + colSpan - 1 : c0;
     return { selected, anchorKey: `${anchorR}:${anchorC}`, clampedRow: r0, clampedCol: c0 };
 }
 
@@ -2234,21 +2242,14 @@ function findUpstreamFlowNode(node, targetTypes, graph) {
 // `simulateTipboxOccupancy` to track which cells each operation moves.
 function tipsOpFootprintCells(node, headMode, tipboxGeom) {
     if (!headMode || !tipboxGeom) return new Set();
-    const rowCount = Math.max(1, Number(headMode.row_count) || 1);
-    const colCount = Math.max(1, Number(headMode.column_count) || 1);
-    const anchorRow = Math.max(0, Math.min(
-        tipboxGeom.rows - rowCount,
-        Number(node.properties?.tip_anchor_row) || 0,
-    ));
-    const anchorCol = Math.max(0, Math.min(
-        tipboxGeom.cols - colCount,
-        Number(node.properties?.tip_anchor_col) || 0,
-    ));
-    const cells = new Set();
-    for (let r = anchorRow; r < anchorRow + rowCount; r++) {
-        for (let c = anchorCol; c < anchorCol + colCount; c++) cells.add(`${r}:${c}`);
-    }
-    return cells;
+    return tipboxCellsForAnchor(tipboxGeom, headMode, {
+        row: Number(node.properties?.tip_anchor_row) || 0,
+        col: Number(node.properties?.tip_anchor_col) || 0,
+        row_count: headMode.row_count,
+        column_count: headMode.column_count,
+        row_stride: node.properties?.row_stride,
+        col_stride: node.properties?.col_stride,
+    }).selected;
 }
 
 // Forward-simulate tipbox occupancy along the workflow's flow path up
@@ -2272,6 +2273,8 @@ function tipsOpFootprintCells(node, headMode, tipboxGeom) {
 // useful approximation.
 function simulateTipboxOccupancy(target, graph) {
     const state = new Map();  // location (number) -> Set<"r:c">
+    state.fresh = new Map();
+    state.spent = new Map();
 
     // Seed from deck config.
     for (const [locStr, stack] of Object.entries(designerState.deckConfig || {})) {
@@ -2290,6 +2293,20 @@ function simulateTipboxOccupancy(target, graph) {
             }
         }
         state.set(Number(locStr), cells);
+        const supplied = Array.isArray(top.available_tips) ? top.available_tips : null;
+        if (supplied) {
+            cells.clear();
+            for (const well of supplied) {
+                const match = /^([A-Z]+)(\d+)$/i.exec(String(well));
+                if (!match) continue;
+                let r = 0;
+                for (const letter of match[1].toUpperCase()) r = r * 26 + letter.charCodeAt(0) - 64;
+                cells.add(`${r - 1}:${Number(match[2]) - 1}`);
+            }
+        }
+        const startsSpent = top.tipbox_fill_state === 'spent';
+        state.fresh.set(Number(locStr), startsSpent ? new Set() : new Set(cells));
+        state.spent.set(Number(locStr), startsSpent ? new Set(cells) : new Set());
     }
 
     if (!graph || !target) return state;
@@ -2331,11 +2348,13 @@ function simulateTipboxOccupancy(target, graph) {
                         const normalized = normalizeHeadModeForUi(designerState.headType, headMode);
                         const footprint = tipsOpFootprintCells(node, normalized, geom);
                         if (!state.has(loc)) state.set(loc, new Set());
+                        if (!state.fresh.has(loc)) state.fresh.set(loc, new Set());
+                        if (!state.spent.has(loc)) state.spent.set(loc, new Set());
                         const cells = state.get(loc);
                         if (node.type === 'tips/TipsOn') {
-                            for (const k of footprint) cells.delete(k);
+                            for (const k of footprint) { cells.delete(k); state.fresh.get(loc).delete(k); }
                         } else {
-                            for (const k of footprint) cells.add(k);
+                            for (const k of footprint) { cells.add(k); state.spent.get(loc).add(k); state.fresh.get(loc).delete(k); }
                         }
                     }
                 }
@@ -2536,8 +2555,8 @@ function wireHeadModeModal() {
 // 'return' assumes an empty tipbox (the typical Tips Off case). The
 // backend uses these to compute boundary-collision constraints.
 let tbDraft = {
-    row: 0, col: 0, location: 1, headMode: null,
-    purpose: 'pickup', sourceNode: null, occupied: new Set(),
+    row: 0, col: 0, rowStride: 1, colStride: 1, location: 1, headMode: null,
+    purpose: 'pickup', sourceNode: null, occupied: new Set(), fresh: new Set(), spent: new Set(),
 };
 let tbOnSave = null;
 let tbLegalAnchors = [];  // [{row, col, row_count, column_count, head_anchor, ...}]
@@ -2550,21 +2569,30 @@ function openTipboxPicker(location, headMode, anchorRow, anchorCol, onSave, opts
     // simulation walks from Start to this node, applying prior Tips On
     // (removes cells) and Tips Off (adds cells) along the flow path.
     let occupied = new Set();
+    let fresh = new Set();
+    let spent = new Set();
     if (opts.sourceNode && designerState.graph) {
         const state = simulateTipboxOccupancy(opts.sourceNode, designerState.graph);
         occupied = state.get(Number(location) || 0) || new Set();
+        fresh = state.fresh.get(Number(location) || 0) || new Set();
+        spent = state.spent.get(Number(location) || 0) || new Set();
     }
     tbDraft = {
         row: Number(anchorRow) || 0,
         col: Number(anchorCol) || 0,
+        rowStride: Math.max(1, Math.floor(Number(opts.sourceNode?.properties?.row_stride) || 1)),
+        colStride: Math.max(1, Math.floor(Number(opts.sourceNode?.properties?.col_stride) || 1)),
         location: Number(location) || 1,
         headMode: headMode || { subset_type: 'all_barrels', subset_config: 'back_left' },
         purpose: opts.purpose || 'pickup',
         sourceNode: opts.sourceNode || null,
         occupied,
+        fresh,
+        spent,
     };
     tbOnSave = onSave;
     tbLegalAnchors = [];
+    document.getElementById('hm-tipbox-save').disabled = true;
     document.getElementById('hm-modal-tipbox').classList.add('open');
     // Initial render uses a placeholder anchor while we wait for the
     // backend response — gives instant feedback even on slow links.
@@ -2602,6 +2630,7 @@ async function refreshTipboxLegalAnchors() {
         tbDraft.row = 0;
         tbDraft.col = 0;
         renderTipboxGrid();
+        document.getElementById('hm-tipbox-save').disabled = false;
         return;
     }
     const params = new URLSearchParams({
@@ -2611,6 +2640,8 @@ async function refreshTipboxLegalAnchors() {
         column_count: String(hm.column_count),
         tipbox_rows: String(geom.rows),
         tipbox_cols: String(geom.cols),
+        row_stride: String(tbDraft.rowStride || 1),
+        col_stride: String(tbDraft.colStride || 1),
         purpose: tbDraft.purpose,
     });
     // Pass the simulated occupancy when we have a source node — this is
@@ -2625,6 +2656,7 @@ async function refreshTipboxLegalAnchors() {
         // use the explicit occupancy (an empty box for return scenarios)
         // rather than the purpose-default.
         params.set('occupied_cells', cellsParam);
+        params.set('fresh_cells', Array.from(tbDraft.fresh).join(','));
     }
     try {
         const res = await apiCall(`/api/tipbox/legal_anchors?${params.toString()}`);
@@ -2644,6 +2676,7 @@ async function refreshTipboxLegalAnchors() {
         }
     }
     renderTipboxGrid();
+    document.getElementById('hm-tipbox-save').disabled = tbLegalAnchors.length === 0;
 }
 
 function renderTipboxGrid() {
@@ -2661,7 +2694,11 @@ function renderTipboxGrid() {
     const matched = tbLegalAnchors.find(
         a => Number(a.row) === tbDraft.row && Number(a.col) === tbDraft.col,
     );
-    const anchorForRender = matched || {
+    const stridesForRender = {
+        row_stride: tbDraft.rowStride || 1,
+        col_stride: tbDraft.colStride || 1,
+    };
+    const anchorForRender = { ...stridesForRender, ...(matched || {
         row: tbDraft.row,
         col: tbDraft.col,
         row_count: normalizeHeadModeForUi(designerState.headType, tbDraft.headMode).row_count,
@@ -2673,7 +2710,7 @@ function renderTipboxGrid() {
             const cfg = String(tbDraft.headMode?.subset_config || 'back_left');
             return cfg;
         })(),
-    };
+    }) };
     const { selected, anchorKey, clampedRow, clampedCol } =
         tipboxCellsForAnchor(geom, tbDraft.headMode, anchorForRender);
     tbDraft.row = clampedRow;
@@ -2703,7 +2740,7 @@ function renderTipboxGrid() {
     const cellToAnchor = new Map();  // "r:c" -> anchor dict
     const legalCells = new Set();    // "r:c" of every cell in any legal region
     for (const a of tbLegalAnchors) {
-        const region = tipboxCellsForAnchor(geom, tbDraft.headMode, a);
+        const region = tipboxCellsForAnchor(geom, tbDraft.headMode, { ...stridesForRender, ...a });
         for (const key of region.selected) {
             legalCells.add(key);
             if (!cellToAnchor.has(key)) cellToAnchor.set(key, a);
@@ -2731,7 +2768,8 @@ function renderTipboxGrid() {
             if (anchorKey === key) cell.classList.add('anchor');
             if (legalCells.has(key)) cell.classList.add('legal');
             const mappedAnchor = cellToAnchor.get(key);
-            const occLabel = occupied.has(key) ? 'occupied' : 'empty';
+            const occLabel = tbDraft.spent?.has(key) ? 'spent tip (unavailable for pickup)' : occupied.has(key) ? 'planned fresh tip' : 'empty';
+            if (tbDraft.spent?.has(key)) cell.style.backgroundColor = '#bd8040';
             cell.title = mappedAnchor
                 ? `Row ${row + 1}, Col ${col + 1} (${occLabel}) — legal anchor`
                 : `Row ${row + 1}, Col ${col + 1} (${occLabel}) — not legal here`;
@@ -6869,6 +6907,8 @@ async function runWorkflow({ walkthrough = false } = {}) {
     // Clear any previous state
     clearActiveNodeHighlight();
     timelineReset();
+    document.getElementById('physical-report').hidden = true;
+    document.getElementById('physical-report-body').textContent = '';
     progress.textContent = 'Saving workflow...';
 
     // Save the workflow, then run
@@ -6923,7 +6963,7 @@ async function runWorkflow({ walkthrough = false } = {}) {
             progress.textContent = `${body.message}`;
             console.error('Workflow validation failed:\n' + lines);
             if (isGeneratedProtocolDraftTab()) {
-                progress.textContent = `Strict simulation blocked: ${body.invalid_nodes.length} unresolved catalog references. Use Walk through draft to inspect task order and deck visits, or select the highlighted task to correct its settings.`;
+                progress.textContent = `Simulation blocked: ${body.invalid_nodes.length} catalog or mechanical problems. ${body.invalid_nodes[0]?.reason || ''}`;
                 progress.title = lines;
             } else {
                 alert(`Workflow cannot run:\n\n${body.message}\n\n${lines}`);
@@ -6943,7 +6983,7 @@ async function runWorkflow({ walkthrough = false } = {}) {
             progress.textContent = 'Walking through draft · tasks are not executed or validated';
             progress.title = (simResult.diagnostics || []).map(item => item.reason || item.message).join('\n');
         } else {
-            progress.textContent = executionMode === 'execute' ? 'Executing on hardware...' : simResult.simulation_kind === 'draft_rehearsal' ? 'Rehearsing draft in software...' : 'Simulating...';
+            progress.textContent = executionMode === 'execute' ? 'Executing on hardware...' : simResult.physical_engine ? 'Checking native task motion with SuperDex...' : 'Simulating...';
         }
     } else {
         progress.textContent = executionMode === 'execute' ? 'Failed to start execution' : 'Failed to start simulation';
@@ -7305,6 +7345,19 @@ function resetAnimationTransients(opts = {}) {
 function handleWorkflowEvent(data) {
     const progress = document.getElementById('playback-progress');
     const fill = document.getElementById('progress-fill');
+    if (data.physical_simulation) {
+        const report = data.physical_simulation;
+        const panel = document.getElementById('physical-report');
+        panel.hidden = false;
+        document.getElementById('physical-report-body').textContent = [
+            `${report.engine} · ${report.status} · ${report.moves_checked || 0} motion commands · ${report.samples_checked || 0} sampled poses`,
+            report.scope ? `Coverage: ${report.scope}; head: ${report.head_geometry}` : 'Physical scene was not checked.',
+            report.last_error?.message || (report.status === 'failed' ? 'Physical rehearsal failed.' : 'No collision reported in the checked geometry.'),
+            ...(report.limitations || []),
+            'This does not qualify a wet-lab method or authorize hardware execution.',
+        ].join('\n');
+        if (report.last_error) panel.open = true;
+    }
 
     switch (data.type) {
         case 'workflow:start':
@@ -7437,6 +7490,7 @@ function handleWorkflowEvent(data) {
             break;
         case 'workflow:complete':
             progress.textContent = data.simulation_kind === 'visual_walkthrough' ? `${data.status === 'aborted' ? 'Visual walkthrough stopped' : 'Visual walkthrough complete'} · tasks were not executed; strict simulation is still required` : isGeneratedProtocolDraftTab() ? 'Software rehearsal complete \u2014 review before hardware use' : 'Simulation complete \u2014 use scrubber to review';
+            if (data.physical_simulation) progress.textContent = data.status === 'aborted' ? 'Physical rehearsal stopped' : 'Native task rehearsal complete · modeled collision checks passed; review before hardware use';
             fill.style.width = '100%';
             timelineStopRecording();
             // Display final vars snapshot if backend included one.
@@ -7559,6 +7613,11 @@ function handleWorkflowEvent(data) {
             progress.textContent = `Error: ${data.error || 'Unknown'}`;
             fill.style.width = '0%';
             if (data.node_id) highlightNode(data.node_id, '#ff4444');
+            if (data.physical_simulation?.last_error?.node_id) {
+                highlightNode(data.physical_simulation.last_error.node_id, '#ff4444');
+                const failed = designerState.graph.getNodeById(data.physical_simulation.last_error.node_id);
+                if (failed) { designerState.graphCanvas.selectNode(failed); renderPropertiesPanel(failed); }
+            }
             timelineStopRecording();
             hideUserPromptModal();
             if (data.vars) {

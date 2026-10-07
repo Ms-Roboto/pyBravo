@@ -31,6 +31,13 @@ method record and its referenced liquid class hold numeric pipetting settings.
 deck contents or method qualification. See [Bravo method knowledge](bravo-method-knowledge.md)
 for the separation of catalogs, method records, skills, recipes, and inventory.
 
+`spent_tip_exclusion` and `physical_collision_rehearsal` distinguish inventory
+correctness from geometry checking. Before rehearsal, external planners can
+inspect `GET /api/workflows/{workflow_id}/mechanical-readiness` for static
+catalog/deck and repeated-tip diagnostics. Designer Simulate runs the native
+motion with [SuperDex collision checks](physical-simulation.md); a visual
+walkthrough provides no physical clearance or release approval.
+
 ## Model Hardware Standard relationship
 
 [Anthropic's Model Hardware Standard (MHS)](https://www.anthropic.com/news/model-hardware-standard-research-preview)

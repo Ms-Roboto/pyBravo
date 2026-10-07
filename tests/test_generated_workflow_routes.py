@@ -92,6 +92,29 @@ def _native_workflow():
 
 
 @pytest.mark.asyncio
+async def test_generated_native_clearance_tasks_can_be_saved_without_hardware_release(tmp_path, monkeypatch):
+    storage = WorkflowStorage(tmp_path)
+    monkeypatch.setattr(server, "_get_workflow_storage", lambda: storage)
+    monkeypatch.setattr(server, "_bravo", None)
+    workflow = _native_workflow()
+    workflow['graph']['nodes'][1].update(type='system/DockGripper', properties={})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url='http://test') as client:
+        response = await client.post('/api/protocols/generated-drafts', json={
+            'workflow': workflow, 'provenance': {'source_kind': 'synthetic_mechanical_test',
+                                               'source_id': 'clearance-fixture', 'model': 'test-fixture'},
+        })
+        assert response.status_code == 200, response.text
+        identity = response.json()['workflow_id']
+        saved = (await client.get(f'/api/workflows/{identity}')).json()
+        assert saved['graph']['nodes'][1]['type'] == 'system/DockGripper'
+        saved['graph']['nodes'][1].update(type='system/Home', properties={'axes': 'Y'})
+        updated = await client.put(f'/api/workflows/{identity}', json=saved)
+        assert updated.status_code == 200, updated.text
+        assert updated.json()['graph']['nodes'][1]['type'] == 'system/Home'
+        assert (await client.post(f'/api/workflows/{identity}/execute')).status_code == 409
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("marker", [True, False])
 @pytest.mark.parametrize("task_fails", [True, False])
 async def test_native_generated_rehearsal_is_isolated_unqualified_and_stops_on_error(
@@ -235,8 +258,12 @@ async def test_virtual_target_uses_its_catalog_and_leaves_installed_384_head_unc
 ):
     workflow = _native_workflow()
     workflow["protocol_simulation_target"] = _virtual_target()
-    workflow["graph"]["nodes"][1].update(type="liquid/Aspirate")
-    workflow["graph"]["nodes"][1]["properties"]["liquid_class"] = class_name
+    # The successful branch tests isolated virtual-head setup with Initialize.
+    # A liquid task without source/rack/volume/catalog ID is now correctly
+    # rejected by mechanical preflight even if its name matches this head.
+    if class_name.startswith("384"):
+        workflow["graph"]["nodes"][1].update(type="liquid/Aspirate")
+        workflow["graph"]["nodes"][1]["properties"]["liquid_class"] = class_name
     storage = WorkflowStorage(tmp_path)
     saved = storage.create_generated_draft(workflow, provenance={"model": "qwen"})
     before = storage.get_workflow(saved["id"])

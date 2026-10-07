@@ -730,7 +730,7 @@ async def _simulate(identity: str, record: dict, capabilities: dict, workflow: d
         simulation.connect()
         simulation.controller.set_move_timing_enabled(False)
         executor = WorkflowExecutor(simulation, workflow["graph"], deck_config=workflow["deck"],
-                                    preview_animation=False, strict_validation=True, on_event=event)
+                                    preview_animation=False, strict_validation=True, physical_simulation=True, on_event=event)
         await asyncio.wait_for(executor.execute(), timeout=180)
         failures = [e for e in events if e.get("type") in
                     {"workflow:error", "workflow:task_warning", "workflow:task_aborted"}]
@@ -738,12 +738,14 @@ async def _simulate(identity: str, record: dict, capabilities: dict, workflow: d
         if failures or not completed:
             raise ValueError(failures[0].get("error", "Strict simulation did not complete") if failures
                              else "Strict simulation did not complete")
-        result = {"status": "passed", "run_id": run_id, "events": events, "finished_at": now()}
+        result = {"status": "passed", "run_id": run_id, "events": events, "finished_at": now(),
+                  "physical_simulation": next((e['physical_simulation'] for e in reversed(events) if 'physical_simulation' in e), None)}
     except Exception as exc:
         if executor:
             executor.abort()
         result = {"status": "failed", "run_id": run_id, "events": events, "error": str(exc) or type(exc).__name__,
-                  "finished_at": now()}
+                  "finished_at": now(),
+                  "physical_simulation": next((e['physical_simulation'] for e in reversed(events) if 'physical_simulation' in e), None)}
     finally:
         if simulation is not None:
             simulation.disconnect()

@@ -147,6 +147,9 @@ _CONSTRAINTS = {
     "disposable_head": "Protocol Assistant liquid actions require a configured disposable-tip head.",
     "compatible_tip_pair": "Rack geometry, rack-to-tip link and tip-to-head membership must match exactly.",
     "confirmed_tip_inventory": "The scientist must confirm actual fresh tips; catalog compatibility is not inventory.",
+    "spent_tip_exclusion": "Returned tips remain physically present but spent. Repeated fresh-tip lifecycles use distinct clean supply and spent return/waste roles; a fixed repeated anchor cannot become fresh again.",
+    "gripper_docking_for_tip_handling": "For a gripper-equipped Bravo, plan a visible native DockGripper primitive before tip handling. Initialization alone may leave the fingers protruding; moving tip subsets can then collide with the rack.",
+    "physical_collision_rehearsal": "Native simulated controller moves are checked with SuperDex against robot tool meshes, catalog deck and carried plate envelopes. Missing geometry blocks rehearsal. A clear sampled result is not hardware qualification.",
     "approved_liquid_class": "The chosen liquid class must match the active machine, head and selected tip.",
     "reachable_wells": "Head footprint and selected anchors must fit each plate's verified grid and pitch.",
     "source_and_destination_capacity": "Source stays above dead volume; destination stays below per-well capacity.",
@@ -179,6 +182,7 @@ _REVIEW_REQUIREMENTS = {
     "tip_identity_and_reuse": "Confirm loaded tip IDs, disposal and any source-specific reuse rationale.",
     "liquid_setup": "Confirm source/dead volumes, approved liquid class, head mode and pipetting height.",
     "simulation_and_approval": "Validate, strictly simulate and obtain scientist approval before release.",
+    "mechanical_preflight": "Inspect saved workflow mechanical readiness before strict physical rehearsal; the visual walkthrough grants no collision clearance.",
 }
 
 

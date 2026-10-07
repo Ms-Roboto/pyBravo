@@ -35,6 +35,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# SuperDex currently publishes native wheels for Python 3.12 on supported
+# macOS arm64 / Windows amd64 / Linux x86_64 hosts. Simulation fails visibly
+# when this extra is absent; visual walkthroughs remain nonvalidating.
+physics = ["superdex-physics==1.0.0"]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",

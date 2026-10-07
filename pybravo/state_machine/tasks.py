@@ -1061,14 +1061,14 @@ class InitializeTask(StateMachineTask):
         if current_z <= safe_z:
             return
         logger.info("Z already homed; moving to safe position %.3f mm before initialize...", safe_z)
-        self._ctrl.move([AxisMoveInfo(axis=Axis.Z, position=safe_z)], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.Z, position=safe_z)], wait=True)
 
     async def _home_z(self) -> None:
         if self._homed_on_entry.get(Axis.Z, False):
             logger.info("Skipping Z homing because Z was already homed on entry")
             return
         logger.info("Homing Z axis...")
-        self._ctrl.home_axes([Axis.Z])
+        await asyncio.to_thread(self._ctrl.home_axes, [Axis.Z])
 
     async def _handle_plate_in_gripper(self) -> None:
         if not self._gripper_axes_need_home():
@@ -1117,12 +1117,12 @@ class InitializeTask(StateMachineTask):
                 widest_open,
             )
             try:
-                self._ctrl.move([AxisMoveInfo(axis=Axis.G, position=widest_open)], wait=True)
+                await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.G, position=widest_open)], wait=True)
             except Exception as exc:
                 logger.warning("Could not move G to the furthest-open initialize position before homing: %s", exc)
                 try:
                     logger.info("Retrying G pre-home move at the standard open position (0.000 mm)...")
-                    self._ctrl.move([AxisMoveInfo(axis=Axis.G, position=OPEN_GRIPPER_POSITION)], wait=True)
+                    await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.G, position=OPEN_GRIPPER_POSITION)], wait=True)
                 except Exception as fallback_exc:
                     if self._plate_in_gripper_ignored:
                         logger.warning(
@@ -1135,7 +1135,7 @@ class InitializeTask(StateMachineTask):
         else:
             logger.info("Skipping pre-home G open move (controller handles pre-move internally)")
         logger.info("Homing G axis...")
-        self._ctrl.home_axes([Axis.G])
+        await asyncio.to_thread(self._ctrl.home_axes, [Axis.G])
         try:
             self._ctrl.disable_motor(Axis.G)
         except Exception as exc:
@@ -1149,7 +1149,7 @@ class InitializeTask(StateMachineTask):
             logger.info("Skipping Zg-axis homing because Zg was already homed on entry")
             return
         logger.info("Homing Zg axis...")
-        self._ctrl.home_axes([Axis.Zg])
+        await asyncio.to_thread(self._ctrl.home_axes, [Axis.Zg])
 
     async def _move_zg_to_nesting(self) -> None:
         if not self._gripper_present:
@@ -1158,7 +1158,7 @@ class InitializeTask(StateMachineTask):
             logger.info("Skipping Zg nesting move because gripper axes were already homed on entry")
             return
         logger.info("Moving Zg to nesting position (%.3f mm)...", _GRIPPER_RECESS_DEPTH)
-        self._ctrl.move([AxisMoveInfo(axis=Axis.Zg, position=_GRIPPER_RECESS_DEPTH)], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.Zg, position=_GRIPPER_RECESS_DEPTH)], wait=True)
 
     async def _prompt_home_w(self) -> None:
         if (
@@ -1188,7 +1188,7 @@ class InitializeTask(StateMachineTask):
             logger.info("Skipping X/Y homing because both axes were already homed on entry")
             return
         logger.info("Homing %s...", " and ".join(axis.name for axis in axes_to_home))
-        self._ctrl.home_axes(axes_to_home)
+        await asyncio.to_thread(self._ctrl.home_axes, axes_to_home)
 
     async def _home_w(self) -> None:
         if self._skip_w_home:
@@ -1201,7 +1201,7 @@ class InitializeTask(StateMachineTask):
             logger.info("Skipping W-axis homing because W was already homed on entry")
             return
         logger.info("Homing W axis...")
-        self._ctrl.home_axes([Axis.W])
+        await asyncio.to_thread(self._ctrl.home_axes, [Axis.W])
         current_w = float(self._ctrl.get_position(Axis.W))
         if abs(current_w) > AXIS_EPSILON:
             logger.info(
@@ -1210,7 +1210,7 @@ class InitializeTask(StateMachineTask):
                 "Parking W at 0.0 after homing (current %.3f mm)...",
                 current_w,
             )
-            self._ctrl.move([AxisMoveInfo(axis=Axis.W, position=0.0)], wait=True)
+            await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.W, position=0.0)], wait=True)
 
     async def _set_light_idle(self) -> None:
         self._ctrl.set_light(LightCommandData(
@@ -1257,7 +1257,7 @@ class HomeTask(StateMachineTask):
             logger.info("Z not homed — skipping safe Z retract")
             return
         logger.info("Retracting Z to safe position (%.1f mm)...", self._safe_z_position)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.Z, position=self._safe_z_position)],
             wait=True,
         )
@@ -1282,7 +1282,7 @@ class HomeTask(StateMachineTask):
         ordered = safe_home_order(self._axes)
         names = ", ".join(a.label for a in ordered)
         logger.info("Homing axes: %s", names)
-        self._ctrl.home_axes(ordered, force=self._force)
+        await asyncio.to_thread(self._ctrl.home_axes, ordered, force=self._force)
 
     async def _park_homed_axes(self) -> None:
         if not self._axes:
@@ -1295,7 +1295,7 @@ class HomeTask(StateMachineTask):
             "Moving homed axes to park positions: %s",
             ", ".join(f"{move.axis.name}={move.position:.3f}" for move in park_moves),
         )
-        self._ctrl.move(park_moves, wait=True)
+        await asyncio.to_thread(self._ctrl.move, park_moves, wait=True)
 
     async def _finalize_gripper_safe_state(self) -> None:
         if not self._use_gripper_safe_state:
@@ -1359,7 +1359,7 @@ class DockGripperTask(StateMachineTask):
 
     async def _open_gripper(self) -> None:
         logger.info("Dock Gripper: opening gripper to G=%.3f...", self._g_target)
-        self._ctrl.open_gripper()
+        await asyncio.to_thread(self._ctrl.open_gripper)
 
     async def _move_zg_to_nesting(self) -> None:
         zg_velocity = 0.0
@@ -1370,7 +1370,7 @@ class DockGripperTask(StateMachineTask):
             zg_velocity = float(speed.velocity)
             zg_acceleration = float(speed.acceleration)
         logger.info("Dock Gripper: moving Zg to %.3f...", self._zg_target)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.Zg, position=self._zg_target, velocity=zg_velocity, acceleration=zg_acceleration)],
             wait=True,
         )
@@ -1432,7 +1432,7 @@ class MoveToLocationTask(StateMachineTask):
 
     async def _safe_z_retract(self) -> None:
         logger.info("Retracting Z to safe position...")
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [self._move_info(Axis.Z, self._safe_z_position)],
             wait=True,
         )
@@ -1441,7 +1441,7 @@ class MoveToLocationTask(StateMachineTask):
         x = self._tp.get_teachpoint(self._location, Axis.X)
         y = self._tp.get_teachpoint(self._location, Axis.Y)
         logger.info("Moving XY to location %d (%.2f, %.2f)...", self._location, x, y)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 self._move_info(Axis.X, x),
                 self._move_info(Axis.Y, y),
@@ -1452,7 +1452,7 @@ class MoveToLocationTask(StateMachineTask):
     async def _lower_z(self) -> None:
         z = self._target_z()
         logger.info("Lowering Z to %.2f mm...", z)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [self._move_info(Axis.Z, z)],
             wait=True,
         )
@@ -3362,7 +3362,7 @@ class AspirateTask(StateMachineTask):
 
     async def _safe_z_retract(self) -> None:
         self._update_status("safe_z_retract")
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [_axis_move(self._ctrl, Axis.Z, self._safe_z_position)],
             wait=True,
         )
@@ -3382,7 +3382,7 @@ class AspirateTask(StateMachineTask):
             allowed_top_plane_mm=self._target_top_plane(),
         )
         logger.info("Moving to location %d for aspiration...", self._location)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 _axis_move(self._ctrl, Axis.X, x),
                 _axis_move(self._ctrl, Axis.Y, y),
@@ -3402,7 +3402,7 @@ class AspirateTask(StateMachineTask):
         self._update_status("pre_aspirate", pre_aspirate_volume_ul=self._pre_aspirate)
         logger.info("Pre-aspirating %.2f uL (air)...", self._pre_aspirate)
         current_w = self._ctrl.get_position(Axis.W)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [self._w_move(current_w + self._corrected_volume(self._pre_aspirate), operation="aspirate")],
             wait=True,
         )
@@ -3420,7 +3420,7 @@ class AspirateTask(StateMachineTask):
         if self._dynamic_tip_extension > 0 and volume > 0:
             current_z = self._ctrl.get_position(Axis.Z)
             z_moves.append(_axis_move(self._ctrl, Axis.Z, current_z - self._dynamic_tip_extension))
-        self._ctrl.move([self._w_move(current_w + volume, operation="aspirate"), *z_moves], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [self._w_move(current_w + volume, operation="aspirate"), *z_moves], wait=True)
         await self._post_delay("aspirate")
 
     async def _raise_to_plate_top(self) -> None:
@@ -3435,7 +3435,7 @@ class AspirateTask(StateMachineTask):
         self._update_status("post_aspirate", post_aspirate_volume_ul=self._post_aspirate)
         logger.info("Post-aspirating %.2f uL (air)...", self._post_aspirate)
         current_w = self._ctrl.get_position(Axis.W)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [self._w_move(current_w + self._corrected_volume(self._post_aspirate), operation="aspirate")],
             wait=True,
         )
@@ -3559,7 +3559,7 @@ class AspirateTask(StateMachineTask):
         for segment in range(segments):
             fraction = (segment + 1) / segments
             angle = (2.0 * math.pi * fraction) * (-1.0 if clockwise else 1.0)
-            self._ctrl.move(
+            await asyncio.to_thread(self._ctrl.move,
                 [
                     _axis_move(self._ctrl, Axis.X, x_center + math.cos(angle) * radius),
                     _axis_move(self._ctrl, Axis.Y, y_center + math.sin(angle) * radius),
@@ -3569,7 +3569,7 @@ class AspirateTask(StateMachineTask):
             delay = _simulation_motion_delay(self._ctrl)
             if delay > 0:
                 await asyncio.sleep(delay)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 _axis_move(self._ctrl, Axis.X, x_center),
                 _axis_move(self._ctrl, Axis.Y, y_center),
@@ -3587,14 +3587,14 @@ class AspirateTask(StateMachineTask):
         x_center, y_center = self._well_xy()
         radius = self._tip_touch_radius_mm()
         for dx, dy in ((radius, 0.0), (0.0, radius), (-radius, 0.0), (0.0, -radius)):
-            self._ctrl.move(
+            await asyncio.to_thread(self._ctrl.move,
                 [
                     _axis_move(self._ctrl, Axis.X, x_center + dx),
                     _axis_move(self._ctrl, Axis.Y, y_center + dy),
                 ],
                 wait=True,
             )
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 _axis_move(self._ctrl, Axis.X, x_center),
                 _axis_move(self._ctrl, Axis.Y, y_center),
@@ -3706,7 +3706,7 @@ class DispenseTask(StateMachineTask):
 
     async def _safe_z_retract(self) -> None:
         self._update_status("safe_z_retract")
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [_axis_move(self._ctrl, Axis.Z, self._safe_z_position)],
             wait=True,
         )
@@ -3726,7 +3726,7 @@ class DispenseTask(StateMachineTask):
             allowed_top_plane_mm=self._target_top_plane(),
         )
         logger.info("Moving to location %d for dispensing...", self._location)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 _axis_move(self._ctrl, Axis.X, x),
                 _axis_move(self._ctrl, Axis.Y, y),
@@ -3753,7 +3753,7 @@ class DispenseTask(StateMachineTask):
         if self._dynamic_tip_retraction > 0 and dispensed_ul > 0:
             current_z = self._ctrl.get_position(Axis.Z)
             z_moves.append(_axis_move(self._ctrl, Axis.Z, current_z + self._dynamic_tip_retraction * dispensed_ul))
-        self._ctrl.move([self._w_move(target_w, operation="dispense"), *z_moves], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [self._w_move(target_w, operation="dispense"), *z_moves], wait=True)
         await self._post_delay("dispense")
 
     async def _tip_touch_step(self) -> None:
@@ -3875,7 +3875,7 @@ class DispenseTask(StateMachineTask):
         for segment in range(segments):
             fraction = (segment + 1) / segments
             angle = (2.0 * math.pi * fraction) * (-1.0 if clockwise else 1.0)
-            self._ctrl.move(
+            await asyncio.to_thread(self._ctrl.move,
                 [
                     _axis_move(self._ctrl, Axis.X, x_center + math.cos(angle) * radius),
                     _axis_move(self._ctrl, Axis.Y, y_center + math.sin(angle) * radius),
@@ -3885,7 +3885,7 @@ class DispenseTask(StateMachineTask):
             delay = _simulation_motion_delay(self._ctrl)
             if delay > 0:
                 await asyncio.sleep(delay)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 _axis_move(self._ctrl, Axis.X, x_center),
                 _axis_move(self._ctrl, Axis.Y, y_center),
@@ -3909,14 +3909,14 @@ class DispenseTask(StateMachineTask):
         x_center, y_center = self._well_xy()
         radius = self._tip_touch_radius_mm()
         for dx, dy in ((radius, 0.0), (0.0, radius), (-radius, 0.0), (0.0, -radius)):
-            self._ctrl.move(
+            await asyncio.to_thread(self._ctrl.move,
                 [
                     _axis_move(self._ctrl, Axis.X, x_center + dx),
                     _axis_move(self._ctrl, Axis.Y, y_center + dy),
                 ],
                 wait=True,
             )
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 _axis_move(self._ctrl, Axis.X, x_center),
                 _axis_move(self._ctrl, Axis.Y, y_center),
@@ -4069,7 +4069,7 @@ class MixTask(StateMachineTask):
 
     async def _safe_z_retract(self) -> None:
         self._update_status("safe_z_retract")
-        self._ctrl.move([_axis_move(self._ctrl, Axis.Z, self._safe_z_position)], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [_axis_move(self._ctrl, Axis.Z, self._safe_z_position)], wait=True)
 
     async def _move_to_location(self) -> None:
         self._update_status("move_to_location")
@@ -4086,7 +4086,7 @@ class MixTask(StateMachineTask):
             allowed_top_plane_mm=self._target_top_plane(),
         )
         logger.info("Moving to location %d for mixing...", self._location)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [_axis_move(self._ctrl, Axis.X, x), _axis_move(self._ctrl, Axis.Y, y)],
             wait=True,
         )
@@ -4138,14 +4138,14 @@ class MixTask(StateMachineTask):
         if self._dynamic_tip_extension > 0 and total > 0:
             current_z = self._ctrl.get_position(Axis.Z)
             z_moves.append(_axis_move(self._ctrl, Axis.Z, current_z - self._dynamic_tip_extension * total))
-        self._ctrl.move([self._w_move(current_w + total, operation="aspirate"), *z_moves], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [self._w_move(current_w + total, operation="aspirate"), *z_moves], wait=True)
         await self._post_delay("aspirate")
 
     async def _dispense_once(self) -> None:
         current_w = self._ctrl.get_position(Axis.W)
         total = self._corrected_volume(self._pre_aspirate + self._volume + self._blowout)
         target_w = max(0.0, current_w - total)
-        self._ctrl.move([self._w_move(target_w, operation="dispense")], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [self._w_move(target_w, operation="dispense")], wait=True)
         await self._post_delay("dispense")
 
     async def _tip_touch_step(self) -> None:
@@ -4247,14 +4247,14 @@ class MixTask(StateMachineTask):
         x_center, y_center = self._well_xy()
         radius = self._tip_touch_radius_mm()
         for dx, dy in ((radius, 0.0), (0.0, radius), (-radius, 0.0), (0.0, -radius)):
-            self._ctrl.move(
+            await asyncio.to_thread(self._ctrl.move,
                 [
                     _axis_move(self._ctrl, Axis.X, x_center + dx),
                     _axis_move(self._ctrl, Axis.Y, y_center + dy),
                 ],
                 wait=True,
             )
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 _axis_move(self._ctrl, Axis.X, x_center),
                 _axis_move(self._ctrl, Axis.Y, y_center),
@@ -4317,7 +4317,7 @@ class TipsOnTask(StateMachineTask):
 
     async def _safe_z_retract(self) -> None:
         self._log_step("safe_z_retract", transfer_stage="source")
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.Z, position=self._safe_z_position)],
             wait=True,
         )
@@ -4356,7 +4356,7 @@ class TipsOnTask(StateMachineTask):
             "Resetting W to 0.0 uL at %.1f uL/s before tips on (current %.3f)...",
             velocity, current_w,
         )
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.W, position=0.0, velocity=velocity, acceleration=acceleration)],
             wait=True,
         )
@@ -4382,7 +4382,7 @@ class TipsOnTask(StateMachineTask):
             x,
             y,
         )
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 AxisMoveInfo(axis=Axis.X, position=x),
                 AxisMoveInfo(axis=Axis.Y, position=y),
@@ -4445,7 +4445,7 @@ class TipsOnTask(StateMachineTask):
                 # limit protects the entire travel, so a wrong labware height or
                 # an obstruction on the box is met at 25 mm/s under current
                 # control rather than at the fast-move speed with force off.
-                self._ctrl.jog(JogParams(
+                await asyncio.to_thread(self._ctrl.jog, JogParams(
                     axis=Axis.Z,
                     velocity=25.0,
                     acceleration=250.0,
@@ -4477,7 +4477,7 @@ class TipsOnTask(StateMachineTask):
                         "then a %.1f mm press",
                         current_z, approach_z, fast_v, PRESS_TRAVEL_MM,
                     )
-                    self._ctrl.move(
+                    await asyncio.to_thread(self._ctrl.move,
                         [AxisMoveInfo(axis=Axis.Z, position=approach_z,
                                       velocity=fast_v, acceleration=fast_a)],
                         wait=True,
@@ -4489,7 +4489,7 @@ class TipsOnTask(StateMachineTask):
                         current_z, approach_z,
                     )
                 press_v, press_a = _axis_speed(self._profile, Axis.Z, SpeedLevel.SLOW)
-                final_z = self._ctrl.jog(JogParams(
+                final_z = await asyncio.to_thread(self._ctrl.jog, JogParams(
                     axis=Axis.Z,
                     velocity=press_v,
                     acceleration=press_a,
@@ -4552,7 +4552,7 @@ class TipsOnTask(StateMachineTask):
     async def _retract_z(self) -> None:
         self._log_step("retract_z", transfer_stage="mounted")
         logger.info("Retracting Z after tip pickup...")
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.Z, position=self._safe_z_position)],
             wait=True,
         )
@@ -4563,7 +4563,7 @@ class TipsOnTask(StateMachineTask):
                 "Tips On press failed; retracting Z to safe position %.3f at current X/Y...",
                 self._safe_z_position,
             )
-            self._ctrl.move(
+            await asyncio.to_thread(self._ctrl.move,
                 [AxisMoveInfo(axis=Axis.Z, position=self._safe_z_position)],
                 wait=True,
             )
@@ -4790,12 +4790,12 @@ class TipsOffTask(StateMachineTask):
         bump_mm = float(self._profile.safety.tips_off_tip_touch_distance) / ticks_per_mm if ticks_per_mm > 0 else 1.0
         bump_target = current_x - bump_mm
         logger.info("Tips-off tip touch: X %.3f -> %.3f (bump %.3f mm) -> %.3f", current_x, bump_target, bump_mm, current_x)
-        self._ctrl.move([AxisMoveInfo(axis=Axis.X, position=bump_target)], wait=True)
-        self._ctrl.move([AxisMoveInfo(axis=Axis.X, position=current_x)], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.X, position=bump_target)], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.X, position=current_x)], wait=True)
 
     async def _safe_z_retract(self) -> None:
         self._log_step("safe_z_retract", transfer_stage="mounted")
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.Z, position=self._safe_z_position)],
             wait=True,
         )
@@ -4815,7 +4815,7 @@ class TipsOffTask(StateMachineTask):
             allowed_top_plane_mm=self._target_top_plane(),
         )
         logger.info("Moving to tip-eject position (%.2f, %.2f)...", x, y)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [
                 AxisMoveInfo(axis=Axis.X, position=x),
                 AxisMoveInfo(axis=Axis.Y, position=y),
@@ -4847,7 +4847,7 @@ class TipsOffTask(StateMachineTask):
             z_acceleration,
         )
         logger.warning("Calculated Tips Off Z target: %.3f", z)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.Z, position=z, velocity=z_velocity, acceleration=z_acceleration)],
             wait=True,
         )
@@ -4862,20 +4862,20 @@ class TipsOffTask(StateMachineTask):
                     "Emptying syringes (W -> 0.0) at %.1f uL/s before removing pipette tips...",
                     w_v,
                 )
-                self._ctrl.move(
+                await asyncio.to_thread(self._ctrl.move,
                     [AxisMoveInfo(axis=Axis.W, position=0.0, velocity=w_v, acceleration=w_a)],
                     wait=True,
                 )
             await self._shuck_with_gripper()
             return
         logger.info("Ejecting tips (W -> %.1f)...", w_position)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.W, position=w_position)],
             wait=True,
         )
         w_v, w_a = _w_safe_speed(self._profile)
         logger.info("Resetting W after tips off at %.1f uL/s...", w_v)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.W, position=0.0, velocity=w_v, acceleration=w_a)],
             wait=True,
         )
@@ -4948,18 +4948,18 @@ class TipsOffTask(StateMachineTask):
         # field, so it is expressed as a fraction of the axis limit rather than a
         # bare number for this one machine.
         zg_return_v = SHUCK_ZG_RETURN_FRACTION * _axis_velocity_limit(self._profile, Axis.Zg)
-        self._ctrl.move([AxisMoveInfo(axis=Axis.G, position=g_start + g_delta)], wait=True)
-        self._ctrl.move([AxisMoveInfo(axis=Axis.Zg, position=zg_start + zg_delta)], wait=True)
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.G, position=g_start + g_delta)], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.Zg, position=zg_start + zg_delta)], wait=True)
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.Zg, position=zg_start, velocity=zg_return_v)],
             wait=True,
         )
-        self._ctrl.move([AxisMoveInfo(axis=Axis.G, position=g_start)], wait=True)
+        await asyncio.to_thread(self._ctrl.move, [AxisMoveInfo(axis=Axis.G, position=g_start)], wait=True)
 
     async def _retract_z(self) -> None:
         self._log_step("retract_z", transfer_stage="returned" if self._tip_selection is not None else "discarded")
         logger.info("Retracting Z after tip ejection...")
-        self._ctrl.move(
+        await asyncio.to_thread(self._ctrl.move,
             [AxisMoveInfo(axis=Axis.Z, position=self._safe_z_position)],
             wait=True,
         )

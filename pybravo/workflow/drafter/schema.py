@@ -108,6 +108,14 @@ class DraftedDeckItem(BaseModel):
             "that the physical rack is loaded or its tips are fresh."
         ),
     )
+    tipbox_fill_state: Literal['full', 'empty'] | None = Field(
+        default=None,
+        description=(
+            'Proposed initial loading for a tip box: full clean supply or empty spent-tip return. '
+            'Use empty for a separate return rack. This is a proposed setup, not evidence '
+            'of inspected physical inventory; the operator must confirm actual loaded tips.'
+        ),
+    )
     is_lidded: bool = False
     is_sealed: bool = False
 

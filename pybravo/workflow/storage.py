@@ -20,14 +20,16 @@ logger = structlog.get_logger(__name__)
 DEFAULT_WORKFLOWS_DIR = Path.home() / ".pybravo" / "workflows"
 
 # Model-generated protocols are editable diagrams, not execution grants. Keep
-# scripts and hardware-control nodes out of this import path; unsupported
-# scientific stages should be represented as explicit Manual checkpoints.
+# scripts and arbitrary controller commands out of this import path. Native
+# Home/DockGripper remain visible clearance primitives, under the same strict
+# simulation and hardware-release boundary as other generated tasks.
 GENERATED_DRAFT_NODE_TYPES = frozenset({
     "flow/Start", "flow/End", "flow/Loop", "flow/IfElse", "flow/Frame",
     "plate/PickPlace", "plate/Stack", "plate/Destack", "plate/Mount",
     "plate/Unmount", "plate/Delid", "plate/Relid",
     "liquid/Aspirate", "liquid/Dispense", "liquid/Mix",
-    "tips/TipsOn", "tips/TipsOff", "system/Initialize", "system/Manual", "system/Wait",
+    "tips/TipsOn", "tips/TipsOff", "system/Initialize", "system/Home", "system/DockGripper",
+    "system/Manual", "system/Wait",
 })
 _GENERATED_DRAFT_FORBIDDEN_FIELDS = frozenset({
     "approval", "protocol_session_id", "protocol_compiled_preview", "protocol_chat_draft",

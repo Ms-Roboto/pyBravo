@@ -402,8 +402,14 @@ def _build_task_params(node_type: str, properties: dict[str, Any]) -> dict[str, 
                     pass
 
     elif node_type == "system/Home":
+        from pybravo.types import Axis
+
         axes_str = properties.get("axes", "X,Y,Z,W,G,Zg")
-        params["axes"] = [a.strip() for a in axes_str.split(",") if a.strip()]
+        names = [name.strip() for name in axes_str.split(",") if name.strip()]
+        try:
+            params["axes"] = [Axis[name] for name in names]
+        except KeyError as exc:
+            raise ValueError(f"Unknown Bravo home axis: {exc.args[0]}") from exc
 
     return params
 
@@ -422,6 +428,7 @@ class WorkflowExecutor:
         library_src: str = "",
         strict_validation: bool = False,
         reviewed_protocol: bool = False,
+        physical_simulation: bool = False,
     ) -> None:
         self.bravo = bravo
         self._deck_config = deck_config or {}
@@ -433,7 +440,10 @@ class WorkflowExecutor:
         self._library_src = library_src or ""
         self._library_ns: dict[str, Any] = {}
         self._runtime_state = copy.deepcopy(runtime_state or {})
-        self._preview_animation = preview_animation
+        self._physical_simulation = physical_simulation
+        self._physics_scene = None
+        # Show the actual native primitive motion stream when it is checked.
+        self._preview_animation = preview_animation and not physical_simulation
         self._strict_validation = strict_validation
         self._reviewed_protocol = reviewed_protocol
         self._nodes = {n["id"]: n for n in graph_data.get("nodes", [])}
@@ -491,6 +501,29 @@ class WorkflowExecutor:
         # idle. We track _light_in_error so we only emit transitions, not
         # on every step.
         self._light_in_error: bool = False
+        self._step_emissions = []
+
+    async def _flush_step_emissions(self):
+        pending, self._step_emissions = self._step_emissions, []
+        if pending:
+            await asyncio.gather(*(asyncio.wrap_future(future) for future in pending))
+
+    def _physical_report_fields(self, error=None) -> dict[str, Any]:
+        if self._physics_scene is None:
+            return {}
+        if error is not None:
+            self._physics_scene.record_failure(error)
+        return {"physical_simulation": self._physics_scene.report()}
+
+    async def _emit_early_workflow_error(self, error: str) -> None:
+        try:
+            await self._emit({
+                "type": "workflow:error", "error": error,
+                **self._physical_report_fields(error),
+            })
+        finally:
+            if self._physics_scene is not None:
+                await self._physics_scene.close()
 
     @staticmethod
     def _selection_keys(selection: Any) -> set[str]:
@@ -1002,24 +1035,42 @@ class WorkflowExecutor:
         # Capture the main loop so sandbox threads (prompt_user) can submit
         # coroutines back via asyncio.run_coroutine_threadsafe.
         self._main_loop = asyncio.get_running_loop()
-        if self._strict_validation and (self._library_src or any(
+        if self._physical_simulation:
+            from pybravo.physics.runtime import CollisionRehearsal
+
+            # Native SDK import and scene construction are deferred to the
+            # owner thread. Even pre-scene failures get an explicit report.
+            self._physics_scene = CollisionRehearsal(self.bravo)
+        if (self._strict_validation or self._physical_simulation) and (self._library_src or any(
             n.get("type") == "logic/Script" for n in self._nodes.values()
         )):
+            if self._physical_simulation:
+                await self._emit_early_workflow_error("Physical rehearsal does not execute Python scripts or libraries")
+                return
             raise ValueError("Strict protocol validation does not execute Python scripts or libraries")
         # Compile the workflow-level library ONCE at run start so every
         # Script node sees the same helpers. A library compile failure
         # aborts the run before any motion.
         ok, err = self._compile_library()
         if not ok:
-            await self._emit({
-                "type": "workflow:error",
-                "error": f"Library failed to compile: {err}",
-            })
+            await self._emit_early_workflow_error(f"Library failed to compile: {err}")
             return
         start = self._find_start_node()
         if not start:
-            await self._emit({"type": "workflow:error", "error": "No Start node found"})
+            await self._emit_early_workflow_error("No Start node found")
             return
+
+        if self._physical_simulation:
+            from pybravo.controllers.simulation import SimulationController
+
+            # Refuse a physical controller before auto-connect or deck setup.
+            # This checker belongs only to an isolated software Bravo.
+            if (
+                self.bravo.profile.connection.controller_type != "simulation"
+                or (self.bravo.is_connected and not isinstance(self.bravo.controller, SimulationController))
+            ):
+                await self._emit_early_workflow_error("Physical rehearsal requires an isolated simulation controller")
+                return
 
         # Ensure connected (auto-connect in simulation mode if needed)
         if not self.bravo.is_connected:
@@ -1027,7 +1078,7 @@ class WorkflowExecutor:
                 self.bravo.connect()
                 logger.info("Auto-connected bravo for workflow simulation")
             except Exception as exc:
-                await self._emit({"type": "workflow:error", "error": f"Failed to connect: {exc}"})
+                await self._emit_early_workflow_error(f"Failed to connect: {exc}")
                 return
 
         # Hook into the state machine engine's on_step_complete callback so we
@@ -1072,21 +1123,21 @@ class WorkflowExecutor:
                         Y=round(positions.get("Y", 0), 2),
                         G=round(positions.get("G", 0), 2),
                     )
-                    asyncio.run_coroutine_threadsafe(
+                    self._step_emissions.append(asyncio.run_coroutine_threadsafe(
                         self._emit({
                             "type": "workflow:positions",
                             "positions": positions,
                         }),
                         self._step_event_loop,
-                    )
-                    asyncio.run_coroutine_threadsafe(
+                    ))
+                    self._step_emissions.append(asyncio.run_coroutine_threadsafe(
                         self._emit({
                             "type": "workflow:node_step",
                             "node_id": self._current_node_id,
                             "step_name": step_name,
                         }),
                         self._step_event_loop,
-                    )
+                    ))
             except Exception as e:
                 logger.warning("on_step position read failed: %s", e)
         engine.set_step_handler(_on_step)
@@ -1110,7 +1161,7 @@ class WorkflowExecutor:
         # resolves with Retry/Ignore/Abort). Latch error state and blink
         # yellow until the next successful step or workflow end.
         def _on_engine_error(task_error) -> None:
-            if self._strict_validation or self._reviewed_protocol:
+            if self._strict_validation or self._reviewed_protocol or self._physical_simulation:
                 raise RuntimeError(f"{task_error.step_name}: {task_error.message}")
             try:
                 if not self._light_in_error:
@@ -1120,34 +1171,64 @@ class WorkflowExecutor:
                 pass
         engine.set_error_handler(_on_engine_error)
 
+        workflow_error = None
         try:
             # Setup can fail before the first node, particularly when a
             # reviewed tip inventory no longer matches the configured deck.
             # Keep it inside the event-recording and callback-cleanup boundary.
             await self._setup_deck()
             self._apply_runtime_snapshot()
+            if self._physical_simulation:
+                from pybravo.controllers.simulation import SimulationController
+
+                if not isinstance(self.bravo.controller, SimulationController):
+                    raise RuntimeError('Physical rehearsal requires an isolated simulation controller')
+                await self._physics_scene.initialize()
+                self.bravo.controller.set_motion_guard(self._physics_scene.check_motion)
             self._set_workflow_light("running")
-            await self._emit({"type": "workflow:start"})
+            await self._emit({"type": "workflow:start", **self._physical_report_fields()})
             await self._emit(self._current_runtime_event_state())
             await self._emit_vars_update(force=True)
             # Give the WebSocket client a moment to connect and receive events.
             await asyncio.sleep(0.3)
             await self._walk(start["id"], 0)  # slot 0 = flow output
+            await self._flush_step_emissions()
         except Exception as exc:
-            await self._emit({
-                "type": "workflow:error",
-                "error": str(exc),
-                "vars": _safe_json_snapshot(self._vars),
-            })
+            await self._flush_step_emissions()
+            workflow_error = exc
+            self._physical_report_fields(exc)
             # Workflow ended in an unhandled error — leave the lights
             # blinking yellow so the operator sees something needs
             # attention before navigating away.
             self._set_workflow_light("error")
-            return
+        except asyncio.CancelledError:
+            self._physical_report_fields("Physical rehearsal canceled")
+            raise
         finally:
             # Restore the caller's handlers even if deck setup failed.
             engine.set_step_handler(prior_step_handler)
             engine.set_error_handler(prior_error_handler)
+            if self._physics_scene:
+                try:
+                    self.bravo.controller.set_motion_guard(None)
+                except Exception as exc:
+                    workflow_error = workflow_error or exc
+                    self._physical_report_fields(exc)
+                finally:
+                    try:
+                        await self._physics_scene.close()
+                    except Exception as exc:
+                        workflow_error = workflow_error or exc
+                        self._physical_report_fields(exc)
+
+        if workflow_error is not None:
+            self._set_workflow_light("error")
+            await self._emit({
+                "type": "workflow:error", "error": str(workflow_error),
+                "vars": _safe_json_snapshot(self._vars),
+                **self._physical_report_fields(),
+            })
+            return
 
         # Clean completion — green idle so the operator can tell the run
         # is done from across the room.
@@ -1156,6 +1237,7 @@ class WorkflowExecutor:
             "type": "workflow:complete",
             "status": "aborted" if self._aborted else "ok",
             "vars": _safe_json_snapshot(self._vars),
+            **self._physical_report_fields(),
         })
 
     async def _emit_vars_update(self, force: bool = False) -> None:
@@ -1462,6 +1544,8 @@ class WorkflowExecutor:
         properties = _resolve_dynamic_properties(
             properties, self._loop_stack, self._vars,
         )
+        if self._physics_scene:
+            await self._physics_scene.set_context(node_id, node_type, properties)
 
         # Per-node plate anchor selection. Aspirate/Dispense/Mix nodes carry an
         # `anchor` property (e.g. "A1", "B2", "D4", or "iter:A1,A2,B1,B2" which
@@ -1528,7 +1612,17 @@ class WorkflowExecutor:
             try:
                 method = getattr(self.bravo, method_name, None)
                 if method:
-                    result = await method(**params)
+                    if self._physical_simulation:
+                        from pybravo.physics.runtime import _await_drained
+
+                        # Canceling an asyncio.to_thread waiter cannot stop its
+                        # controller worker. Keep its guard/scene alive until
+                        # the native task finishes, then propagate cancellation
+                        # through the normal cleanup boundary.
+                        result = await _await_drained(asyncio.create_task(method(**params)))
+                    else:
+                        result = await method(**params)
+                    await self._flush_step_emissions()
                     # Store data output for sensor nodes
                     if node_type == "sensor/ReadBarcode" and result:
                         barcode = str(result.get("barcode") or "")
@@ -1640,6 +1734,8 @@ class WorkflowExecutor:
                     "error": str(result.get("message") or "aborted"),
                 })
                 self._aborted = True
+                if self._physical_simulation:
+                    raise RuntimeError(str(result.get("message") or "Physical rehearsal task aborted"))
                 return
 
         elif self._strict_validation:

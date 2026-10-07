@@ -622,6 +622,160 @@ def _check_tips_lifecycle(wf: DraftedWorkflow) -> list[ValidationIssue]:
     return issues
 
 
+def _literal_tip_location(value: Any) -> int | None:
+    """Return a fixed deck location, excluding iteration/variable references."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 1 <= value <= 9 else None
+    if isinstance(value, str) and value.isdecimal():
+        location = int(value)
+        return location if 1 <= location <= 9 else None
+    return None
+
+
+def _literal_tip_anchor(properties: Mapping[str, Any]) -> tuple[int, int] | None:
+    row = properties.get("anchor_row", properties.get("tip_anchor_row"))
+    col = properties.get("anchor_col", properties.get("tip_anchor_col"))
+    if all(isinstance(value, int) and not isinstance(value, bool) and value >= 0
+           for value in (row, col)):
+        return row, col
+    return None
+
+
+def _check_repeated_loop_tip_inventory(wf: DraftedWorkflow) -> list[ValidationIssue]:
+    """Flag repeated, linear loop bodies that mix clean and returned tips.
+
+    Branches, nested loops, and dynamic locations need execution-time
+    inventory tracking; this check deliberately avoids guessing their paths.
+    """
+    issues: list[ValidationIssue] = []
+    nodes = {node.id: node for node in wf.graph.nodes}
+    outputs: dict[int, list[tuple[int, int]]] = {}
+    for link in wf.graph.links:
+        if link.link_type == -1:
+            outputs.setdefault(link.origin_id, []).append((link.origin_slot, link.target_id))
+
+    for loop in wf.graph.nodes:
+        if loop.type != "flow/Loop":
+            continue
+        raw_count = loop.properties.get("count")
+        if isinstance(raw_count, bool):
+            continue
+        if isinstance(raw_count, int):
+            count = raw_count
+        elif isinstance(raw_count, float) and math.isfinite(raw_count) and raw_count.is_integer():
+            count = int(raw_count)
+        elif isinstance(raw_count, str) and raw_count.strip().isdecimal():
+            count = int(raw_count.strip())
+        else:
+            continue
+        if count <= 1:
+            continue
+        roots = [target for slot, target in outputs.get(loop.id, []) if slot == 0]
+        if len(roots) != 1:
+            continue
+        body = []
+        current = roots[0]
+        visited: set[int] = set()
+        while current not in visited:
+            node = nodes.get(current)
+            if node is None or node.type in {"flow/Loop", "flow/IfElse"}:
+                break
+            visited.add(current)
+            body.append(node)
+            outgoing = outputs.get(current, [])
+            if not outgoing:
+                break
+            if len(outgoing) != 1:
+                body = []  # Branching is outside this definite check.
+                break
+            current = outgoing[0][1]
+        else:
+            body = []  # Cycles need control-flow analysis, not a guess.
+        if not body:
+            continue
+
+        pickups = [node for node in body if node.type == "tips/TipsOn"]
+        returns = [node for node in body if node.type == "tips/TipsOff"]
+        if any(node.type in _LIQUID_TYPES for node in body):
+            if bool(pickups) != bool(returns):
+                issues.append(ValidationIssue(
+                    "error", "LOOP_TIP_LIFECYCLE_INCOMPLETE",
+                    "A repeated liquid loop has pickup or ejection only inside its body. "
+                    "A later iteration would start with the wrong mounted-tip state.", loop.id,
+                ))
+            elif not pickups:
+                issues.append(ValidationIssue(
+                    "warning", "LOOP_TIP_REUSE_UNREVIEWED",
+                    "The loop performs liquid actions without a per-iteration tip lifecycle. "
+                    "Confirm whether reuse is intended and acceptable for the sources.", loop.id,
+                ))
+
+        pickup_by_location: dict[int, list[Any]] = {}
+        return_by_location: dict[int, list[Any]] = {}
+        for node in pickups:
+            location = _literal_tip_location(node.properties.get("location"))
+            if location is not None:
+                pickup_by_location.setdefault(location, []).append(node)
+        for node in returns:
+            location = _literal_tip_location(node.properties.get("location"))
+            if location is not None:
+                return_by_location.setdefault(location, []).append(node)
+        # A distinct return box needs empty holes, not merely another catalog
+        # ID. Check only fixed, stationary dedicated racks: other control flow
+        # and moving racks are assessed by the native inventory ledger.
+        if not any(node.type.startswith("plate/") for node in wf.graph.nodes):
+            all_pickup_locations = {
+                _literal_tip_location(node.properties.get("location"))
+                for node in wf.graph.nodes if node.type == "tips/TipsOn"
+            }
+            all_return_locations = {
+                _literal_tip_location(node.properties.get("location"))
+                for node in wf.graph.nodes if node.type == "tips/TipsOff"
+            }
+            for location in pickup_by_location.keys() - all_return_locations:
+                items = wf.deck.get(str(location), [])
+                if items and items[-1].tipbox_fill_state == "empty":
+                    issues.append(ValidationIssue(
+                        "error", "LOOP_EMPTY_CLEAN_SUPPLY",
+                        f"Dedicated pickup box {location} is proposed empty. "
+                        "Load fresh supply there; keep empty boxes for spent-tip return.", loop.id,
+                    ))
+            for location in return_by_location.keys() - all_pickup_locations:
+                items = wf.deck.get(str(location), [])
+                if items and items[-1].tipbox_fill_state == "full":
+                    issues.append(ValidationIssue(
+                        "error", "LOOP_OCCUPIED_RETURN_BOX",
+                        f"Dedicated return box {location} is proposed full. "
+                        "Set tipbox_fill_state to empty for the proposed spent-tip return "
+                        "and confirm actual loading before a run.", loop.id,
+                    ))
+        for location in sorted(pickup_by_location.keys() & return_by_location.keys()):
+            fixed_same_anchor = any(
+                _literal_tip_anchor(on.properties) is not None
+                and _literal_tip_anchor(on.properties) == _literal_tip_anchor(off.properties)
+                for on in pickup_by_location[location]
+                for off in return_by_location[location]
+            )
+            if fixed_same_anchor:
+                issues.append(ValidationIssue(
+                    "error", "LOOP_FIXED_SPENT_TIP_ANCHOR",
+                    f"Repeated loop picks from and returns to tip box {location} at "
+                    "the same fixed anchor. The next pass starts at returned spent "
+                    "tips; fresh inventory cannot be inferred from that anchor.",
+                    loop.id,
+                ))
+            else:
+                issues.append(ValidationIssue(
+                    "error", "LOOP_MIXES_CLEAN_SPENT_TIPS",
+                    f"Repeated loop uses tip box {location} for both clean pickup "
+                    "and spent-tip return. Separate the inventories or leave "
+                    "the fresh-tip plan unresolved for operator review.", loop.id,
+                ))
+    return issues
+
+
 def _check_start_end_reachability(wf: DraftedWorkflow) -> list[ValidationIssue]:
     """Warn on orphan nodes not reachable from Start via flow links.
 
@@ -769,6 +923,7 @@ def validate_drafted_workflow(
         wf, context=catalog_context, require_catalog=require_catalog,
     ))
     issues.extend(_check_tips_lifecycle(wf))
+    issues.extend(_check_repeated_loop_tip_inventory(wf))
     issues.extend(_check_start_end_reachability(wf))
     issues.extend(_check_citations(
         wf,

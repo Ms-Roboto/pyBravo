@@ -168,6 +168,11 @@ class Bravo:
         self._tips_on_head_selection: TipSelection | None = None
         self._plate_selection: dict[int, PlateSelection] = {}
         self._tipbox_occupancy: dict[int, set[tuple[int, int]]] = {}
+        # Physical presence is independent of freshness. Returned tips remain
+        # in their wells, but must never become pickup supply again.
+        self._tipbox_spent: dict[int, set[tuple[int, int]]] = {}
+        self._tipbox_inventory_owners: dict[int, Labware] = {}
+        self._tipbox_rack_inventories: dict[int, tuple[Labware, set[tuple[int, int]], set[tuple[int, int]], bool]] = {}
         self._tipbox_untracked: set[int] = set()
         self._labware_names: dict[str, int] = {}
         self._accessories = AccessoryManager(self._profile)
@@ -1401,6 +1406,13 @@ class Bravo:
         speed: SpeedLevel = SpeedLevel.MED,
     ) -> dict[str, Any]:
         from_loc = self._resolve_location(from_location)
+        source_labware = self._deck.get_stack(from_loc).top
+        source_is_tipbox = source_labware is not None and (
+            self._labware_base_class(source_labware) == "tip_box" or self._labware_kind(source_labware) == "tip_box"
+        )
+        if source_is_tipbox:
+            self._ensure_tipbox_occupancy(from_loc, source_labware)
+            self._remember_tipbox_inventory(from_loc, source_labware)
         task = PickPlaceTask(
             self.controller,
             self._teachpoints,
@@ -1414,6 +1426,11 @@ class Bravo:
         if task.status == TaskStatus.ABORTED:
             logger.warning("Pick/place %d->%d aborted by operator.", from_loc, to_location)
             return {"status": "aborted", "from_location": from_loc, "to_location": to_location, "message": "Pick/place aborted by operator."}
+        if source_is_tipbox and self._deck.get_stack(to_location).top is source_labware:
+            # Inventory follows the physical rack; moving it must not restock
+            # emptied wells or relabel returned tips as fresh.
+            self._clear_tipbox_inventory(from_loc)
+            self._ensure_tipbox_occupancy(to_location, source_labware)
         for name in list(self._labware_names):
             if self._labware_names[name] == from_loc:
                 self._labware_names[name] = to_location
@@ -2005,6 +2022,8 @@ class Bravo:
             self._tipbox_untracked.add(location)
         else:
             self._tipbox_untracked.discard(location)
+        if self._labware_base_class(labware) == "tip_box" or self._labware_kind(labware) == "tip_box":
+            self._remember_tipbox_inventory(location, labware)
         if name is not None:
             self._labware_names = {k: v for k, v in self._labware_names.items() if k != name}
             self._labware_names[name] = location
@@ -2015,7 +2034,7 @@ class Bravo:
         location = self._resolve_location(location)
         self._deck.clear(location)
         self._plate_selection.pop(location, None)
-        self._tipbox_occupancy.pop(location, None)
+        self._clear_tipbox_inventory(location)
         self._labware_names = {k: v for k, v in self._labware_names.items() if v != location}
         self._emit("deck_updated", location=location, labware=None)
 
@@ -2074,6 +2093,9 @@ class Bravo:
                 if refreshed is None:
                     rebuilt_items.append(item)
                     continue
+                record = self._tipbox_rack_inventories.get(id(item))
+                if record is not None:
+                    self._tipbox_rack_inventories[id(refreshed)] = (refreshed, set(record[1]), set(record[2]), record[3])
                 rebuilt_items.append(refreshed)
                 changed = True
 
@@ -2085,7 +2107,7 @@ class Bravo:
                 self._deck.add(location, item)
             top = self._deck.get_stack(location).top
             if top is None:
-                self._tipbox_occupancy.pop(location, None)
+                self._clear_tipbox_inventory(location)
             else:
                 self._initialize_tipbox_occupancy(location, top, fill_state="preserve")
             self._emit("deck_updated", location=location, labware=None if top is None else top.name)
@@ -2538,6 +2560,15 @@ class Bravo:
         wells = selected_tip_wells(rows, cols, selection)
         if not wells:
             raise RuntimeError("No tips are selected for the current head mode")
+        self._ensure_tipbox_occupancy(selection.location, labware)
+        if purpose == "pickup" and set(wells) & self._spent_tip_wells(selection.location):
+            raise RuntimeError("Selected tip wells contain spent tips; load fresh tips or choose a fresh legal region")
+        if purpose == "return":
+            box_tip_id = self._tip_id_for_labware(labware)
+            if self._tip_definition_id and box_tip_id and box_tip_id != self._tip_definition_id:
+                raise RuntimeError(
+                    f"Tip return requires matching tip definitions ({self._tip_definition_id} on head, {box_tip_id} in box)"
+                )
         if interleaved:
             if selection.location in self._tipbox_untracked:
                 raise RuntimeError("Interleaved tip selection requires tracked rack occupancy")
@@ -2554,7 +2585,12 @@ class Bravo:
             if selection.location not in self._tipbox_untracked:
                 self._ensure_tipbox_occupancy(selection.location, labware)
                 occupied = self._occupied_tip_wells(selection.location)
-                if not is_legal_tipbox_anchor(
+                original_empty_return = (
+                    purpose == "return"
+                    and self._tips_on_head_selection == selection
+                    and not set(wells) & occupied
+                )
+                if not original_empty_return and not is_legal_tipbox_anchor(
                     rows,
                     cols,
                     head_mode,
@@ -2581,12 +2617,22 @@ class Bravo:
             except RuntimeError:
                 if (self._tip_selection.row_stride, self._tip_selection.col_stride) != (1, 1):
                     raise  # Explicit quadrants must not silently select a different region.
+        original = self._tips_on_head_selection
+        if purpose == "return" and original is not None and original.location == location:
+            try:
+                self._validated_tip_wells(labware, head_mode, original, purpose=purpose)
+                self._tip_selection = original
+                return original
+            except RuntimeError:
+                if (original.row_stride, original.col_stride) != (1, 1):
+                    raise
         rows, cols = self._tipbox_dimensions(labware)
         if rows <= 0 or cols <= 0:
             raise RuntimeError("Tip box metadata is missing rows/cols")
         anchors = self._legal_tip_anchors(location, labware, head_mode, purpose=purpose)
         if not anchors:
-            raise RuntimeError(f"No legal tip anchors are available for {purpose} at location {location}")
+            qualifier = "fresh " if purpose == "pickup" else ""
+            raise RuntimeError(f"No legal {qualifier}tip anchors are available for {purpose} at location {location}")
         selection = tipbox_selection(location, anchors[0]["row"], anchors[0]["col"], head_mode)
         self._validated_tip_wells(labware, head_mode, selection, purpose=purpose)
         self._tip_selection = selection
@@ -2634,30 +2680,78 @@ class Bravo:
 
     def _initialize_tipbox_occupancy(self, location: int, labware: Labware, *, fill_state: str = "full") -> None:
         if self._labware_base_class(labware) != "tip_box" and self._labware_kind(labware) != "tip_box":
-            self._tipbox_occupancy.pop(location, None)
+            self._clear_tipbox_inventory(location)
             return
         rows, cols = self._tipbox_dimensions(labware)
         if rows <= 0 or cols <= 0:
-            self._tipbox_occupancy.pop(location, None)
+            self._clear_tipbox_inventory(location)
             return
         normalized_fill = str(fill_state or "full").strip().lower()
         if normalized_fill == "preserve" and location in self._tipbox_occupancy:
+            self._remember_tipbox_inventory(location, labware)
             return
+        previous_owner = self._tipbox_inventory_owners.get(location)
+        if previous_owner is not None:
+            self._remember_tipbox_inventory(location, previous_owner)
+        # Explicit loading/restocking supplies new inventory. Catalog refresh
+        # uses preserve above and never clears freshness history.
+        self._tipbox_spent[location] = set()
         if normalized_fill == "empty":
             self._tipbox_occupancy[location] = set()
+            self._remember_tipbox_inventory(location, labware)
             return
         self._tipbox_occupancy[location] = {
             (row, col)
             for row in range(rows)
             for col in range(cols)
         }
+        if normalized_fill == "spent":
+            self._tipbox_spent[location] = set(self._tipbox_occupancy[location])
+        self._remember_tipbox_inventory(location, labware)
+
+    def _remember_tipbox_inventory(self, location: int, labware: Labware) -> None:
+        self._tipbox_inventory_owners[location] = labware
+        self._tipbox_rack_inventories[id(labware)] = (
+            labware, set(self._tipbox_occupancy.get(location, set())), set(self._tipbox_spent.get(location, set())),
+            location in self._tipbox_untracked,
+        )
+
+    def _clear_tipbox_inventory(self, location: int) -> None:
+        owner = self._tipbox_inventory_owners.get(location)
+        if owner is not None:
+            self._remember_tipbox_inventory(location, owner)
+        self._tipbox_occupancy.pop(location, None)
+        self._tipbox_spent.pop(location, None)
+        self._tipbox_inventory_owners.pop(location, None)
+        self._tipbox_untracked.discard(location)
 
     def _ensure_tipbox_occupancy(self, location: int, labware: Labware) -> None:
-        if location not in self._tipbox_occupancy:
+        if self._tipbox_inventory_owners.get(location) is not labware:
+            previous_owner = self._tipbox_inventory_owners.get(location)
+            if previous_owner is not None:
+                self._remember_tipbox_inventory(location, previous_owner)
+            record = self._tipbox_rack_inventories.get(id(labware))
+            if record is not None:
+                self._tipbox_occupancy[location] = set(record[1])
+                self._tipbox_spent[location] = set(record[2])
+                if record[3]:
+                    self._tipbox_untracked.add(location)
+                else:
+                    self._tipbox_untracked.discard(location)
+                self._remember_tipbox_inventory(location, labware)
+                return
+            self._initialize_tipbox_occupancy(location, labware)
+        elif location not in self._tipbox_occupancy:
             self._initialize_tipbox_occupancy(location, labware)
 
     def _occupied_tip_wells(self, location: int) -> set[tuple[int, int]]:
         return set(self._tipbox_occupancy.get(location, set()))
+
+    def _spent_tip_wells(self, location: int) -> set[tuple[int, int]]:
+        return set(self._tipbox_spent.get(location, set()))
+
+    def _fresh_tip_wells(self, location: int) -> set[tuple[int, int]]:
+        return self._occupied_tip_wells(location) - self._spent_tip_wells(location)
 
     def _tipbox_fill_state(self, location: int, labware: Labware) -> str | None:
         """'full' / 'empty' / 'partial' for a tip box, else None.
@@ -2697,20 +2791,21 @@ class Bravo:
         labware = self._require_tip_box(location, operation="Tip inventory update")
         wells = self._validated_tip_wells(labware, head_mode, selection, purpose=purpose)
         if location in self._tipbox_untracked:
+            if purpose == "return":
+                self._tipbox_occupancy.setdefault(location, set()).update(wells)
+                self._tipbox_spent.setdefault(location, set()).update(wells)
+                self._remember_tipbox_inventory(location, labware)
             return
         occupied = self._occupied_tip_wells(location)
         if purpose == "pickup":
             occupied.difference_update(wells)
         elif purpose == "return":
-            box_tip_id = self._tip_id_for_labware(labware)
-            if self._tip_definition_id and box_tip_id and box_tip_id != self._tip_definition_id:
-                raise RuntimeError(
-                    f"Tip return requires matching tip definitions ({self._tip_definition_id} on head, {box_tip_id} in box)"
-                )
             occupied.update(wells)
+            self._tipbox_spent.setdefault(location, set()).update(wells)
         else:
             raise ValueError(f"Unknown tip inventory purpose: {purpose}")
         self._tipbox_occupancy[location] = occupied
+        self._remember_tipbox_inventory(location, labware)
 
     def _legal_tip_anchors(
         self,
@@ -2739,11 +2834,26 @@ class Bravo:
             occupied,
             purpose=purpose,
         )
-        return [
+        spent = self._spent_tip_wells(location)
+        result = [
             anchor.to_dict()
             for anchor in anchors
             if self._is_tip_anchor_reachable(location, labware, head_mode, anchor.row, anchor.col)
+            and (purpose != "pickup" or not set(selected_tip_wells(
+                rows, cols, tipbox_selection(location, anchor.row, anchor.col, head_mode),
+            )) & spent)
         ]
+        original = self._tips_on_head_selection
+        if purpose == "return" and original is not None and original.location == location:
+            wells = set(selected_tip_wells(rows, cols, original))
+            if wells and not wells & occupied and self._is_tip_anchor_reachable(
+                location, labware, head_mode, original.row, original.col,
+            ) and not any(item["row"] == original.row and item["col"] == original.col for item in result):
+                # A partially full rack may not meet the generic return-box
+                # packing rule, but the exact vacant pickup region remains a
+                # valid place to return its tracked tips. They become spent.
+                result.insert(0, original.to_dict())
+        return result
 
     def _axis_xy_range(self) -> tuple[tuple[float, float], tuple[float, float]]:
         x_cfg = self._profile.axes.get("X")
@@ -2788,6 +2898,8 @@ class Bravo:
             self._ensure_tipbox_occupancy(location, labware)
             rows, cols = self._tipbox_dimensions(labware)
             occupied = self._occupied_tip_wells(location)
+            spent = self._spent_tip_wells(location)
+            all_wells = {(row, col) for row in range(rows) for col in range(cols)}
             pickup_mode = self._head_mode
             return_mode = self._tips_on_head_mode or self._head_mode
             state[str(location)] = {
@@ -2795,7 +2907,11 @@ class Bravo:
                 "rows": rows,
                 "cols": cols,
                 "tip_id": self._tip_id_for_labware(labware),
+                "freshness_tracked": location not in self._tipbox_untracked,
                 "occupied": [f"{row}:{col}" for row, col in sorted(occupied)],
+                "fresh": [f"{row}:{col}" for row, col in sorted(occupied - spent)] if location not in self._tipbox_untracked else [],
+                "spent": [f"{row}:{col}" for row, col in sorted(spent)],
+                "empty": [f"{row}:{col}" for row, col in sorted(all_wells - occupied)],
                 "legal_pickup_anchors": self._legal_tip_anchors(location, labware, pickup_mode, purpose="pickup"),
                 "legal_return_anchors": self._legal_tip_anchors(location, labware, return_mode, purpose="return"),
             }

@@ -71,6 +71,7 @@ class SimulationController(BravoController):
         self._lights: LightCommandData | None = None
         self._go_button_pressed = False
         self._move_timing_enabled = True
+        self._motion_guard = None
         logger.info("SimulationController created (head_type=%s)", head_type.name)
 
     def set_move_timing_enabled(self, enabled: bool) -> None:
@@ -81,6 +82,17 @@ class SimulationController(BravoController):
         retain the velocity-based timing by default.
         """
         self._move_timing_enabled = enabled
+
+    def set_motion_guard(self, guard) -> None:
+        """Install an isolated physical checker; failures precede position edits."""
+        self._motion_guard = guard
+
+    def _check_motion(self, targets: dict[Axis, float]) -> None:
+        if self._motion_guard is None:
+            return
+        start = {axis: self._axes[axis].position for axis in Axis}
+        end = {**start, **targets}
+        self._motion_guard(start, end)
 
     # -- Connection --
 
@@ -138,6 +150,8 @@ class SimulationController(BravoController):
                 self._validate_zg_target(target)
             targets[m.axis] = target
 
+        self._check_motion(targets)
+
         max_duration = 0.0
         for m in moves:
             ax = self._axes[m.axis]
@@ -168,6 +182,7 @@ class SimulationController(BravoController):
 
     def home_axes(self, axes: list[Axis], *, force: bool = False) -> None:
         for axis in axes:
+            self._check_motion({axis: self._homing_offsets.get(axis, 0.0)})
             self._axes[axis].position = self._homing_offsets.get(axis, 0.0)
             self._axes[axis].homed = True
             logger.debug("Simulation: homed %s", axis.label)
@@ -178,6 +193,7 @@ class SimulationController(BravoController):
         # controllers and in Bravo.jog_axis's force-limited path.
         if params.axis == Axis.Zg:
             self._validate_zg_target(params.max_position)
+        self._check_motion({params.axis: params.max_position})
         ax.position = params.max_position
         logger.debug(
             "Simulation: jog %s to %.3f (max_pos=%.3f)",
@@ -255,11 +271,13 @@ class SimulationController(BravoController):
         return self._gripper_detected
 
     def grip(self, speed: SpeedLevel, position: float, grip_lid: bool = False) -> None:
+        self._check_motion({Axis.G: position})
         self._plate_in_gripper = True
         self._axes[Axis.G].position = position
         logger.debug("Simulation: grip at position %.3f", position)
 
     def open_gripper(self, position: float | None = None) -> None:
+        self._check_motion({Axis.G: OPEN_GRIPPER_POSITION if position is None else float(position)})
         self._plate_in_gripper = False
         self._axes[Axis.G].position = OPEN_GRIPPER_POSITION if position is None else float(position)
         logger.debug("Simulation: open_gripper")
@@ -280,8 +298,10 @@ class SimulationController(BravoController):
     ) -> dict[str, float | bool | None]:
         self._validate_zg_target(start_zg)
         self._validate_zg_target(end_zg)
+        self._check_motion({Axis.Zg: start_zg})
         self._axes[Axis.Zg].position = start_zg
         if self._simulated_scan_height_mm is None:
+            self._check_motion({Axis.Zg: end_zg})
             self._axes[Axis.Zg].position = end_zg
             self._plate_sensor_present = False
             return {
@@ -291,6 +311,7 @@ class SimulationController(BravoController):
         self._plate_sensor_present = True
         detected_zg = float(start_zg) + float(self._simulated_scan_height_mm)
         detected_zg = max(min(detected_zg, max(start_zg, end_zg)), min(start_zg, end_zg))
+        self._check_motion({Axis.Zg: detected_zg})
         self._axes[Axis.Zg].position = detected_zg
         return {
             "detected": True,

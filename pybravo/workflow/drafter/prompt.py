@@ -143,27 +143,29 @@ _NODE_CATALOG: tuple[tuple[str, dict[str, Any]], ...] = (
     }),
     ("tips/TipsOn", {
         "desc": (
-            "Pick up tips from a tip box. `location` is the tip-box deck "
+            "Pick up fresh tips from a clean supply box. `location` is the tip-box deck "
             "position (use `iter:1,2,3,4` to cycle through multiple boxes "
             "on successive loop iterations). `head_mode` is a dict with "
             "`subset_type` (all_barrels|row|column|rectangle|single_barrel), "
             "`subset_config` (back_left|back_right|front_left|front_right), "
             "and optional `row_count`/`column_count`. `tip_anchor_row` / "
-            "`tip_anchor_col` choose which cells of the tip box are picked "
-            "up (0-indexed; ignored when using the whole head)."
+            "`tip_anchor_col` suggest the starting cells of the tip box "
+            "(0-indexed; ignored when using the whole head). An anchor is "
+            "not proof that fresh tips exist there."
         ),
         "required": ("location",),
         "optional": ("head_mode", "tip_anchor_row", "tip_anchor_col"),
     }),
     ("tips/TipsOff", {
         "desc": (
-            "Eject tips at `location` — either back into a tip box or "
-            "into a tip trash bin. The head_mode is INHERITED from the "
+            "Eject used tips at `location` into a designated spent-tip return "
+            "box or compatible tip waste. Returned tips remain spent and "
+            "must not be counted as clean supply. The head_mode is INHERITED from the "
             "most recent upstream Tips On node (head can't reconfigure "
             "mid-cycle), so DO NOT emit `head_mode` on Tips Off. "
             "`tip_anchor_row` / `tip_anchor_col` choose which cells of "
-            "the destination box receive the tips (0-indexed); default "
-            "to the upstream pickup anchor."
+            "the destination box receive the tips (0-indexed); these are "
+            "starting hints, not a new fresh-tip inventory."
         ),
         "required": ("location",),
         "optional": ("tip_anchor_row", "tip_anchor_col"),
@@ -488,6 +490,33 @@ into a valid pyBravo workflow JSON.
     ID empty and explain the unresolved choice if no ready pair is
     established. Do not infer a tip from the rack name, capacity, or an
     exemplar.
+15. In a repeated operation that requires fresh tips each iteration,
+    include a complete pickup/use/eject lifecycle within the loop body.
+    Treat every returned set as spent even if it is physically present in
+    a rack. Keep the clean pickup supply distinct from a spent-tip return
+    rack or compatible waste; never return to a rack that a later
+    `tips/TipsOn` will treat as clean, and never repeat a pickup/return
+    anchor pair as if those returned tips became fresh again. A catalog
+    rack or numeric loop count does not establish actual fresh inventory.
+    Propose only catalog-compatible rack roles and locations supported by
+    the supplied deck. Set `deck[location][item].tipbox_fill_state` to
+    `full` for proposed clean supply and `empty` for a proposed return
+    rack. Preserve that initial state in the output. Leave missing fresh-well count, return capacity,
+    disposal location, and physical loading explicitly unresolved for
+    operator confirmation. If the source calls for deliberate tip reuse,
+    preserve that intent for review instead of silently labeling it fresh.
+16. The saved native graph must pass mechanical readiness and strict
+    physical rehearsal before review. A visual walkthrough is only an
+    illustration. Resolve head/tip/rack compatibility, empty liquid-task
+    locations, repeated anchors, capacity and missing geometry first.
+    SuperDex checks actual simulated axis commands and stops on modeled
+    collisions; never invent geometry or motion settings to bypass it.
+17. When the device has a gripper, put a native `system/DockGripper`
+    primitive before tip handling, after any required initialization.
+    Initialization alone does not guarantee the gripper is recessed. A
+    protruding finger can hit the tip rack as a subset moves across it.
+    Keep docking visible in the graph; do not rely on a cosmetic animation
+    or an invisible movement to supply this clearance.
 
 ## Output format
 
