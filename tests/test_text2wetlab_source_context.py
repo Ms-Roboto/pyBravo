@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 
-from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
+from pybravo.evals.text2wetlab.source_context import (
+    prepare_planning_source,
+    prepare_scientific_source,
+)
 
 
 def test_selects_longest_complete_methods_section_instead_of_abstract():
@@ -51,3 +54,39 @@ def test_task_relevant_results_section_is_retained_verbatim_with_provenance():
     assert "Digest fragments, then assemble." in context.text
     assert "Ignore this assay." not in context.text
     assert context.line_spans == ((2, 4), (8, 10))
+
+
+def test_planning_selector_keeps_whole_relevant_method_and_results_subsections():
+    paper = (
+        "Title\nMaterials and methods\n"
+        "Materials and methods > Unrelated reagent history\n2.1\n"
+        + "History has no bearing on this transfer. " * 14 + "\n"
+        "Materials and methods > PCR amplification\n2.2\n"
+        "PCRs were performed in 25 µL volumes. "
+        + "Amplification used a thermal cycle. " * 8 + "\n"
+        "Materials and methods > Liquid handling\n2.3\n"
+        "PCRs were manually transferred to a thermocycler. "
+        + "The robot prepared liquid reactions. " * 8 + "\n"
+        "Results\nGeneral findings.\n"
+        "Results > PCR assembly\n"
+        "Fragments were cleaned and concentrated before assembly.\n"
+        "Results > Unrelated assay\nAn unrelated assay is described here.\n"
+        "Discussion\nOther details.\n"
+    )
+    task = "# PCR assembly\nPrepare amplification and liquid handling, then clean fragments."
+    context = prepare_planning_source(paper, task_instruction=task, max_chars=1_100)
+    assert context.strategy == "verbatim_ranked_method_subsections_for_planning"
+    assert "PCRs were performed in 25 µL volumes" in context.text
+    assert "PCRs were manually transferred to a thermocycler" in context.text
+    assert "Fragments were cleaned and concentrated before assembly" in context.text
+    assert "History has no bearing" not in context.text
+    assert "An unrelated assay" not in context.text
+    assert len(context.text) <= 1_100
+    assert len(context.line_spans) == 3
+    assert context.excerpt_sha256 == hashlib.sha256(context.text.encode("utf-8")).hexdigest()
+
+
+def test_planning_selector_falls_back_when_source_has_no_complete_subsections():
+    source = "Methods\nPCRs were performed in 25 µL volumes.\nResults\n" + "result " * 300
+    baseline = prepare_scientific_source(source, task_instruction="# PCR")
+    assert prepare_planning_source(source, task_instruction="# PCR", max_chars=20) == baseline
