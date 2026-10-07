@@ -4,8 +4,9 @@ The plan is authored by the local model and grounded in the supplied task and
 paper. These checks do not invent experimental quantities. They detect manual
 liquid handoffs without a named stage and compare unambiguous, direct source
 deliveries in a simulator event log with planned per-vessel additions.
-Intermediate preparation and mixed-source tips are intentionally left for
-review instead of being assigned a possibly false lineage.
+Ambiguous mixed-source tips are intentionally left for review. Prepared
+intermediates can be checked separately when their exact simulated well is
+known.
 """
 
 from __future__ import annotations
@@ -36,6 +37,244 @@ for every robot-delivered component in a named pipette stage and every manual
 addition in a named manual stage. The code's delivered quantities must agree
 with the cited plan; if a source-supported alternative changes the plan,
 regenerate and re-audit the plan first."""
+
+_VOLUME_UL = re.compile(r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*[µμu]l\b", re.IGNORECASE)
+_MASS = re.compile(r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*(ng|[µμu]g)\b(?!\s*/)",
+                   re.IGNORECASE)
+_MASS_CONCENTRATION = re.compile(
+    r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*(ng|[µμu]g)\s*/\s*[µμu]l\b",
+    re.IGNORECASE,
+)
+_MOLAR_CONCENTRATION = re.compile(
+    r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*(nM|[µμu]M|mM)\b",
+)
+_DURATION = re.compile(
+    r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*"
+    r"(hours?|hrs?|h|minutes?|mins?|min|seconds?|secs?|s)\b", re.IGNORECASE,
+)
+_TEMPERATURE_C = re.compile(r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*°?\s*c\b",
+                            re.IGNORECASE)
+_FINAL_VOLUME = re.compile(
+    r"(?:\b(?:final|total)\b[^.;:]{0,45}?\b(?:of|is|was|at|=)\s*"
+    r"|\b(?:reaction|pcr|assay)s?\b[^.;:]{0,45}?\b(?:in|at|of)\s*)"
+    r"(\d+(?:\.\d+)?)\s*[µμu]l\b",
+    re.IGNORECASE,
+)
+
+
+def _mass_ng(value: float, unit: str) -> float:
+    return value * (1000 if unit.casefold().endswith("g") and unit.casefold() != "ng" else 1)
+
+
+def _molar_um(value: float, unit: str) -> float:
+    return value * (0.001 if unit == "nM" else 1000 if unit == "mM" else 1)
+
+
+def _quoted_values(evidence: Sequence[Any], pattern: re.Pattern[str]) -> set[float]:
+    return {float(match.group(1)) for item in evidence
+            for match in pattern.finditer(item.quote)}
+
+
+def audit_cited_plan_quantities(
+    plan: OT2Plan, *, volume_tolerance_ul: float = 0.01,
+) -> tuple[PlanIssue, ...]:
+    """Compare unambiguous cited volumes and stock-equivalent masses.
+
+    This deliberately leaves multi-quantity prose and derived premixes for
+    review. It checks only one-to-one claims in a reaction/addition's own
+    citation and a uniquely cited ng/µL or µg/µL starting stock.
+    """
+    if not math.isfinite(volume_tolerance_ul) or volume_tolerance_ul < 0:
+        raise ValueError("volume_tolerance_ul must be finite and nonnegative")
+    sources = {source.id: source for source in plan.deck_sources}
+    issues: list[PlanIssue] = []
+    for reaction_index, reaction in enumerate(plan.reactions):
+        reaction_path = f"reactions[{reaction_index}]"
+        final_claims = _quoted_values(reaction.evidence, _FINAL_VOLUME)
+        if len(final_claims) == 1:
+            quoted = next(iter(final_claims))
+            if abs(quoted - reaction.final_volume_ul) > volume_tolerance_ul:
+                issues.append(PlanIssue(
+                    "cited_final_volume_mismatch", reaction_path,
+                    f"{reaction.name} claims {reaction.final_volume_ul:g} µL but its cited "
+                    f"source specifies {quoted:g} µL per final vessel.",
+                ))
+        for addition_index, item in enumerate(reaction.additions):
+            path = f"{reaction_path}.additions[{addition_index}]"
+            amount = item.addition.volume_ul
+            if amount is None:
+                continue
+            # Batch-preparation citations often state per-reaction quantities;
+            # comparing them to a prepared batch would assert false precision.
+            if reaction.output_source_id is None:
+                quoted_volumes = _quoted_values(item.evidence, _VOLUME_UL)
+                component = re.sub(r"[^a-z0-9]+", " ", item.addition.component.casefold()).strip()
+                if (len(quoted_volumes) == 1 and component and any(
+                    component in re.sub(r"[^a-z0-9]+", " ", evidence.quote.casefold())
+                    for evidence in item.evidence
+                )):
+                    quoted = next(iter(quoted_volumes))
+                    if abs(quoted - amount) > volume_tolerance_ul:
+                        issues.append(PlanIssue(
+                            "cited_addition_volume_mismatch", path,
+                            f"{item.addition.component} plans {amount:g} µL but its cited "
+                            f"source specifies {quoted:g} µL.",
+                        ))
+            source = sources.get(item.source_id or "")
+            if source is None or source.produced_by_stage is not None:
+                continue
+            concentrations = {
+                _mass_ng(float(match.group(1)), match.group(2))
+                for evidence in source.evidence
+                for match in _MASS_CONCENTRATION.finditer(evidence.quote)
+            }
+            target_masses = {
+                _mass_ng(float(match.group(1)), match.group(2))
+                for evidence in item.evidence
+                for match in _MASS.finditer(evidence.quote)
+            }
+            if len(concentrations) == len(target_masses) == 1:
+                concentration = next(iter(concentrations))
+                target_mass = next(iter(target_masses))
+                if concentration > 0:
+                    expected = target_mass / concentration
+                    if abs(expected - amount) > volume_tolerance_ul:
+                        issues.append(PlanIssue(
+                            "cited_stock_equivalent_mismatch", path,
+                            f"{target_mass:g} ng from {concentration:g} ng/µL requires "
+                            f"{expected:g} µL of {source.id}; plan has {amount:g} µL.",
+                        ))
+            stock_molar = {
+                _molar_um(float(match.group(1)), match.group(2))
+                for evidence in source.evidence
+                for match in _MOLAR_CONCENTRATION.finditer(evidence.quote)
+            }
+            final_molar = {
+                _molar_um(float(match.group(1)), match.group(2))
+                for evidence in item.evidence
+                for match in _MOLAR_CONCENTRATION.finditer(evidence.quote)
+            }
+            if len(stock_molar) == len(final_molar) == 1 and reaction.final_volume_ul > 0:
+                stock = next(iter(stock_molar))
+                final = next(iter(final_molar))
+                if stock > 0:
+                    expected = final * reaction.final_volume_ul / stock
+                    if abs(expected - amount) > volume_tolerance_ul:
+                        issues.append(PlanIssue(
+                            "cited_final_concentration_mismatch", path,
+                            f"A {final:g} µM target from {stock:g} µM stock in a "
+                            f"{reaction.final_volume_ul:g} µL reaction requires "
+                            f"{expected:g} µL of {source.id}; plan has {amount:g} µL.",
+                        ))
+    return tuple(issues)
+
+
+def audit_intermediate_preparation_events(
+    plan: OT2Plan,
+    events: Sequence[Mapping[str, Any]],
+    *,
+    output_locations: Mapping[str, tuple[str, str]],
+    volume_tolerance_ul: float = 0.01,
+) -> tuple[PlanIssue, ...]:
+    """Flag observable over-preparation of a model-linked physical batch.
+
+    ``output_locations`` maps a model-authored output source ID to its actual
+    simulator labware label and well. Only positive external dispenses into
+    that well count; aspirate/dispense mixing from the same well does not.
+    Missing or ambiguous simulator events never establish an underfill.
+    """
+    if not math.isfinite(volume_tolerance_ul) or volume_tolerance_ul < 0:
+        raise ValueError("volume_tolerance_ul must be finite and nonnegative")
+    expected = {reaction.output_source_id: reaction.final_volume_ul
+                for reaction in plan.reactions if reaction.output_source_id is not None}
+    locations = {
+        (labware.strip().casefold(), well.strip().casefold()): source_id
+        for source_id, (labware, well) in output_locations.items()
+        if source_id in expected
+    }
+    if not locations:
+        return ()
+    origins: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    delivered: dict[str, float] = defaultdict(float)
+    for event in events:
+        instrument = event.get("instrument")
+        if not isinstance(instrument, str):
+            continue
+        kind = event.get("kind")
+        if kind in {"pick", "drop"}:
+            origins[instrument].clear()
+            continue
+        if kind not in {"aspirate", "dispense"}:
+            continue
+        place, well, volume = event.get("labware"), event.get("well"), event.get("volume")
+        if (not isinstance(place, str) or not isinstance(well, str)
+                or isinstance(volume, bool) or not isinstance(volume, (int, float))
+                or not math.isfinite(volume) or volume <= 0):
+            continue
+        location = (place.strip().casefold(), well.strip().casefold())
+        if kind == "aspirate":
+            origins[instrument].add(location)
+        elif location in locations and origins[instrument] and location not in origins[instrument]:
+            delivered[locations[location]] += float(volume)
+    return tuple(PlanIssue(
+        "intermediate_overfilled", f"deck_sources/{source_id}",
+        f"Simulated external dispenses put {amount:g} µL into prepared intermediate "
+        f"{source_id}, above its single planned batch of {expected[source_id]:g} µL. "
+        "Check for a second executable preparation or an incorrect batch volume.",
+    ) for source_id, amount in delivered.items()
+        if amount > expected[source_id] + volume_tolerance_ul)
+
+
+def audit_parameterized_manual_stages(
+    plan: OT2Plan, *, time_tolerance_s: float = 1.0,
+    temperature_tolerance_c: float = 0.5,
+) -> tuple[PlanIssue, ...]:
+    """Require timed/manual source claims to be represented and ordered."""
+    if (not math.isfinite(time_tolerance_s) or time_tolerance_s < 0 or
+            not math.isfinite(temperature_tolerance_c) or temperature_tolerance_c < 0):
+        raise ValueError("Manual-stage tolerances must be finite and nonnegative")
+    issues: list[PlanIssue] = []
+    for index, stage in enumerate(plan.stages):
+        if stage.kind != "manual":
+            continue
+        path = f"stages[{index}]"
+        times = {
+            float(match.group(1)) * (3600 if match.group(2).casefold().startswith("h")
+                                     else 60 if match.group(2).casefold().startswith("m") else 1)
+            for evidence in stage.evidence for match in _DURATION.finditer(evidence.quote)
+        }
+        temperatures = _quoted_values(stage.evidence, _TEMPERATURE_C)
+        if len(times) > 1 or len(temperatures) > 1:
+            issues.append(PlanIssue(
+                "multiple_manual_conditions_in_one_stage", path,
+                f"{stage.name} cites several times or temperatures; represent the "
+                "ordered phases as separate manual stages.",
+            ))
+            continue
+        if times:
+            expected = next(iter(times))
+            if stage.duration_s is None or abs(stage.duration_s - expected) > time_tolerance_s:
+                issues.append(PlanIssue(
+                    "cited_manual_duration_mismatch", path,
+                    f"{stage.name} cites {expected:g} s but plans "
+                    f"{stage.duration_s!r} s.",
+                ))
+        if temperatures:
+            expected = next(iter(temperatures))
+            if (stage.temperature_c is None or
+                    abs(stage.temperature_c - expected) > temperature_tolerance_c):
+                issues.append(PlanIssue(
+                    "cited_manual_temperature_mismatch", path,
+                    f"{stage.name} cites {expected:g} °C but plans "
+                    f"{stage.temperature_c!r} °C.",
+                ))
+        if index and (times or temperatures) and stage.after_stage is None:
+            issues.append(PlanIssue(
+                "manual_stage_order_unlinked", path,
+                f"Timed or temperature-controlled manual stage {stage.name} needs "
+                "after_stage naming the preceding workflow stage.",
+            ))
+    return tuple(issues)
 
 
 def _strengths(value: str) -> set[float]:

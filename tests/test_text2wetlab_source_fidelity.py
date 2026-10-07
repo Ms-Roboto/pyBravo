@@ -18,9 +18,12 @@ from pybravo.evals.text2wetlab.planning import (
 from pybravo.evals.text2wetlab.reaction import Addition
 from pybravo.evals.text2wetlab.source_fidelity import (
     SOURCE_FIDELITY_GUIDANCE,
+    audit_cited_plan_quantities,
     audit_direct_source_delivery,
+    audit_intermediate_preparation_events,
     audit_inventory_strength_claims,
     audit_manual_addition_stages,
+    audit_parameterized_manual_stages,
 )
 
 
@@ -165,3 +168,121 @@ def test_guidance_forbids_unsourced_predilution_to_hide_subminimum_transfer():
     assert "newly prepared dilution" in SOURCE_FIDELITY_GUIDANCE
     assert "stock-equivalent" in SOURCE_FIDELITY_GUIDANCE
     assert "manual operator-handoff stage" in " ".join(SOURCE_FIDELITY_GUIDANCE.split())
+
+
+def test_single_cited_final_volume_and_component_volume_are_enforced():
+    plan = _plan()
+    reaction = plan.reactions[0]
+    addition = replace(reaction.additions[0], addition=Addition("green buffer", 4), evidence=(
+        Evidence("paper", "Add 3 µL green buffer to each vessel."),
+    ))
+    reaction = replace(reaction, final_volume_ul=21, evidence=(
+        Evidence("paper", "The final reaction is 20 µL."),
+    ), additions=(addition, *reaction.additions[1:]))
+    assert _codes(audit_cited_plan_quantities(replace(plan, reactions=(reaction,)))) == {
+        "cited_final_volume_mismatch", "cited_addition_volume_mismatch",
+    }
+
+
+def test_cited_quantity_audit_avoids_ambiguous_and_nonfinal_prose():
+    plan = _plan()
+    reaction = plan.reactions[0]
+    addition = replace(reaction.additions[0], addition=Addition("green buffer", 4), evidence=(
+        Evidence("paper", "Add 3 µL green buffer and 2 µL water."),
+    ))
+    reaction = replace(reaction, evidence=(
+        Evidence("paper", "Add 5 µL of buffer to the reaction."),
+    ), additions=(addition, *reaction.additions[1:]))
+    assert audit_cited_plan_quantities(replace(plan, reactions=(reaction,))) == ()
+
+
+def test_cited_mass_and_starting_concentration_fix_stock_equivalent_volume():
+    plan = _plan()
+    source = replace(plan.deck_sources[0], evidence=(
+        Evidence("instruction", "The DNA stock is 2 ng/µL."),
+    ))
+    reaction = plan.reactions[0]
+    addition = replace(reaction.additions[0], addition=Addition("DNA", 1), evidence=(
+        Evidence("paper", "Add 4 ng DNA."),
+    ))
+    plan = replace(plan, deck_sources=(source, *plan.deck_sources[1:]),
+                   reactions=(replace(reaction, additions=(addition, *reaction.additions[1:])),))
+    assert _codes(audit_cited_plan_quantities(plan)) == {"cited_stock_equivalent_mismatch"}
+    corrected = replace(addition, addition=Addition("DNA", 2))
+    corrected_plan = replace(plan, reactions=(replace(
+        reaction, additions=(corrected, *reaction.additions[1:]),
+    ),))
+    assert audit_cited_plan_quantities(corrected_plan) == ()
+
+
+def test_cited_stock_and_final_molarities_require_correct_dilution_arithmetic():
+    plan = _plan()
+    source = replace(plan.deck_sources[1], evidence=(
+        Evidence("instruction", "Primer stock is 1 µM."),
+    ))
+    reaction = plan.reactions[0]
+    primer = replace(reaction.additions[1], addition=Addition("primer pairs", 5), evidence=(
+        Evidence("paper", "Use primers at 0.1 µM final concentration."),
+    ))
+    plan = replace(plan, deck_sources=(plan.deck_sources[0], source, plan.deck_sources[2]),
+                   reactions=(replace(reaction, final_volume_ul=25, additions=(
+                       reaction.additions[0], primer, *reaction.additions[2:],
+                   )),))
+    assert _codes(audit_cited_plan_quantities(plan)) == {"cited_final_concentration_mismatch"}
+    corrected = replace(primer, addition=Addition("primer pairs", 2.5))
+    corrected_plan = replace(plan, reactions=(replace(plan.reactions[0], additions=(
+        reaction.additions[0], corrected, *reaction.additions[2:],
+    )),))
+    assert audit_cited_plan_quantities(corrected_plan) == ()
+
+
+def test_manual_stage_cited_time_temperature_and_order_are_checked():
+    plan = _plan()
+    hold = replace(_stage("Warm sample", "manual"), evidence=(
+        Evidence("paper", "Incubate at 42 °C for 10 min."),
+    ))
+    plan = replace(plan, stages=(_stage("Prepare sample"), hold))
+    assert _codes(audit_parameterized_manual_stages(plan)) == {
+        "cited_manual_duration_mismatch", "cited_manual_temperature_mismatch",
+        "manual_stage_order_unlinked",
+    }
+    corrected = replace(hold, duration_s=600, temperature_c=42,
+                        after_stage="Prepare sample")
+    assert audit_parameterized_manual_stages(replace(plan, stages=(plan.stages[0], corrected))) == ()
+    combined = replace(corrected, evidence=(
+        Evidence("paper", "Incubate at 42 °C for 10 min, then 4 °C for 5 min."),
+    ))
+    assert _codes(audit_parameterized_manual_stages(replace(
+        plan, stages=(plan.stages[0], combined),
+    ))) == {"multiple_manual_conditions_in_one_stage"}
+
+
+def test_simulated_second_preparation_overfills_one_model_linked_intermediate():
+    plan = _plan()
+    batch = PlannedReaction("prepared batch", 10, None, (), (), output_source_id="batch")
+    plan = replace(plan, reactions=(batch,))
+    events = [
+        {"kind": "pick", "instrument": "P20"},
+        {"kind": "aspirate", "instrument": "P20", "labware": "stock on 2", "well": "A1",
+         "volume": 10},
+        {"kind": "dispense", "instrument": "P20", "labware": "batch on 4", "well": "D1",
+         "volume": 10},
+        {"kind": "aspirate", "instrument": "P20", "labware": "batch on 4", "well": "D1",
+         "volume": 2},
+        {"kind": "dispense", "instrument": "P20", "labware": "batch on 4", "well": "D1",
+         "volume": 2},
+        {"kind": "drop", "instrument": "P20"},
+    ]
+    locations = {"batch": ("batch on 4", "D1")}
+    assert audit_intermediate_preparation_events(plan, events, output_locations=locations) == ()
+    second = [
+        {"kind": "pick", "instrument": "P20"},
+        {"kind": "aspirate", "instrument": "P20", "labware": "stock on 2", "well": "A1",
+         "volume": 10},
+        {"kind": "dispense", "instrument": "P20", "labware": "batch on 4", "well": "D1",
+         "volume": 10},
+        {"kind": "drop", "instrument": "P20"},
+    ]
+    assert _codes(audit_intermediate_preparation_events(
+        plan, [*events, *second], output_locations=locations,
+    )) == {"intermediate_overfilled"}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -107,6 +108,41 @@ def test_schema_has_only_plan_data_and_no_protocol_code_field():
     addition_schema = PLAN_SCHEMA["properties"]["reactions"]["items"]["properties"]["additions"]["items"]
     assert "produced_by_stage" in source_schema["required"]
     assert "stage_name" in addition_schema["required"]
+    assert "output_source_id" in PLAN_SCHEMA["properties"]["reactions"]["items"]["required"]
+    assert "after_stage" in PLAN_SCHEMA["properties"]["stages"]["items"]["required"]
+
+
+def test_generated_intermediate_has_one_preparation_and_ordered_manual_stage():
+    produced = DeckSource("batch", "prepared mixture", "microtube", (),
+                          produced_by_stage="Prepare mixture")
+    stock = DeckSource("stock", "stock reagent", "source plate", ())
+    one = PlannedReaction("prepare batch", 10, None, (
+        PlannedAddition(Addition("stock reagent", 10), "stock", (),
+                        stage_name="Prepare mixture"),
+    ), (), output_source_id="batch")
+    stages = (
+        Stage("Prepare mixture", "pipette", None, None, None, None, None,
+              None, None, None, ()),
+        Stage("Manual hold", "manual", None, None, None, None, None,
+              None, None, None, (), duration_s=60, after_stage="Prepare mixture"),
+    )
+    plan = OT2Plan((stock, produced), (one,), (), stages)
+    assert "duplicate_intermediate_preparation" not in _codes(audit_plan(plan))
+    assert "duplicate_intermediate_preparation" in _codes(audit_plan(replace(
+        plan, reactions=(one, replace(one, name="corrected batch")),
+    )))
+    assert "reaction_output_is_starting_stock" in _codes(audit_plan(replace(
+        plan, reactions=(replace(one, output_source_id="stock"),),
+    )))
+    assert "stage_predecessor_not_earlier" in _codes(audit_plan(replace(
+        plan, stages=(stages[1], stages[0]),
+    )))
+    assert "unknown_stage_predecessor" in _codes(audit_plan(replace(
+        plan, stages=(stages[0], replace(stages[1], after_stage="Missing")),
+    )))
+    rendered = json.loads(plan_to_prompt(plan))
+    assert rendered["reactions"][0]["output_source_id"] == "batch"
+    assert rendered["stages"][1]["after_stage"] == "Prepare mixture"
 
 
 def test_parser_accepts_whitespace_normalized_verbatim_evidence():
@@ -226,6 +262,8 @@ Prepare master mix in mix_tube well A1, then add 10 µL master mix to each PCR w
         _stage("Prepare master mix", "pipette", "Prepare master mix in mix_tube well A1"),
         _stage("Dispense master mix", "pipette", "add 10 µL master mix to each PCR well"),
     ]
+    payload["reactions"][0]["output_source_id"] = None
+    payload["stages"][1]["after_stage"] = "Prepare master mix"
     payload["tip_budgets"] = [{
         "pipette": "p20_single_gen2", "channels": 1,
         "tiprack_load_name": "opentrons_96_tiprack_20ul",
@@ -243,6 +281,8 @@ Prepare master mix in mix_tube well A1, then add 10 µL master mix to each PCR w
     rendered = json.loads(plan_to_prompt(plan))
     assert rendered["deck_sources"][0]["produced_by_stage"] == "Prepare master mix"
     assert rendered["reactions"][0]["additions"][0]["stage_name"] == "Dispense master mix"
+    assert rendered["reactions"][0]["output_source_id"] is None
+    assert rendered["stages"][1]["after_stage"] == "Prepare master mix"
 
     payload["stages"].reverse()
     assert "intermediate_used_before_production" in _codes(

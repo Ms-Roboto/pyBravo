@@ -23,19 +23,21 @@ from pybravo.evals.text2wetlab.planning import (
 )
 from pybravo.evals.text2wetlab.source_fidelity import (
     SOURCE_FIDELITY_GUIDANCE,
+    audit_cited_plan_quantities,
     audit_inventory_strength_claims,
     audit_manual_addition_stages,
+    audit_parameterized_manual_stages,
 )
 from pybravo.workflow.protocols.llm import LocalLLMConfig, ProtocolLLMError, StructuredResponse
 
 _PLANNING_CHECKLIST = """Before returning the plan, check these distinctions against the task and paper:
 - A vessel described as empty at the start is a destination or later intermediate, not an initially available deck reagent. Give a generated source produced_by_stage equal to its earlier pipette or explicit manual handoff stage; never use its starting inventory quote as evidence that it already contains liquid. Its robot additions need stage_name equal to a later pipette stage.
 - Name each starting source component from the actual inventory contents, rather than from the vessel label alone. For a plate of several named primers or templates, a plural category is acceptable only when the cited inventory quote identifies that category and its contents.
-- A reaction record describes one physical final vessel unless its name explicitly says it is a batch preparation. Do not count the same liquid both as an existing product and as its component additions. Sum all additions and check each stated stock-to-final concentration. Keep separate fragment or sample identities when their volumes or destinations differ.
+- A reaction record describes one physical final vessel unless its name explicitly says it is a batch preparation. Link each prepared batch to exactly one generated deck source with output_source_id; a revised recipe replaces the earlier executable preparation instead of adding a second preparation in the same vessel. Do not count the same liquid both as an existing product and as its component additions. Sum all additions and check each stated stock-to-final concentration. Keep separate fragment or sample identities when their volumes or destinations differ.
 - Every robot-delivered addition needs stage_name equal to a named pipette stage. Every pipette stage needs a tip-demand row whose stage string is exactly the stage name, including case and spaces. A manual stage describes an actual operator action, not a substitute for on-deck pipetting.
 - A reaction's total or a batch's total is not one pipette stroke. In each tip-demand row, stroke_volumes_ul contains physically executable single aspirate or dispense amounts within that named pipette's working range and tip capacity. Split larger transfers or choose the provided suitable pipette. Never round a below-minimum aliquot upward or claim a stock was diluted without supporting inventory evidence; mark an unautomatable addition as an explicit operator handoff. Count tips for every pipette stage, including shared-reagent distribution, repeated samples, mixing, and cross-sample changes. Add the demands across stages before calculating refill cycles. Plan a rack reset only when the task authorizes fresh-rack replenishment and demand actually exceeds loaded capacity; an exhausted rack must be replaced and reset before the next pickup, even when that pickup occurs inside a repeated stage.
 - For a multichannel pipette, count one pickup per addressed, pitch-compatible full column and consume one tip per channel. A tube rack or partly populated geometry cannot be treated as a full multichannel plate merely because its wells have names. Keep individual sample identities and fresh-tip changes visible when samples enter or leave pooled reagent steps.
-- Record temperature, lid, and magnet state changes before the pipetting that depends on them; distinguish a timed incubation from a mere setpoint change. If a destination must be held at a specified temperature, set it before the first dispense there and record that requirement on the pipette stage. Preserve the source's stated order and duration.
+- Record temperature, lid, and magnet state changes before the pipetting that depends on them; distinguish a timed incubation from a mere setpoint change. Parameterized manual stages need their cited duration_s and temperature_c, one phase per stage, and after_stage links that preserve order. If a destination must be held at a specified temperature, set it before the first dispense there and record that requirement on the pipette stage. Preserve the source's stated order and duration.
 If the source lacks a scientific setting, do not fabricate a value just to complete the schema; keep it unknown or make the required manual handoff explicit."""
 
 _REPAIR_HINTS: dict[str, str] = {
@@ -58,6 +60,16 @@ _REPAIR_HINTS: dict[str, str] = {
     "source_strength_conflicts_with_inventory": "Keep the stock concentration named in the starting-inventory quote; do not reinterpret a loaded stock as a prepared dilution.",
     "addition_stock_strength_conflicts_with_inventory": "Use the inventory-cited stock concentration for this addition, then recalculate its required volume.",
     "manual_addition_stage_missing": "Name an explicit, ordered manual handoff stage for each manual liquid addition and link it with stage_name.",
+    "duplicate_intermediate_preparation": "Replace the earlier batch reaction; never execute an old recipe followed by a corrected recipe in the same vessel.",
+    "cited_final_volume_mismatch": "Use the final volume in the reaction's cited source and rebalance every component, including later additions.",
+    "cited_addition_volume_mismatch": "Preserve the cited per-vessel addition volume, or cite the source-supported preparation that changes it.",
+    "cited_stock_equivalent_mismatch": "Calculate target mass divided by the starting stock concentration; preserve the resulting stock-equivalent dose.",
+    "cited_final_concentration_mismatch": "Use C1×V1 = C2×V2 with the cited stock concentration, target concentration, and final vessel volume.",
+    "multiple_manual_conditions_in_one_stage": "Split distinct manual temperature/time phases into ordered stages with separate source citations.",
+    "cited_manual_duration_mismatch": "Put the cited incubation time in duration_s, converted to seconds.",
+    "cited_manual_temperature_mismatch": "Put the cited temperature in temperature_c for that manual phase.",
+    "manual_stage_order_unlinked": "Set after_stage to the preceding workflow stage for a timed or temperature-controlled manual phase.",
+    "stage_predecessor_not_earlier": "Move the predecessor before this stage, or correct the named dependency.",
 }
 
 
@@ -165,7 +177,9 @@ async def run_grounded_plan(
         else:
             issues = (audit_plan(plan, geometry=geometry)
                       + audit_inventory_strength_claims(plan)
-                      + audit_manual_addition_stages(plan))
+                      + audit_manual_addition_stages(plan)
+                      + audit_cited_plan_quantities(plan)
+                      + audit_parameterized_manual_stages(plan))
             record["issues"] = [issue.__dict__ for issue in issues]
             errors = [issue for issue in issues if issue.severity == "error"]
             if not errors:
