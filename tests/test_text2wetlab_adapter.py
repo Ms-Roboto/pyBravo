@@ -176,6 +176,17 @@ def test_out_of_tips_diagnostic_respects_task_refill_permission():
     assert "reset_tipracks()" in advice
 
 
+def test_out_of_range_stroke_diagnostic_preserves_stock_equivalent_dose():
+    advice = adapter._repair_guidance(
+        "Line 106: p20.dispense(0.5 µL) is outside this pipette's 1–20 µL working range.",
+        VALID_PROTOCOL,
+    )
+    assert "never round up" in advice
+    assert "batch dilution" in advice
+    assert "stock-equivalent dose" in advice
+    assert "explicit manual handoff" in advice
+
+
 @pytest.mark.asyncio
 async def test_simulation_error_repairs_protocol_and_sets_trace_gate(tmp_path, monkeypatch):
     calls = []

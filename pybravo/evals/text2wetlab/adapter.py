@@ -160,6 +160,18 @@ def _repair_guidance(error: str, code: str) -> str:
         snippet = "\nCode near the reported line:\n" + "\n".join(
             f"{number}: {lines[number - 1]}" for number in range(start, stop + 1)
         )
+    if "outside this pipette's" in error and "working range" in error:
+        return (
+            "This individual liquid stroke is outside the loaded pipette's stated working "
+            "range. For a stroke above its maximum, split the same total into valid strokes "
+            "or use a loaded larger pipette. For a subminimum aliquot, never round up or "
+            "silently change concentration: if the listed deck includes a suitable diluent "
+            "and vessel, prepare a batch dilution using in-range stock and diluent strokes, "
+            "then deliver the same stock-equivalent dose and rebalance the reaction total. "
+            "Otherwise record the exact addition as an explicit manual handoff if the task "
+            "permits it. Preserve the cited reagent identity, volume, and well mapping."
+            + snippet
+        )
     if re.search(r"KeyError\s*\[line \d+\]:\s*\d+", error):
         return (
             "Opentrons Labware.__getitem__ expects a well name such as 'A1', not a numeric "
