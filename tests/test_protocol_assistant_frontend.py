@@ -705,6 +705,180 @@ assert.ok(dirtied>=4);
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
 
 
+def test_guided_simulation_setup_uses_confirmed_layout_and_ranked_active_class(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in ("guidedQuadrantSetup", "guidedPhysicalLayout", "guidedSimulationSetup",
+                 "applyGuidedSimulationSetup"):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+const materials=[
+  ...[1,2,3,4].map(i=>({id:'source_'+i,role:'liquid',labware_id:'384',deck_slot:9,
+    stack_order:i-1,initial_volume_ul:45,dead_volume_ul:6.5,reagent_family:'DMSO',reagent_id:null})),
+  ...[1,2].map(i=>({id:'destination_'+i,role:'liquid',labware_id:'1536',
+    deck_slot:i===1?5:8,initial_volume_ul:0})),
+  ...[4,3,2,1].map((i,index)=>({id:'tips_source_'+i,role:'tips',labware_id:'st-box',
+    tip_definition_id:'st_10ul',deck_slot:index+1,available_tips:'full'}))];
+const anchors={1:'A1',2:'A2',3:'B1',4:'B2'};
+const steps=[4,3,2,1].flatMap(i=>[1,2].map(j=>({kind:'transfer',source:'source_'+i,
+  destination:'destination_'+j,source_anchor:'A1',destination_anchor:anchors[i],volume_ul:5})));
+const decisions=[];
+function record(path,value){decisions.push({path,value,actor:'scientist'});}
+for(let i=0;i<4;i++){
+  record(`/materials/${i}/deck_slot`,9);record(`/materials/${i}/stack_order`,i);
+}
+for(let i=4;i<6;i++){
+  record(`/materials/${i}/deck_slot`,materials[i].deck_slot);
+  record(`/materials/${i}/initial_volume_ul`,0);
+}
+for(let i=6;i<10;i++)for(const field of
+  ['labware_id','tip_definition_id','deck_slot','available_tips'])
+    record(`/materials/${i}/${field}`,materials[i][field]);
+record('/setup/initially_empty_slots',[6,7]);
+record('/setup/tip_strategy','fresh_each_source');
+record('/setup/tip_disposal_id','return_to_source_rack');
+const query={tip_id:'st_10ul',volume_ul:5,reagent_family:'DMSO',
+  source_labware_id:'384',destination_labware_id:'1536'};
+function liquidClassProposalQueries(){return [{query,step_count:8}];}
+function candidate(id,distance){return {liquid_class_id:id,name:id,
+  catalog_relation:'active_machine',is_active:true,status:'imported_unverified',
+  machine_id:'robot',head_type:'HT_384_D_70',tip_id:'st_10ul',
+  score_scope:'calibration_control_point_proximity_only',
+  calibration_control_point_distance_ul:distance,nearest_control_point_ul:5-distance,
+  equation:{control_points:[{desired_ul:0},{desired_ul:5-distance},{desired_ul:10}]},
+  provenance:{source_type:'local_config',source_path:'config/liquid_classes.yaml',
+    source_digest:'digest-'+id},ranking_reason:'Calibration proximity only'};}
+const broad=candidate('liq-broad',4),near=candidate('liq-near',0.02);
+const state={session:{id:'draft',plan:{materials,steps,decisions},setup:{
+    tip_strategy:'fresh_each_source',tip_disposal_id:'return_to_source_rack'}},
+  context:{controller_type:'simulation',machine_id:'robot',head_type:'HT_384_D_70',
+    labware:[{id:'384',wells:384,well_depth_mm:11.4},
+      {id:'1536',wells:1536,well_depth_mm:5.2}],
+    liquid_classes:[broad,near],tipbox_choices:[]},
+  capabilities:{setup_options:{head_modes:[{id:'all_barrels',subset_config_values:['back_left']}]}},
+  liquidClassProposals:{items:[{query,step_count:8,status:'ready',candidates:[broad,near]}]}};
+function verifiedTipboxChoices(){return [{labware_id:'st-box',tip_definition_id:'st_10ul',
+  wells:384,tip_length_mm:20,tip_capacity_ul:10}];}
+function decide(path,value,reason){record(path,value);assert.match(reason,/simulation|SIMULATED|provisional|placeholder|confirmed layout|rack positions/i);}
+let dirtied=0,rendered=0,notice='';
+function dirty(){dirtied++;}
+function renderPlan(){rendered++;}
+function notify(value){notice=value;}
+"""
+        + "\n".join(functions)
+        + """
+const model=guidedQuadrantSetup(),layout=guidedPhysicalLayout(model);
+assert.equal(layout.ok,true);
+let proposal=guidedSimulationSetup(model,layout);
+assert.equal(proposal.candidate.liquid_class_id,'liq-near',
+  'Use active calibration ranking, not a hardcoded class ID or shortlist decision');
+assert.equal(proposal.minimumDepth,5.2);
+assert.deepEqual(proposal.rackIds,['tips_source_4','tips_source_3','tips_source_2','tips_source_1']);
+assert.throws(()=>applyGuidedSimulationSetup(false),/explicitly/);
+applyGuidedSimulationSetup(true);
+assert.deepEqual(state.session.setup.head_mode,{subset_type:'all_barrels',subset_config:'back_left'});
+assert.deepEqual(state.session.setup.tip_rack_ids,proposal.rackIds);
+assert.equal(state.session.setup.liquid_class,'liq-near');
+assert.equal(state.session.setup.distance_from_bottom_mm,1);
+assert.deepEqual(state.session.setup.simulation_only_liquid_assumption,{
+  liquid_class_id:'liq-near',distance_from_bottom_mm:1,
+  basis:'unqualified_geometric_placeholder'});
+assert.ok(materials.slice(0,4).every(row=>row.reagent_id===null));
+assert.ok(steps.every(step=>!step.method_ref));
+assert.equal(dirtied,1);assert.equal(rendered,1);
+assert.match(notice,/not qualified for physical use/);
+assert.equal(guidedSimulationSetup(model,layout).alreadyApplied,true);
+state.session.setup.tip_rack_ids=['tips_source_4'];
+assert.equal(guidedPhysicalLayout(model).ok,false,
+  'A partial rack order cannot be silently replaced');
+state.session.setup.tip_rack_ids=proposal.rackIds;
+state.context.controller_type='agile_srt';
+assert.match(guidedSimulationSetup(model,layout).reason,/SIMULATED controller/);
+state.context.controller_type='simulation';
+state.context.labware[1].well_depth_mm=1;
+assert.match(guidedSimulationSetup(model,layout).reason,/not inside every addressed/);
+state.context.labware[1].well_depth_mm=5.2;
+state.session.setup.liquid_class='different-class';
+assert.match(guidedSimulationSetup(model,layout).reason,/different liquid class/);
+state.session.setup.liquid_class='liq-near';
+state.liquidClassProposals.items[0].candidates=[{...near,is_active:false}];
+assert.match(guidedSimulationSetup(model,layout).reason,/No active/);
+"""
+    )
+    script = tmp_path / "guided-simulation-setup.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_simulation_only_marker_keeps_strict_simulation_and_blocks_release(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    assert 'id="approval-provisional-note"' in html
+    functions = []
+    for name in ("renderValidationIssues", "gates"):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+function el(tag,attrs,...children){return {tag,attrs,children:children.flat(Infinity)};}
+function text(node){return node==null?'':typeof node==='string'?node:node.children?.map(text).join(' ')||'';}
+const nodes={
+  'issues-details':{hidden:false,open:false,addEventListener(){}},
+  'blocking-summary':{children:[],replaceChildren(...rows){this.children=rows;}},
+  'issues-summary':{textContent:''},
+  issues:{replaceChildren(){}},
+  'method-differences-label':{hidden:true},
+  'approval-provisional-note':{hidden:true},
+  'approval-status':{textContent:'',style:{}},
+  'session-status':{textContent:'',className:''},
+  scientist:{value:'Scientist'},'approval-notes':{value:'Reviewed'},
+  'publish-name':{value:'Published'},'setup-name':{value:'Setup'},
+  'setup-picker':{value:''},'protocol-text':{value:''},
+  'protocol-file':{files:[]},'plan-reviewed':{checked:true},
+  'deck-confirmed':{checked:true},'source-reviewed':{checked:false}
+};
+function $(id){return nodes[id]??(nodes[id]={disabled:false,value:'',style:{}});}
+function freezeBusyControls(){}
+function readinessIssueGroup(){return 'Simulation-only method review';}
+function readinessRepeatedReason(){return null;}
+function renderValidationIssue(issue){return el('p',{},issue.message);}
+function guidedQuadrantSetup(){return {};}
+const state={busy:false,dirty:false,session:{id:'draft',revision:4,plan:{},
+  selected_paragraph_ids:[],setup:{simulation_only_liquid_assumption:{
+    liquid_class_id:'liq-near',distance_from_bottom_mm:1,
+    basis:'unqualified_geometric_placeholder'}},
+  validation:{ok:true},simulation:{status:'passed'},approval:{scientist:'Scientist'}}};
+"""
+        + "\n".join(functions)
+        + """
+gates();
+assert.equal(nodes.simulate.disabled,false,'A warning-only provisional draft may strictly simulate');
+for(const id of ['approve','export','publish'])assert.equal(nodes[id].disabled,true,id);
+assert.equal(nodes['approval-provisional-note'].hidden,false);
+assert.equal(nodes['deck-confirmed'].disabled,true,'Do not invite physical confirmation');
+assert.equal(nodes['approval-status'].textContent,'Simulation only');
+renderValidationIssues([{code:'simulation_only_liquid_assumption',severity:'warning',
+  path:'/setup/simulation_only_liquid_assumption',message:'Unqualified simulation assumption'}]);
+assert.match(nodes['blocking-summary'].children.map(text).join(' '),
+  /review notes do not block strict simulation/i);
+delete state.session.setup.simulation_only_liquid_assumption;
+gates();
+for(const id of ['approve','export','publish'])assert.equal(nodes[id].disabled,false,id);
+assert.equal(nodes['approval-provisional-note'].hidden,true);
+"""
+    )
+    script = tmp_path / "simulation-only-release.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
 def test_catalog_dead_volume_confirmation_binds_plate_and_value(tmp_path):
     html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
     functions = []

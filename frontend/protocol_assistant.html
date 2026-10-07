@@ -38,13 +38,13 @@
 <div class="panel" id="source-panel" hidden><div class="panel-title"><div><h2>Review the source passages</h2><p class="muted" id="source-description"></p></div><div class="actions" style="margin:0"><a id="original-pdf" class="button small" target="_blank" rel="noopener" hidden>Open original PDF</a><button id="select-all" class="small">Select all</button><button id="select-none" class="small">Clear</button></div></div><div id="source-paragraphs" class="source-list"></div><label class="check"><input type="checkbox" id="source-reviewed"><span>I have checked these passages against the original document and selected the procedure to automate.</span></label><div class="actions end"><button data-go="plan" class="primary">Continue to setup</button></div></div>
 <div class="panel" id="source-extract-panel"><div class="panel-title"><div><h2>Interpret the selected procedure</h2><p class="muted">The local model proposes a structured plan. Missing quantities and experimental choices remain open for review.</p></div></div><label class="field">Experiment context / extraction instructions<textarea id="extraction-instructions" placeholder="For example: use only the plate preparation section; preserve the centrifugation step as a manual handoff."></textarea></label><div class="actions"><button id="extract" class="primary">Interpret with local LLM</button><span class="muted" id="extraction-status"></span></div></div>
 </details>
-<div class="panel" id="setup-panel"><div class="panel-title"><div><h2>Experiment setup</h2><p class="muted" id="instrument-summary">Loading the active instrument catalog…</p><p class="muted" style="font-size:12px">Catalog corrections: <a href="/labware-editor" target="_blank" rel="noopener">labware geometry</a> · <a href="/tip-editor" target="_blank" rel="noopener">tip definitions</a> · <a href="/liquid-class-editor" target="_blank" rel="noopener">liquid classes</a>. Validation uses the catalog dimensions, not the labware name.</p></div><span class="badge" id="model-status">Local model</span></div><div id="liquid-class-proposals" class="row-card" hidden></div><div id="guided-setup" class="row-card" hidden></div><details id="setup-recommendations-details"><summary>Detailed capability recommendations</summary><div id="setup-recommendations" class="row-card" hidden></div></details><details id="method-preview-details"><summary>Automatic method proposals and evidence</summary><div id="method-preview" class="row-card" hidden></div></details><details id="setup-advanced"><summary>Edit advanced head, tip, and liquid setup</summary><div class="fields" id="setup-fields"></div><div id="setup-tipbox-choices" class="row-card" style="margin-top:18px"></div><div class="actions"><label class="field" style="min-width:240px">Reusable setup<select id="setup-picker"><option value="">Choose a saved setup</option></select></label><button id="apply-setup">Apply setup</button><button id="prepare-deck">Configure materials</button><button id="suggest-methods">Suggest liquid methods</button><label class="field" style="flex:1;min-width:170px">Save setup as<input id="setup-name" placeholder="A descriptive laboratory setup name"></label><button id="save-setup">Save setup</button></div></details></div>
+<div class="panel" id="setup-panel"><div class="panel-title"><div><h2>Experiment setup</h2><p class="muted" id="instrument-summary">Loading the active instrument catalog…</p><p class="muted" style="font-size:12px">Catalog corrections: <a href="/labware-editor" target="_blank" rel="noopener">labware geometry</a> · <a href="/tip-editor" target="_blank" rel="noopener">tip definitions</a> · <a href="/liquid-class-editor" target="_blank" rel="noopener">liquid classes</a>. Validation uses the catalog dimensions, not the labware name.</p></div><span class="badge" id="model-status">Local model</span></div><div id="guided-setup" class="row-card" hidden></div><div id="liquid-class-proposals" class="row-card" hidden></div><details id="setup-recommendations-details"><summary>Detailed capability recommendations</summary><div id="setup-recommendations" class="row-card" hidden></div></details><details id="method-preview-details"><summary>Automatic method proposals and evidence</summary><div id="method-preview" class="row-card" hidden></div></details><details id="setup-advanced"><summary>Edit advanced head, tip, and liquid setup</summary><div class="fields" id="setup-fields"></div><div id="setup-tipbox-choices" class="row-card" style="margin-top:18px"></div><div class="actions"><label class="field" style="min-width:240px">Reusable setup<select id="setup-picker"><option value="">Choose a saved setup</option></select></label><button id="apply-setup">Apply setup</button><button id="prepare-deck">Configure materials</button><button id="suggest-methods">Suggest liquid methods</button><label class="field" style="flex:1;min-width:170px">Save setup as<input id="setup-name" placeholder="A descriptive laboratory setup name"></label><button id="save-setup">Save setup</button></div></details></div>
 <div id="plan-content" hidden><div id="guided-plan-summary" class="row-card" hidden></div><details id="plan-details"><summary>Edit individual materials, deck positions and transfer steps</summary><div class="panel"><div class="panel-title"><div><h2>Materials &amp; deck assignments</h2><p class="muted">Volumes are per well unless a well-specific override is supplied. Enter 0 µL for an empty destination. For plates sharing a deck position, assign stack levels from bottom 0 upward.</p></div><button id="add-material" class="small">Add material</button></div><div id="materials"></div></div><div class="panel"><div class="panel-title"><div><h2>Review the experimental steps</h2><p class="muted">Edit the interpretation and follow its source links. External operations remain explicit manual instructions.</p></div><button id="add-step" class="small">Add step</button></div><label class="field" style="margin-bottom:16px">Reason for corrections<input id="correction-reason" placeholder="For example, confirmed volume against laboratory SOP v3"></label><div id="steps"></div></div></details><div class="panel" id="questions-panel"><div class="panel-title"><div><h2>Individual questions and exceptions</h2><p class="muted">Use these fields for exceptions that need a specific answer. Head, rack-order, and liquid-method choices are handled in Experiment setup above.</p></div></div><details id="raw-questions"><summary id="raw-questions-summary">Review individual questions</summary><div id="questions"></div></details></div><div class="actions end"><button data-go="review" class="primary">Review &amp; validate</button></div></div>
 </section>
 <section id="review-view" role="tabpanel" aria-labelledby="tab-review" hidden>
 <div class="panel"><div class="panel-title"><div><h2>Readiness checks</h2><p class="muted">Validate the saved plan, then run a simulation that stops on any task error.</p></div><button id="print" class="small no-print">Print run sheet</button></div><div class="summary-grid"><div class="metric"><strong id="validation-status">Not validated</strong><span>Plan and instrument compatibility</span></div><div class="metric"><strong id="simulation-status">Not simulated</strong><span>Strict simulation</span></div><div class="metric"><strong id="approval-status">Needs review</strong><span>Approval for this saved revision</span></div></div><div id="validation-summary" class="muted" style="font-size:12px;margin-bottom:14px"></div><div id="blocking-summary"></div><details id="issues-details"><summary id="issues-summary">View every detailed readiness check</summary><div id="issues" class="issues"></div></details><div class="actions"><button id="validate" class="primary">Validate plan</button><button id="simulate">Run strict simulation</button></div><details id="simulation-details" hidden><summary>Simulation events</summary><pre class="log" id="simulation-events"></pre></details></div>
 <div class="grid"><div class="panel"><div class="panel-title"><h2>Deck run sheet</h2><span class="badge">Bravo positions</span></div><div id="deck" class="deck"></div><p class="muted" style="font-size:11px;margin:12px 0 0">Position numbers follow the configured Bravo deck. Confirm the physical labware arrangement before a run.</p></div><div class="panel"><div class="panel-title"><h2>Reagent &amp; tip preparation</h2></div><div id="supplies"></div></div></div><div class="panel"><div class="panel-title"><h2>Execution &amp; manual handoffs</h2></div><div id="run-steps"></div></div>
-<div class="panel no-print"><div class="panel-title"><div><h2>Scientist approval</h2><p class="muted">Approval is attached to this source, plan, setup, and simulation. Edits require another validation and approval.</p></div></div><div class="fields"><label class="field">Scientist name<input id="scientist" autocomplete="name" placeholder="Name of the reviewing scientist"></label><label class="field">Release basis<select id="qualification"><option value="qualification_run">Supervised qualification run</option><option value="previously_qualified">Previously qualified procedure</option><option value="scientist_reviewed_simulated">Scientist-reviewed adaptation after strict simulation</option></select></label><label class="field">Release rationale / review notes<textarea id="approval-notes" placeholder="Record the qualification reference or why this reviewed adaptation is suitable."></textarea></label></div><label class="check"><input id="plan-reviewed" type="checkbox"><span>I reviewed quantities, well mappings, timing, manual instructions, and the source references.</span></label><label class="check"><input id="deck-confirmed" type="checkbox"><span>I confirmed the physical deck, loaded tip types and freshness, head footprint, reagent volumes, and liquid methods.</span></label><label class="check" id="method-differences-label" hidden><input id="method-differences" type="checkbox"><span>I reviewed and accept the listed method differences and any fallback to separate aspirate/dispense pairs.</span></label><div class="actions"><button id="approve" class="primary">Approve this revision</button><button id="export" disabled>Open approved workflow in Designer</button></div><div id="approval-record" class="muted" style="font-size:12px;margin-top:12px"></div><div class="actions"><label class="field" style="min-width:260px">Approved library name<input id="publish-name" placeholder="Reusable, reviewed procedure name"></label><button id="publish" disabled>Add to protocol library</button></div></div>
+<div class="panel no-print"><div class="panel-title"><div><h2>Scientist approval</h2><p class="muted">Approval is attached to this source, plan, setup, and simulation. Edits require another validation and approval.</p></div></div><div id="approval-provisional-note" class="issue warn" hidden><strong>Software simulation only · physical release unavailable</strong><p style="margin:6px 0 0">This draft uses an unqualified liquid class and geometric height placeholder. A passing strict simulation checks software workflow, deck and tip bookkeeping; it does not verify noncontact, DMSO transfer accuracy, or wet-lab suitability. Remove the provisional assumption and complete method review before approval, export, or publication.</p></div><div class="fields"><label class="field">Scientist name<input id="scientist" autocomplete="name" placeholder="Name of the reviewing scientist"></label><label class="field">Release basis<select id="qualification"><option value="qualification_run">Supervised qualification run</option><option value="previously_qualified">Previously qualified procedure</option><option value="scientist_reviewed_simulated">Scientist-reviewed adaptation after strict simulation</option></select></label><label class="field">Release rationale / review notes<textarea id="approval-notes" placeholder="Record the qualification reference or why this reviewed adaptation is suitable."></textarea></label></div><label class="check"><input id="plan-reviewed" type="checkbox"><span>I reviewed quantities, well mappings, timing, manual instructions, and the source references.</span></label><label class="check"><input id="deck-confirmed" type="checkbox"><span>I confirmed the physical deck, loaded tip types and freshness, head footprint, reagent volumes, and liquid methods.</span></label><label class="check" id="method-differences-label" hidden><input id="method-differences" type="checkbox"><span>I reviewed and accept the listed method differences and any fallback to separate aspirate/dispense pairs.</span></label><div class="actions"><button id="approve" class="primary">Approve this revision</button><button id="export" disabled>Open approved workflow in Designer</button></div><div id="approval-record" class="muted" style="font-size:12px;margin-top:12px"></div><div class="actions"><label class="field" style="min-width:260px">Approved library name<input id="publish-name" placeholder="Reusable, reviewed procedure name"></label><button id="publish" disabled>Add to protocol library</button></div></div>
 <div class="panel"><div class="panel-title"><h2>Revision &amp; correction history</h2></div><div id="history"></div></div>
 </section>
 <section id="library-view" role="tabpanel" aria-labelledby="tab-library" hidden><div class="panel"><div class="panel-title"><div><h2>Scientist-approved protocol library</h2><p class="muted">Reuse starts a new draft. Check the new experiment setup and repeat validation, simulation, and approval.</p></div><button id="refresh-library" class="small">Refresh library</button></div><div id="library" class="library-grid"><p class="muted">Loading the protocol library…</p></div></div></section>
@@ -422,6 +422,7 @@ async function refreshLiquidClassProposals(){
         items[index].candidates=list(response.candidates??response.planning_liquid_class_candidates);
     }
     renderLiquidClassProposals();
+    if(typeof renderGuidedSetup==='function')renderGuidedSetup();
 }
 function methodNumber(label,value='',help=''){
     const field=el('label',{class:'field'},label),input=el('input',{type:'number',min:0,step:'any'});
@@ -1214,6 +1215,114 @@ function applyGuidedTipReuse(confirmed){
     decide('/setup/tip_disposal_id','return_to_source_rack','Scientist confirmed each spent set returns to its own now-empty rack and will never be selected again.');
     dirty();renderPlan();notify('Same-source tip reuse recorded for this exact plan. Review rack order and run strict validation.');
 }
+function guidedSimulationSetup(model,layout){
+    const context=state.context??{},setup=state.session?.setup??{};
+    if(context.controller_type!=='simulation')return {reason:'This provisional setup is available only with the SIMULATED controller profile.'};
+    if(context.head_type!=='HT_384_D_70'||!layout?.ok)
+        return {reason:layout?.reason||'The active 384-channel head and exact source/rack layout are required.'};
+    const modes=list(state.capabilities?.setup_options?.head_modes);
+    if(!modes.some(row=>row.id==='all_barrels'&&list(row.subset_config_values).includes('back_left')))
+        return {reason:'The active head catalog does not offer the full 384-barrel, back-left mode.'};
+    const decisions=list(state.session?.plan?.decisions);
+    const confirmed=(path,value)=>decisions.some(row=>row.actor==='scientist'&&row.path===path&&
+        JSON.stringify(row.value)===JSON.stringify(value));
+    if(!model.sources.every(({material,index})=>confirmed(`/materials/${index}/deck_slot`,material.deck_slot)&&
+        confirmed(`/materials/${index}/stack_order`,material.stack_order))||
+        !model.destinations.every(({material,index})=>confirmed(`/materials/${index}/deck_slot`,material.deck_slot)&&
+            material.initial_volume_ul===0&&confirmed(`/materials/${index}/initial_volume_ul`,0))||
+        !layout.pairs.every(({material,index})=>material.available_tips==='full'&&
+            ['labware_id','tip_definition_id','deck_slot','available_tips'].every(field=>
+                confirmed(`/materials/${index}/${field}`,material[field])))||
+        !confirmed('/setup/initially_empty_slots',[6,7]))
+        return {reason:'First record the inspected source stack, empty destinations, four full ST10 racks and initially empty positions 6–7 in this guide.'};
+    if(setup.tip_strategy!=='fresh_each_source'||!confirmed('/setup/tip_strategy','fresh_each_source')||
+        setup.tip_disposal_id!=='return_to_source_rack'||!confirmed('/setup/tip_disposal_id','return_to_source_rack'))
+        return {reason:'First record the same-source tip path and spent-tip return in this guide.'};
+    const queries=liquidClassProposalQueries();
+    if(queries.length!==1||queries[0].step_count!==model.transfers.length||
+        queries[0].query.tip_id!=='st_10ul'||Number(queries[0].query.volume_ul)!==5)
+        return {reason:'The eight transfers need one shared 5 µL ST10 class query. Review individual steps if their liquids or tips differ.'};
+    const query=queries[0].query;
+    const proposal=list(state.liquidClassProposals?.items).find(item=>
+        item.status==='ready'&&item.step_count===model.transfers.length&&
+        JSON.stringify(item.query)===JSON.stringify(query));
+    if(!proposal)return {reason:'Checking the active hardware liquid-class records for these eight transfers…'};
+    const catalog=list(context.liquid_classes);
+    const candidates=list(proposal.candidates).filter(row=>{
+        const local=catalog.find(item=>item.liquid_class_id===row.liquid_class_id);
+        const points=list(row.equation?.control_points).map(point=>Number(point.desired_ul));
+        return row.catalog_relation==='active_machine'&&row.is_active===true&&
+            row.status==='imported_unverified'&&row.machine_id===context.machine_id&&
+            row.head_type===context.head_type&&row.tip_id==='st_10ul'&&
+            local?.machine_id===context.machine_id&&local?.head_type===context.head_type&&
+            local?.tip_id==='st_10ul'&&row.score_scope==='calibration_control_point_proximity_only'&&
+            Number.isFinite(row.calibration_control_point_distance_ul)&&
+            Number.isFinite(row.nearest_control_point_ul)&&
+            points.length>=2&&points.every(Number.isFinite)&&Math.min(...points)<=5&&Math.max(...points)>=5&&
+            row.provenance?.source_type==='local_config'&&row.provenance?.source_digest;
+    }).sort((left,right)=>left.calibration_control_point_distance_ul-right.calibration_control_point_distance_ul||
+        left.name.localeCompare(right.name)||left.liquid_class_id.localeCompare(right.liquid_class_id));
+    const candidate=candidates[0];
+    if(!candidate)return {reason:'No active, explicitly calibrated ST10 class is available for a provisional 5 µL simulation.'};
+    const catalogLabware=new Map(list(context.labware).map(row=>[row.id,row]));
+    const depths=[...model.sources,...model.destinations].map(({material})=>
+        Number(catalogLabware.get(material.labware_id)?.well_depth_mm));
+    const minimumDepth=Math.min(...depths),height=1.0;
+    if(depths.some(depth=>!Number.isFinite(depth)||depth<=height))
+        return {reason:'A 1.0 mm geometric placeholder is not inside every addressed catalog well. Review heights individually.'};
+    const headMode={subset_type:'all_barrels',subset_config:'back_left'};
+    const rackIds=layout.pairs.map(({material})=>material.id);
+    if(setup.head_mode&&(setup.head_mode.subset_type!==headMode.subset_type||
+        setup.head_mode.subset_config!==headMode.subset_config||
+        setup.head_mode.row_count!=null||setup.head_mode.column_count!=null))
+        return {reason:'A different head mode is already selected. Review it in advanced setup.'};
+    if(list(setup.tip_rack_ids).length&&
+        (list(setup.tip_rack_ids).length!==rackIds.length||
+            list(setup.tip_rack_ids).some((id,index)=>id!==rackIds[index])))
+        return {reason:'A different rack order is already selected. Review it in advanced setup.'};
+    if((setup.liquid_class&&setup.liquid_class!==candidate.liquid_class_id)||
+        (setup.distance_from_bottom_mm!=null&&setup.distance_from_bottom_mm!==height))
+        return {reason:'A different liquid class or height is already selected. Review it in advanced setup.'};
+    const assumption={liquid_class_id:candidate.liquid_class_id,distance_from_bottom_mm:height,
+        basis:'unqualified_geometric_placeholder'};
+    if(setup.simulation_only_liquid_assumption&&
+        JSON.stringify(setup.simulation_only_liquid_assumption)!==JSON.stringify(assumption))
+        return {reason:'A different simulation-only liquid assumption is already recorded. Review it in advanced setup.'};
+    return {candidate,query,minimumDepth,height,headMode,rackIds,assumption,
+        alreadyApplied:setup.head_mode?.subset_type==='all_barrels'&&
+            setup.head_mode?.subset_config==='back_left'&&
+            list(setup.tip_rack_ids).length===rackIds.length&&
+            list(setup.tip_rack_ids).every((id,index)=>id===rackIds[index])&&
+            setup.liquid_class===candidate.liquid_class_id&&
+            setup.distance_from_bottom_mm===height&&
+            JSON.stringify(setup.simulation_only_liquid_assumption)===JSON.stringify(assumption)};
+}
+function applyGuidedSimulationSetup(confirmed){
+    if(!confirmed)throw new Error('Choose the provisional SIMULATED-only setup explicitly.');
+    const model=guidedQuadrantSetup(),layout=model&&guidedPhysicalLayout(model);
+    if(!model)throw new Error('This guided simulation setup only covers the four-source, eight-transfer quadrant plan.');
+    const proposal=guidedSimulationSetup(model,layout);
+    if(!proposal.candidate)throw new Error(proposal.reason);
+    if(proposal.alreadyApplied)return;
+    const setup=state.session.setup??={};
+    setup.head_mode=proposal.headMode;
+    setup.tip_rack_ids=proposal.rackIds;
+    setup.liquid_class=proposal.candidate.liquid_class_id;
+    setup.distance_from_bottom_mm=proposal.height;
+    setup.simulation_only_liquid_assumption=proposal.assumption;
+    decide('/setup/head_mode',setup.head_mode,
+        'Selected the full 384-channel mode from the confirmed layout for simulation planning; this action did not inspect the hardware.');
+    decide('/setup/tip_rack_ids',setup.tip_rack_ids,
+        'Derived top-source-first rack order from previously recorded rack positions and source pairing for simulation planning.');
+    decide('/setup/liquid_class',setup.liquid_class,
+        `Selected active hardware class ${proposal.candidate.name} (${setup.liquid_class}) as an unqualified SIMULATED-only 5 µL planning assumption; no liquid method or physical use was approved.`);
+    decide('/setup/distance_from_bottom_mm',proposal.height,
+        `Selected a provisional ${proposal.height} mm geometric height inside the addressed catalog wells for SIMULATED-only planning; aspiration and dispense heights are not method-qualified.`);
+    decide('/setup/simulation_only_liquid_assumption',proposal.assumption,
+        'Explicit SIMULATED-only unqualified geometric placeholder; physical validation must reject this setup.');
+    dirty();renderPlan();
+    notify('Provisional SIMULATED-only setup added to the draft. Save, validate and run strict simulation. The liquid class and height are not qualified for physical use.');
+}
 function guidedDraftForPlan(){
     const key=JSON.stringify([state.session?.id,state.session?.plan?.materials,state.session?.plan?.steps]);
     if(state.guidedDraft?.key!==key)state.guidedDraft={key,initial:'',dead:'',sameSources:false,
@@ -1258,6 +1367,24 @@ function renderGuidedSetup(){
         onclick:applyKnowledgeBackedProposals},'Apply proposed head, rack order and deck setup'));
     if(!choices.length)setup.append(el('p',{class:'muted',style:'margin-top:8px'},data?'No additional safe setup proposal is available.':'Checking the active instrument and catalog…'));
     host.append(setup);
+    if(state.context?.controller_type==='simulation'){
+        const simulation=guidedSimulationSetup(model,layout);
+        const simulationPanel=el('div',{class:'row-card'},
+            el('strong',{},'SIMULATED-only setup · provisional liquid assumption'),
+            el('p',{class:'muted'},'Use one guided action for the four remaining setup fields after the deck and tip decisions in this guide are recorded. This does not review or qualify a physical DMSO transfer method.'));
+        if(simulation.candidate){
+            simulationPanel.append(
+                el('p',{},`Full 384-barrel head (back left); rack pickup order ${simulation.rackIds.join(' → ')}.`),
+                el('p',{},`Active hardware class ${simulation.candidate.name} (${simulation.candidate.liquid_class_id}) on ${state.context.machine_id}; imported and unverified for ${simulation.query.reagent_id||simulation.query.reagent_family||'the source liquid'} and these plates.`),
+                el('p',{class:'muted'},simulation.candidate.ranking_reason||'Ranked by recorded calibration control-point proximity only.'),
+                el('p',{class:'muted'},`Recorded class provenance: ${simulation.candidate.provenance.source_path} · digest ${simulation.candidate.provenance.source_digest}.`),
+                el('p',{class:'issue warn'},`Provisional height: ${simulation.height} mm above the well bottom, inside the shallowest addressed catalog well (${simulation.minimumDepth} mm). This is a geometric placeholder, not an aspiration or dispense method setting. Strict simulation checks workflow, deck and tip bookkeeping; it does not verify noncontact, DMSO transfer accuracy or wet-lab suitability. Physical use requires separate method review and qualification.`),
+                el('button',{type:'button',class:'primary small',disabled:state.busy||simulation.alreadyApplied,
+                    onclick:()=>{try{applyGuidedSimulationSetup(true);}catch(error){notify(error.message,true);}}},
+                    simulation.alreadyApplied?'SIMULATED-only setup added to draft':'Apply provisional setup for strict simulation'));
+        }else simulationPanel.append(el('p',{class:'issue warn'},simulation.reason));
+        host.append(simulationPanel);
+    }
 
     const sourceConflict=model.sources.some(({material})=>Object.keys(material.well_volumes_ul??{}).length);
     const initial=el('input',{type:'number',min:0,step:'any',placeholder:'Starting µL per well',
@@ -1341,7 +1468,10 @@ function renderGuidedSetup(){
 
     const classGap=localLiquidClassGap({tip_id:'st_10ul'});
     const needsMethod=model.transfers.some(step=>!step.method_ref);
-    if(needsMethod&&classGap){
+    if(needsMethod&&state.session?.setup?.simulation_only_liquid_assumption)
+        host.append(el('div',{class:'issue warn'},el('strong',{},'Provisional liquid setup · strict simulation only'),
+            el('p',{style:'margin:6px 0 0'},'No reviewed liquid method is pinned to these transfers. Save and validate the provisional setup, then run strict software simulation. Noncontact, transfer accuracy and physical method suitability remain unverified.')));
+    else if(needsMethod&&classGap){
         const proposed=liquidClassProposalQueries().length>0;
         host.append(el('div',{class:'issue warn'},el('strong',{},'Liquid method not yet qualified'),
             el('p',{style:'margin:6px 0 0'},proposed?
@@ -1862,7 +1992,8 @@ function renderValidationIssues(issues){
     const blocking=rows.filter(issue=>issue.severity!=='warning').length;
     summary.replaceChildren(el('p',{class:'muted'},
         `${blocking} blocking check${blocking===1?'':'s'}${rows.length>blocking?` · ${rows.length-blocking} review note${rows.length-blocking===1?'':'s'}`:''}. `+
-        (state.dirty?'These results describe the last saved version. Save edits and validate again.':'Resolve the grouped items, then validate again.')),
+        (state.dirty?'These results describe the last saved version. Save edits and validate again.':
+            blocking===0&&state.session?.validation?.ok?'These review notes do not block strict simulation.':'Resolve the grouped items, then validate again.')),
         el('ul',{},...[...grouped].map(([label,items])=>el('li',{},`${label} (${items.length})`,readinessRepeatedReason(items)))));
     $('issues-summary').textContent=`View every detailed readiness check (${rows.length})`;
     const key=JSON.stringify([state.session?.id,state.session?.revision,rows]);
@@ -1873,7 +2004,40 @@ function renderValidationIssues(issues){
 }
 function renderReview(){const s=state.session,plan=s?.plan;$('validation-summary').textContent=validationSummaryText(s?.validation);$('validation-status').textContent=s?.validation?(s.validation.ok?'Passed':'Needs attention'):'Not validated';$('simulation-status').textContent=({running:'Running…',passed:'Passed',failed:'Failed'})[s?.simulation?.status]||'Not simulated';$('approval-status').textContent=s?.approval?'Approved':'Needs review';for(const id of ['validation-status','simulation-status','approval-status'])$(id).style.color='';if(s?.validation?.ok)$('validation-status').style.color='var(--green)';if(s?.simulation?.status==='passed')$('simulation-status').style.color='var(--green)';if(s?.simulation?.status==='failed')$('simulation-status').style.color='var(--red)';if(s?.approval)$('approval-status').style.color='var(--green)';const issues=s?.validation?.issues??s?.issues??[];const hasMethodDifferences=list(issues).some(issue=>['method_mismatch','distribute_calibration_fallback'].includes(issue.code));$('method-differences-label').hidden=!hasMethodDifferences;if(!hasMethodDifferences)$('method-differences').checked=false;renderValidationIssues(issues);$('simulation-details').hidden=!s?.simulation;$('simulation-events').textContent=list(s?.simulation?.events).map(event=>typeof event==='string'?event:JSON.stringify(event)).join('\n')+(s?.simulation?.error?'\n'+s.simulation.error:'');const materials=list(plan?.materials);renderDeckRunSheet(materials);const table=el('table',{},el('thead',{},el('tr',{},...['Material','Starting supply','Dead volume / tips'].map(text=>el('th',{},text)))));table.append(el('tbody',{},...materials.map(item=>el('tr',{},el('td',{},item.name||item.id,el('small',{},materialDeckLabel(item))),el('td',{},item.role==='liquid'?`${item.initial_volume_ul??'Unspecified'} µL per well`:item.role==='tips'?item.tip_definition_id||'Tip type unspecified':'Waste',Object.keys(item.well_volumes_ul??{}).length?el('small',{},'Well overrides: '+Object.entries(item.well_volumes_ul).map(([well,v])=>`${well} ${v} µL`).join(', ')):null),el('td',{},item.role==='liquid'?deadVolumeLabel(item,plan):item.role==='tips'?tipInventoryLabel(item):'—')))));$('supplies').replaceChildren(materials.length?el('div',{class:'table-wrap'},table):el('p',{class:'muted'},plan?'This protocol does not use deck materials.':'Materials will appear after interpretation.'));$('run-steps').replaceChildren(plan?runList(list(plan.steps)):el('p',{class:'muted'},'No steps yet.'));const approval=s?.approval;$('approval-record').textContent=approval?`Approved by ${approval.scientist||'scientist'} · ${approval.created_at||approval.approved_at||''} · ${approval.qualification||''}${approval.notes?' · '+approval.notes:''}`:'';const history=list(s?.history??s?.revisions);$('history').replaceChildren(...history.map(item=>el('div',{class:'history-row'},el('strong',{},`${item.action||item.event||'Revision'} ${item.revision??''}`),' ',el('time',{},item.created_at||item.timestamp||item.time||''),item.summary?el('p',{},item.summary):null,el('details',{},el('summary',{},'Record details'),el('pre',{},JSON.stringify(item,null,2))))),...list(plan?.decisions).map(item=>el('div',{class:'history-row'},el('strong',{},item.path),' → '+textValue(item.value),el('p',{class:'muted'},item.reason||'Scientist decision'))));if(!$('history').childElementCount)$('history').append(el('p',{class:'muted'},'Saved revisions and scientist corrections will appear here.'));}
 function runList(steps){return el('ol',{class:'step-list'},...steps.map(step=>{const parts={distribute:`Aspirate ${list(step.dispenses).reduce((sum,target)=>sum+Number(target.volume_ul||0),0)} µL per channel from ${step.source??'?'} / ${step.source_anchor??'?'}; then ${list(step.dispenses).map(target=>'dispense '+(target.volume_ul??'?')+' µL into '+(target.destination??'?')+' / '+(target.destination_anchor??'?')).join('; ')}.`,transfer:`Aspirate ${step.volume_ul??'?'} µL per channel from ${step.source??'?'} / ${step.source_anchor??'?'}; then dispense ${step.volume_ul??'?'} µL into ${step.destination??'?'} / ${step.destination_anchor??'?'}.`,mix:`Mix ${step.material??'?'} / ${step.anchor??'?'}: ${step.cycles??'?'} cycles of ${step.volume_ul??'?'} µL.`,manual:`Manual handoff: ${step.message||step.description||'Instruction required'}`,wait:`Wait ${step.duration_s??'?'} seconds.`,move_plate:`Move ${step.material??'?'} to position ${step.destination_slot??'?'}.`,destack_plate:'Destack '+(step.material??'?')+' to empty position '+(step.destination_slot??'?')+'.',stack_plate:'Stack '+(step.material??'?')+' onto position '+(step.destination_slot??'?')+'.',repeat:`Repeat ${step.repeat??'?'} times.`};return el('li',{},parts[step.kind]||step.description,step.description?el('small',{},step.description):null,step.kind==='repeat'?runList(list(step.steps)):null);}));}
-function gates(){const s=state.session;const plan=!!s?.plan;const busy=state.busy;const running=s?.simulation?.status==='running';$('session-status').textContent=s?`Revision ${s.revision??1}${state.dirty?' · unsaved':s.approval?' · approved':' · draft'}`:'No protocol loaded';$('session-status').className='badge'+(s?.approval&&!state.dirty?' good':'');$('save-status').textContent=state.dirty?'Unsaved changes. Saving invalidates previous checks and approval.':s?`All changes saved · session ${s.id}`:'No session';$('save').disabled=busy||!state.dirty;$('reload').disabled=busy||!s;$('extract').disabled=busy||!s||!list(s.selected_paragraph_ids).length||!$('source-reviewed').checked;$('validate').disabled=busy||!plan;$('simulate').disabled=busy||!s?.validation?.ok||state.dirty||running;$('approve').disabled=busy||state.dirty||!s?.validation?.ok||s?.simulation?.status!=='passed'||!$('plan-reviewed').checked||!$('deck-confirmed').checked||!$('scientist').value.trim()||!$('approval-notes').value.trim()||(!$('method-differences-label').hidden&&!$('method-differences').checked);$('export').disabled=busy||state.dirty||!s?.approval;$('publish').disabled=busy||state.dirty||!s?.approval||!$('publish-name').value.trim();$('apply-setup').disabled=busy||!s||!$('setup-picker').value;$('save-setup').disabled=busy||!s||!$('setup-name').value.trim();if($('add-compatible-tipbox'))$('add-compatible-tipbox').disabled=busy||!s||!$('setup-tipbox-select').value;$('prepare-deck').disabled=busy||!s;$('suggest-methods').disabled=busy||!plan;$('add-material').disabled=busy||!s;$('add-step').disabled=busy||!plan;$('from-text').disabled=busy||!$('protocol-text').value.trim();$('ingest').disabled=busy||!$('protocol-file').files.length;freezeBusyControls();}
+function gates(){
+    const s=state.session,plan=!!s?.plan,busy=state.busy;
+    const running=s?.simulation?.status==='running';
+    const provisional=Boolean(s?.setup?.simulation_only_liquid_assumption);
+    freezeBusyControls();
+    $('session-status').textContent=s?`Revision ${s.revision??1}${state.dirty?' · unsaved':provisional?' · simulation only':s.approval?' · approved':' · draft'}`:'No protocol loaded';
+    $('session-status').className='badge'+(provisional?' warn':s?.approval&&!state.dirty?' good':'');
+    $('save-status').textContent=state.dirty?'Unsaved changes. Saving invalidates previous checks and approval.':s?`All changes saved · session ${s.id}`:'No session';
+    $('approval-provisional-note').hidden=!provisional;
+    $('approval-status').textContent=provisional?'Simulation only':s?.approval?'Approved':'Needs review';
+    $('approval-status').style.color=provisional?'var(--yellow)':s?.approval?'var(--green)':'';
+    for(const id of ['scientist','qualification','approval-notes','plan-reviewed','deck-confirmed','method-differences','publish-name'])
+        $(id).disabled=busy||provisional;
+    $('save').disabled=busy||!state.dirty;
+    $('reload').disabled=busy||!s;
+    $('extract').disabled=busy||!s||!list(s.selected_paragraph_ids).length||!$('source-reviewed').checked;
+    $('validate').disabled=busy||!plan;
+    $('simulate').disabled=busy||!s?.validation?.ok||state.dirty||running;
+    $('approve').disabled=busy||provisional||state.dirty||!s?.validation?.ok||
+        s?.simulation?.status!=='passed'||!$('plan-reviewed').checked||!$('deck-confirmed').checked||
+        !$('scientist').value.trim()||!$('approval-notes').value.trim()||
+        (!$('method-differences-label').hidden&&!$('method-differences').checked);
+    $('export').disabled=busy||provisional||state.dirty||!s?.approval;
+    $('publish').disabled=busy||provisional||state.dirty||!s?.approval||!$('publish-name').value.trim();
+    $('apply-setup').disabled=busy||!s||!$('setup-picker').value;
+    $('save-setup').disabled=busy||provisional||!s||!$('setup-name').value.trim();
+    if($('add-compatible-tipbox'))$('add-compatible-tipbox').disabled=busy||!s||!$('setup-tipbox-select').value;
+    $('prepare-deck').disabled=busy||!s;
+    $('suggest-methods').disabled=busy||!plan;
+    $('add-material').disabled=busy||!s;
+    $('add-step').disabled=busy||!plan;
+    $('from-text').disabled=busy||!$('protocol-text').value.trim();
+    $('ingest').disabled=busy||!$('protocol-file').files.length;
+}
 function schedulePoll(){clearTimeout(state.poll);if(state.session?.simulation?.status==='running'){const sessionId=state.session.id;state.poll=setTimeout(async()=>{try{const data=await api('/'+encodeURIComponent(sessionId));if(state.session?.id!==sessionId)return;const next=data.session??data;if(state.dirty){state.session.simulation=next.simulation;renderReview();gates();schedulePoll();}else acceptSession(next);}catch(error){notify('Simulation status could not be refreshed: '+error.message,true);schedulePoll();}},1200);}}
 async function refreshLibrary(){try{const data=await api('/library');const items=list(data.items??data.protocols??data);$('library').replaceChildren(...(items.length?items.map(item=>el('article',{class:'library-item'},el('h3',{},item.name||item.plan?.name||item.id),el('p',{},item.description||item.plan?.description||'Approved reusable protocol'),el('p',{},`${item.approval?.scientist?'Reviewed by '+item.approval.scientist+' · ':''}${item.created_at||item.updated_at||item.updated||item.created||''}`),el('button',{class:'small',onclick:()=>action(async()=>{const session=await api('/library/'+encodeURIComponent(item.id)+'/reuse',{method:'POST',body:'{}'});acceptSession(session);show('plan');notify('A new draft was created from the approved protocol. Review the setup for this experiment.');})},'Reuse as new draft'))):[el('p',{class:'empty'},'No approved protocols yet. Publish an approved revision from Verify & approve.') ]));}catch(error){$('library').replaceChildren(el('p',{class:'notice error'},error.message));}}
 async function refreshSetups(){const data=await api('/setups');state.setups=list(data.items??data.setups??data);$('setup-picker').replaceChildren(el('option',{value:''},'Choose a saved setup'),...state.setups.map(item=>el('option',{value:item.id},item.name||item.id)));}
