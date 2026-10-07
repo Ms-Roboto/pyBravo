@@ -2447,6 +2447,16 @@ def _get_workflow_storage():
     return _workflow_storage
 
 
+def _has_unreviewed_protocol_nodes(data: dict) -> bool:
+    graph = data.get("graph")
+    nodes = graph.get("nodes", []) if isinstance(graph, dict) else []
+    for node in nodes if isinstance(nodes, list) else []:
+        properties = node.get("properties") if isinstance(node, dict) else None
+        if isinstance(properties, dict) and str(properties.get("_protocol_step_id", "")).startswith("unreviewed-node-"):
+            return True
+    return False
+
+
 @app.get("/api/workflows", tags=["Designer"])
 async def list_designer_workflows():
     """List all saved designer workflows."""
@@ -2468,6 +2478,16 @@ async def create_designer_workflow(request: Request):
     body = await request.json()
     if isinstance(body, dict) and body.get("protocol_compiled_preview"):
         raise HTTPException(status_code=409, detail="Compiled protocol previews cannot be saved as Designer workflows.")
+    if isinstance(body, dict) and body.get("protocol_generated_draft"):
+        try:
+            return _get_workflow_storage().create_generated_copy(body)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(body, dict) and (
+        _has_unreviewed_protocol_nodes(body)
+        or any(key in body for key in ("protocol_generated_root_id", "protocol_generated_provenance", "protocol_draft_status"))
+    ):
+        raise HTTPException(status_code=409, detail="An unreviewed generated protocol must retain its draft marker and provenance.")
     return _get_workflow_storage().create_workflow(body)
 
 
@@ -2480,6 +2500,16 @@ async def update_designer_workflow(workflow_id: str, request: Request):
         existing and existing.get("protocol_compiled_preview")
     ):
         raise HTTPException(status_code=409, detail="Compiled protocol previews cannot be saved as Designer workflows.")
+    if existing and existing.get("protocol_generated_draft"):
+        try:
+            return _get_workflow_storage().update_generated_draft(workflow_id, body)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(body, dict) and (
+        body.get("protocol_generated_draft") or _has_unreviewed_protocol_nodes(body)
+        or any(key in body for key in ("protocol_generated_root_id", "protocol_generated_provenance", "protocol_draft_status"))
+    ):
+        raise HTTPException(status_code=409, detail="An unreviewed generated protocol cannot be saved over an ordinary workflow.")
     result = _get_workflow_storage().update_workflow(workflow_id, body)
     if result is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -2502,6 +2532,11 @@ async def import_designer_workflow(file: UploadFile = File(...)):
         data = json.loads(content)
         if isinstance(data, dict) and data.get("protocol_compiled_preview"):
             raise HTTPException(status_code=409, detail="Compiled protocol previews cannot be imported as Designer workflows.")
+        if isinstance(data, dict) and (
+            data.get("protocol_generated_draft") or _has_unreviewed_protocol_nodes(data)
+            or any(key in data for key in ("protocol_generated_root_id", "protocol_generated_provenance", "protocol_draft_status"))
+        ):
+            raise HTTPException(status_code=409, detail="Unreviewed generated protocols must be loaded from their saved Designer drafts.")
         return _get_workflow_storage().import_workflow(content)
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -2645,6 +2680,11 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
     # Chat builds a structural DAG so scientists can see and revise the plan
     # before setup. Its review nodes are not robot tasks. Refuse both preview
     # simulation and execution even if a saved copy loses its draft marker.
+    if data.get("protocol_generated_draft") or _has_unreviewed_protocol_nodes(data):
+        raise HTTPException(
+            status_code=409,
+            detail="This locally generated workflow is an unreviewed draft. Review and approve its exact revision before simulation or execution.",
+        )
     if data.get("protocol_compiled_preview"):
         raise HTTPException(status_code=409, detail="Compiled protocol previews are read-only and cannot run in Designer.")
     if data.get("protocol_chat_draft") or any(

@@ -17,6 +17,21 @@ from pybravo.workflow.protocols.store import ProtocolStore
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("marker", [True, False])
+@pytest.mark.parametrize("mode", ["simulate", "execute"])
+async def test_generated_draft_cannot_start_even_if_marker_is_removed(monkeypatch, marker, mode):
+    node = {"id": 2, "type": "liquid/Aspirate", "properties": {"_protocol_step_id": "unreviewed-node-2"}}
+    workflow = {"graph": {"nodes": [node]}, "deck": {}, "protocol_generated_draft": marker}
+    monkeypatch.setattr(server, "_get_workflow_storage", lambda: SimpleNamespace(get_workflow=lambda identity: workflow))
+    monkeypatch.setattr(server, "_active_workflow_executor", None)
+    monkeypatch.setattr(server, "_workflow_start_lock", asyncio.Lock())
+    with pytest.raises(HTTPException) as error:
+        await server._run_designer_workflow("generated-draft", mode=mode)
+    assert error.value.status_code == 409
+    assert "unreviewed draft" in str(error.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_startup_running_and_aborting_all_exclude_second_workflow(monkeypatch):
     entered_initialize, finish_initialize = asyncio.Event(), asyncio.Event()
     entered_execute, finish_execute = asyncio.Event(), asyncio.Event()

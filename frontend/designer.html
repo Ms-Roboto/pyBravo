@@ -5415,7 +5415,7 @@ function serializeWorkflow() {
 function configureWorkflowGraph(graph, data) {
     if (!data.graph || !graph) return;
     graph.configure(data.graph);
-    if (!data.protocol_session_id) return;
+    if (!data.protocol_session_id && !data.protocol_generated_draft) return;
     // LiteGraph merges constructor defaults into loaded properties. A compiled
     // protocol supplies its exact execution parameters, so preserve those
     // rather than silently adding unrelated defaults during a view/save cycle.
@@ -5435,7 +5435,7 @@ function deserializeWorkflow(data) {
     const sessionId = (data && typeof data.drafter_session_id === 'string') ? data.drafter_session_id : '';
     const desc = (data && typeof data.description === 'string') ? data.description : '';
     const protocolMetadata = {};
-    for (const key of ['protocol_session_id', 'protocol_revision', 'protocol', 'protocol_chat_draft', 'protocol_chat_session_id', 'protocol_materials']) {
+    for (const key of ['protocol_session_id', 'protocol_revision', 'protocol', 'protocol_chat_draft', 'protocol_chat_session_id', 'protocol_materials', 'protocol_generated_draft', 'protocol_draft_status', 'protocol_generated_provenance', 'protocol_generated_root_id', 'protocol_draft_issues']) {
         if (data && data[key] !== undefined) protocolMetadata[key] = JSON.parse(JSON.stringify(data[key]));
     }
     if (wfId) {
@@ -5557,7 +5557,7 @@ async function loadWorkflowList() {
         const meta = document.createElement('div');
         meta.className = 'wf-meta';
         const modified = wf.modified ? new Date(wf.modified).toLocaleString() : '';
-        meta.textContent = modified;
+        meta.textContent = (wf.protocol_generated_draft ? 'Unreviewed local draft · ' : '') + modified;
         info.appendChild(meta);
         item.appendChild(info);
 
@@ -6776,6 +6776,7 @@ async function runWorkflow() {
     const progress = document.getElementById('playback-progress');
     if (isCompiledProtocolPreviewTab()) { await replayCompiledSimulationPreview(); return; }
     if (isProtocolDraftTab()) { progress.textContent = 'This protocol preview cannot run in Designer. Review it in Protocol Assistant.'; return; }
+    if (isGeneratedProtocolDraftTab()) { progress.textContent = 'This locally generated protocol is an editable draft. Review and approve it before simulation or execution.'; return; }
 
     // Validate first
     const errors = validateWorkflow();
@@ -7890,6 +7891,9 @@ const PROTOCOL_CHAT_STORAGE = 'pybravo-designer-protocol-chat';
 function isProtocolDraftTab(tab = getActiveTab()) {
     return Boolean(tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_draft || isCompiledProtocolPreviewTab(tab));
 }
+function isGeneratedProtocolDraftTab(tab = getActiveTab()) {
+    return tab?.protocolMetadata?.protocol_generated_draft === true;
+}
 function isCompiledProtocolPreviewTab(tab = getActiveTab()) {
     return Boolean(tab?.protocolPreviewSessionId && tab?.protocolMetadata?.protocol_compiled_preview);
 }
@@ -7948,17 +7952,19 @@ async function loadProtocolCapabilities(refresh = false) {
 function updateProtocolDraftControls() {
     const tab = getActiveTab();
     const draft = isProtocolDraftTab(tab);
+    const generated = isGeneratedProtocolDraftTab(tab);
     const compiledPreview = isCompiledProtocolPreviewTab(tab);
     document.body.classList.toggle('protocol-preview-active', draft);
     document.body.classList.toggle('protocol-compiled-preview', compiledPreview);
     if (compiledPreview) requestAnimationFrame(() => designerState.robotScene?.resize());
     document.querySelector('#viewport-header span').textContent = compiledPreview ? 'Bravo 3D replay' : '3D Simulation';
     document.getElementById('btn-simulate').title = compiledPreview ? 'Replay this revision’s saved strict simulation without starting a new run' : 'Simulate';
-    document.getElementById('protocol-draft-banner').hidden = !draft;
+    document.getElementById('protocol-draft-banner').hidden = !(draft || generated);
     for (const id of ['btn-save', 'btn-save-as', 'btn-library', 'btn-draft', 'btn-import', 'btn-export', 'btn-simulate', 'btn-execute', 'btn-play', 'btn-pause', 'btn-stop', 'btn-step']) {
         const button = document.getElementById(id);
         const replayControl = compiledPreview && ['btn-simulate', 'btn-play', 'btn-pause', 'btn-stop', 'btn-step'].includes(id);
-        if (draft && !replayControl) {
+        const generatedRunControl = generated && ['btn-simulate', 'btn-execute', 'btn-play', 'btn-pause', 'btn-stop', 'btn-step'].includes(id);
+        if ((draft && !replayControl) || generatedRunControl) {
             if (!('protocolPreviousDisabled' in button.dataset)) button.dataset.protocolPreviousDisabled = String(button.disabled);
             button.disabled = true;
         } else if ('protocolPreviousDisabled' in button.dataset) {
@@ -7969,14 +7975,22 @@ function updateProtocolDraftControls() {
     const canvas = designerState.graphCanvas;
     if (canvas) { canvas.read_only = draft; canvas.allow_dragnodes = !draft; canvas.allow_reconnect_links = !draft; }
     const id = tab?.protocolPreviewSessionId || tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_session_id;
-    if (id) document.getElementById('protocol-draft-review').href = '/protocol-assistant?session=' + encodeURIComponent(id);
+    const reviewLink = document.getElementById('protocol-draft-review');
+    reviewLink.hidden = generated;
+    if (id) reviewLink.href = '/protocol-assistant?session=' + encodeURIComponent(id);
     const label = document.querySelector('#protocol-draft-banner strong');
-    label.textContent = compiledPreview ? 'Compiled simulation preview · unapproved' : 'Non-executable protocol draft';
-    document.getElementById('protocol-draft-review').textContent = compiledPreview ? 'Return to Protocol Assistant →' : 'Review setup, simulate & approve →';
+    label.textContent = generated ? 'Locally generated protocol · unreviewed' : compiledPreview ? 'Compiled simulation preview · unapproved' : 'Non-executable protocol draft';
+    reviewLink.textContent = compiledPreview ? 'Return to Protocol Assistant →' : 'Review setup, simulate & approve →';
     if (compiledPreview) {
         const operations = (tab.graph?._nodes || []).filter(node => !['flow/Start', 'flow/End', 'flow/Frame'].includes(node.type)).length;
         const assumption = tab.protocolPreviewStatus === 'simulation_only' ? ' Liquid method and height are provisional; hardware use unavailable.' : ' Scientist approval is still required.';
         document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata.protocol_revision} · ${operations} Bravo tasks · read only.${assumption} Simulate replays saved motion and reconstructs plate/tip changes from primitive task steps; it does not run or approve a new method.`;
+    } else if (generated) {
+        const operations = (tab.graph?._nodes || []).filter(node => !['flow/Start', 'flow/End', 'flow/Frame'].includes(node.type)).length;
+        const issues = tab.protocolMetadata?.protocol_draft_issues || [];
+        const summary = document.getElementById('protocol-draft-summary');
+        summary.textContent = `${operations} editable Bravo tasks and manual handoffs · ${issues.length} review checks. Check deck, labware, tips, liquids, mappings, and external stages before review; simulation and execution are disabled for this draft.`;
+        summary.title = issues.map(issue => issue.message).join('\n');
     } else if (draft) {
         document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;
     }

@@ -211,6 +211,7 @@ async def draft_workflow(
     *,
     current_deck: dict[str, Any] | None = None,
     config: DrafterConfig | None = None,
+    include_exemplars: bool = True,
 ) -> DraftResult:
     """End-to-end draft: system prompt → LLM → validate → (optional) repair.
 
@@ -226,7 +227,7 @@ async def draft_workflow(
     """
     cfg = config or _resolve_config()
     client = _build_client(cfg.provider)
-    system_prompt = build_system_prompt(current_deck=current_deck)
+    system_prompt = build_system_prompt(current_deck=current_deck, include_exemplars=include_exemplars)
 
     messages: list[dict[str, str]] = [
         {"role": "user", "content": prompt},
