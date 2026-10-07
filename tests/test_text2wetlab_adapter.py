@@ -98,6 +98,13 @@ def test_static_gate_rejects_unresolved_executable_draft_correction() -> None:
         adapter.validate_ot2_source(source)
 
 
+def test_static_gate_reports_unsupported_pipette_loading_api() -> None:
+    source = VALID_PROTOCOL.replace("protocol.load_instrument(", "protocol.load_pipette(")
+    with pytest.raises(adapter.ProtocolValidationError,
+                       match=r"load_pipette\(\).*load_instrument"):
+        adapter.validate_ot2_source(source)
+
+
 def test_static_gate_reports_multiple_literal_stroke_ranges_in_one_repair() -> None:
     source = VALID_PROTOCOL.replace(
         "    for well in plate.rows()[0]:",
