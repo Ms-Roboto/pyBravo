@@ -20,6 +20,11 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
+class _ActionBase(_Strict):
+    # IDs refer to trusted task/paper spans supplied outside model output.
+    evidence_refs: list[str] = Field(min_length=1)
+
+
 class LabwareLoad(_Strict):
     id: str = Field(min_length=1)
     load_name: str = Field(min_length=1)
@@ -40,17 +45,17 @@ class PipetteLoad(_Strict):
     tip_rack_ids: list[str] = Field(min_length=1)
 
 
-class Pickup(_Strict):
+class Pickup(_ActionBase):
     kind: Literal["pickup"]
     pipette: str
 
 
-class Drop(_Strict):
+class Drop(_ActionBase):
     kind: Literal["drop"]
     pipette: str
 
 
-class Stroke(_Strict):
+class Stroke(_ActionBase):
     kind: Literal["aspirate", "dispense"]
     pipette: str
     labware: str
@@ -58,7 +63,7 @@ class Stroke(_Strict):
     volume_ul: float = Field(gt=0)
 
 
-class Mix(_Strict):
+class Mix(_ActionBase):
     kind: Literal["mix"]
     pipette: str
     labware: str
@@ -67,53 +72,53 @@ class Mix(_Strict):
     volume_ul: float = Field(gt=0)
 
 
-class Delay(_Strict):
+class Delay(_ActionBase):
     kind: Literal["delay"]
     seconds: float = Field(gt=0)
 
 
-class Pause(_Strict):
+class Pause(_ActionBase):
     kind: Literal["pause"]
     message: str = Field(min_length=1)
 
 
-class RefillTips(_Strict):
+class RefillTips(_ActionBase):
     kind: Literal["refill_tips"]
     pipette: str
     message: str = Field(min_length=1)
 
 
-class SetTemperature(_Strict):
+class SetTemperature(_ActionBase):
     kind: Literal["set_temperature"]
     module: str
     celsius: float
 
 
-class SetBlockTemperature(_Strict):
+class SetBlockTemperature(_ActionBase):
     kind: Literal["set_block_temperature"]
     module: str
     celsius: float
     hold_seconds: float | None = Field(default=None, gt=0)
 
 
-class SetLidTemperature(_Strict):
+class SetLidTemperature(_ActionBase):
     kind: Literal["set_lid_temperature"]
     module: str
     celsius: float
 
 
-class LidState(_Strict):
+class LidState(_ActionBase):
     kind: Literal["open_lid", "close_lid"]
     module: str
 
 
-class MagnetEngage(_Strict):
+class MagnetEngage(_ActionBase):
     kind: Literal["magnet_engage"]
     module: str
     height_from_base_mm: float = Field(ge=0)
 
 
-class MagnetDisengage(_Strict):
+class MagnetDisengage(_ActionBase):
     kind: Literal["magnet_disengage"]
     module: str
 
@@ -126,7 +131,7 @@ PrimitiveAction = Annotated[
 ]
 
 
-class ForEach(_Strict):
+class ForEach(_ActionBase):
     """Repeat explicit actions over model-supplied well-name bindings.
 
     A body may use a whole-well placeholder such as ``$source_well``. The
@@ -189,8 +194,77 @@ class ModuleFacts:
     magnet_height_range_mm: tuple[float, float] | None = None
 
 
+@dataclass(frozen=True)
+class SourceSpan:
+    """A caller-supplied character span into an unmodified task or paper."""
+
+    source: Literal["instruction", "paper"]
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class ResolvedEvidence:
+    action_path: str
+    span_id: str
+    source: Literal["instruction", "paper"]
+    quote: str
+
+
 class ActionPlanError(ValueError):
     """The proposed action sequence violates a known structural constraint."""
+
+
+def validate_action_evidence(
+    plan: ActionPlan,
+    *,
+    source_spans: Mapping[str, SourceSpan],
+    instruction: str,
+    paper: str | None = None,
+) -> tuple[ResolvedEvidence, ...]:
+    """Resolve every action reference to exact supplied text.
+
+    The spans are created by the caller, not the model. Citation validates
+    origin and prevents nonexistent source IDs; it does not decide whether a
+    quoted passage supports a specific reagent, amount, or operation.
+    """
+    if not isinstance(instruction, str) or not instruction.strip():
+        raise ValueError("The unmodified task instruction is required.")
+    corpora = {"instruction": instruction, "paper": paper}
+    quoted: dict[str, tuple[Literal["instruction", "paper"], str]] = {}
+    for span_id, span in source_spans.items():
+        if not isinstance(span_id, str) or not span_id.strip():
+            raise ValueError("Source-span IDs must be nonempty strings.")
+        if not isinstance(span, SourceSpan) or span.source not in corpora:
+            raise ValueError(f"Source span {span_id!r} has an invalid source.")
+        corpus = corpora[span.source]
+        if (corpus is None or isinstance(span.start, bool) or isinstance(span.end, bool)
+                or not isinstance(span.start, int) or not isinstance(span.end, int)
+                or not 0 <= span.start < span.end <= len(corpus)):
+            raise ValueError(f"Source span {span_id!r} is outside its supplied source.")
+        text = corpus[span.start:span.end]
+        if not text.strip():
+            raise ValueError(f"Source span {span_id!r} contains no source words.")
+        quoted[span_id] = (span.source, text)
+
+    resolved: list[ResolvedEvidence] = []
+
+    def record(item: _ActionBase, path: str) -> None:
+        if len(item.evidence_refs) != len(set(item.evidence_refs)):
+            raise ActionPlanError(f"{path} repeats an evidence reference.")
+        for span_id in item.evidence_refs:
+            if span_id not in quoted:
+                raise ActionPlanError(f"{path} cites unknown source span {span_id!r}.")
+            source, quote = quoted[span_id]
+            resolved.append(ResolvedEvidence(path, span_id, source, quote))
+
+    for index, action in enumerate(plan.actions):
+        path = f"actions[{index}]"
+        record(action, path)
+        if isinstance(action, ForEach):
+            for body_index, item in enumerate(action.actions):
+                record(item, f"{path}.actions[{body_index}]")
+    return tuple(resolved)
 
 
 _MAX_EXPANDED_ACTIONS = 10_000
@@ -289,6 +363,9 @@ def compile_actions(
     *,
     labware_catalog: Mapping[str, LabwareFacts],
     pipette_catalog: Mapping[str, PipetteFacts],
+    source_spans: Mapping[str, SourceSpan],
+    instruction: str,
+    paper: str | None = None,
     module_catalog: Mapping[str, ModuleFacts] | None = None,
     refill_authorized: bool = False,
 ) -> str:
@@ -304,6 +381,9 @@ def compile_actions(
         plan = raw if isinstance(raw, ActionPlan) else ActionPlan.model_validate(raw)
     except ValidationError as exc:
         raise ActionPlanError(str(exc)) from exc
+    validate_action_evidence(
+        plan, source_spans=source_spans, instruction=instruction, paper=paper,
+    )
     if not isinstance(refill_authorized, bool):
         raise ValueError("refill_authorized must be a trusted boolean.")
     trusted_modules = module_catalog or {}

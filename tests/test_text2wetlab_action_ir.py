@@ -13,7 +13,9 @@ from pybravo.evals.text2wetlab.action_ir import (
     LabwareFacts,
     ModuleFacts,
     PipetteFacts,
+    SourceSpan,
     compile_actions,
+    validate_action_evidence,
 )
 
 LABWARE = {
@@ -24,6 +26,8 @@ LABWARE = {
     "synthetic_target": LabwareFacts(frozenset({"A1", "A2"})),
 }
 PIPETTES = {"synthetic_p20": PipetteFacts(1, 20, 1)}
+INSTRUCTION = "Synthetic test: run only the explicitly listed actions in order."
+SPANS = {"task": SourceSpan("instruction", 0, len(INSTRUCTION))}
 
 
 def _draft() -> dict:
@@ -50,9 +54,17 @@ def _draft() -> dict:
 
 def _compile(draft: dict, *, labware=LABWARE, pipettes=PIPETTES,
              modules=None, refill_authorized=False) -> str:
+    # Fixtures focus on mechanical checks; evidence behavior is tested below.
+    cited = deepcopy(draft)
+    for action in cited["actions"]:
+        action.setdefault("evidence_refs", ["task"])
+        if action["kind"] == "for_each":
+            for item in action["actions"]:
+                item.setdefault("evidence_refs", ["task"])
     return compile_actions(
-        draft, labware_catalog=labware, pipette_catalog=pipettes,
-        module_catalog=modules, refill_authorized=refill_authorized,
+        cited, labware_catalog=labware, pipette_catalog=pipettes,
+        source_spans=SPANS, instruction=INSTRUCTION, module_catalog=modules,
+        refill_authorized=refill_authorized,
     )
 
 
@@ -353,3 +365,86 @@ def test_refill_cannot_reset_a_rack_while_tip_remains_attached():
     ]
     with pytest.raises(ActionPlanError, match="cannot refill while"):
         _compile(draft, refill_authorized=True)
+
+
+def test_every_action_and_loop_body_resolves_to_exact_task_or_paper_spans():
+    instruction = "Transfer liquid from the supplied source to the target."
+    paper = "Hold the completed plate at 42 C for 30 seconds."
+    spans = {
+        "transfer": SourceSpan("instruction", 0, len(instruction)),
+        "hold": SourceSpan("paper", 0, len(paper)),
+    }
+    draft = _mapped_draft()
+    draft["actions"][0]["evidence_refs"] = ["transfer"]
+    for item in draft["actions"][0]["actions"]:
+        item["evidence_refs"] = ["transfer"]
+    draft["actions"].append({
+        "kind": "delay", "seconds": 30, "evidence_refs": ["hold"],
+    })
+    plan = ActionPlan.model_validate(draft)
+    resolved = validate_action_evidence(
+        plan, source_spans=spans, instruction=instruction, paper=paper,
+    )
+    assert len(resolved) == 6  # Loop, four body actions, then a paper-cited delay.
+    assert resolved[0].action_path == "actions[0]"
+    assert resolved[0].quote == instruction
+    assert resolved[-1].action_path == "actions[1]"
+    assert resolved[-1].source == "paper"
+    assert resolved[-1].quote == paper
+    code = compile_actions(
+        draft, labware_catalog=LABWARE, pipette_catalog=PIPETTES,
+        source_spans=spans, instruction=instruction, paper=paper,
+    )
+    assert "protocol.delay(seconds=30.0)" in code
+
+
+def test_missing_and_forged_action_evidence_cannot_compile():
+    draft = _draft()
+    with pytest.raises(ActionPlanError, match="evidence_refs"):
+        compile_actions(
+            draft, labware_catalog=LABWARE, pipette_catalog=PIPETTES,
+            source_spans=SPANS, instruction=INSTRUCTION,
+        )
+    for item in draft["actions"]:
+        item["evidence_refs"] = ["invented"]
+    with pytest.raises(ActionPlanError, match="unknown source span"):
+        compile_actions(
+            draft, labware_catalog=LABWARE, pipette_catalog=PIPETTES,
+            source_spans=SPANS, instruction=INSTRUCTION,
+        )
+    for item in draft["actions"]:
+        item["evidence_refs"] = ["task"]
+    draft["actions"][1]["evidence_refs"] = ["task", "task"]
+    with pytest.raises(ActionPlanError, match="repeats an evidence reference"):
+        compile_actions(
+            draft, labware_catalog=LABWARE, pipette_catalog=PIPETTES,
+            source_spans=SPANS, instruction=INSTRUCTION,
+        )
+
+
+def test_unavailable_paper_and_out_of_bounds_spans_are_rejected():
+    draft = _draft()
+    for item in draft["actions"]:
+        item["evidence_refs"] = ["paper"]
+    with pytest.raises(ValueError, match="outside its supplied source"):
+        compile_actions(
+            draft, labware_catalog=LABWARE, pipette_catalog=PIPETTES,
+            source_spans={"paper": SourceSpan("paper", 0, 5)},
+            instruction=INSTRUCTION,
+        )
+    with pytest.raises(ValueError, match="outside its supplied source"):
+        compile_actions(
+            draft, labware_catalog=LABWARE, pipette_catalog=PIPETTES,
+            source_spans={"paper": SourceSpan("instruction", 0, 1000)},
+            instruction=INSTRUCTION,
+        )
+
+
+def test_loop_body_requires_its_own_evidence_reference():
+    draft = _mapped_draft()
+    draft["actions"][0]["evidence_refs"] = ["task"]
+    with pytest.raises(ActionPlanError, match="evidence_refs"):
+        compile_actions(
+            draft, labware_catalog=LABWARE, pipette_catalog=PIPETTES,
+            source_spans=SPANS, instruction=INSTRUCTION,
+        )
