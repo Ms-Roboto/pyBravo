@@ -290,9 +290,9 @@ def _resolve_iter_properties(
 
 
 def _parse_anchor(anchor: str) -> tuple[int, int]:
-    """Parse an anchor well label like 'A1', 'B2', 'D4' into absolute (row, col).
+    """Parse an anchor well label like 'A1', 'D4', 'AF48' into absolute (row, col).
 
-    Letter → row (A=0, B=1, ..., Z=25). Digit suffix → col (1-based input →
+    Letters → row (A=0, ..., Z=25, AA=26). Digit suffix → col (1-based input →
     0-based output). This matches the well-labeling convention users see in the
     Bravo diagnostics UI and in lab conversation (`"aspirate at A2"`).
 
@@ -301,16 +301,19 @@ def _parse_anchor(anchor: str) -> tuple[int, int]:
     """
     if not isinstance(anchor, str):
         raise ValueError(f"Anchor must be a string like 'A1'; got {anchor!r}")
-    s = anchor.strip().upper()
-    if len(s) < 2 or not s[0].isalpha() or not s[1:].isdigit():
+    s = anchor.strip()
+    if not s.isascii():
+        raise ValueError(f"Invalid anchor {anchor!r}; well labels must use ASCII letters and digits")
+    s = s.upper()
+    match = re.fullmatch(r"([A-Z]+)([1-9][0-9]*)", s, flags=re.ASCII)
+    if not match:
         raise ValueError(
-            f"Invalid anchor {anchor!r}; expected letter+digit (e.g. 'A1', 'B2', 'D4')"
+            f"Invalid anchor {anchor!r}; expected well letters and a positive column (e.g. 'A1', 'AF48')"
         )
-    row = ord(s[0]) - ord("A")
-    col = int(s[1:]) - 1
-    if row < 0 or col < 0:
-        raise ValueError(f"Invalid anchor {anchor!r}")
-    return row, col
+    row = 0
+    for char in match[1]:
+        row = row * 26 + ord(char) - ord("A") + 1
+    return row - 1, int(match[2]) - 1
 
 
 def _build_task_params(node_type: str, properties: dict[str, Any]) -> dict[str, Any]:
@@ -2120,7 +2123,7 @@ class WorkflowExecutor:
             labware = stack.top if stack is not None else None
             if labware is None:
                 return teach_x, teach_y
-            head_mode = self.bravo._head_mode
+            head_mode = self.bravo.pipetting_head_mode
             head_type = self.bravo._profile.head.head_type
             try:
                 plate_selection = self.bravo._effective_plate_selection(
@@ -2216,9 +2219,13 @@ class WorkflowExecutor:
             z_top_plate = geometry.top_plane_head_z
             z_liquid = geometry.target_head_z
             volume = float(properties.get("volume", 50))
-            row = int(properties.get("anchor_row", properties.get("row", 0)))
-            col = int(properties.get("anchor_col", properties.get("col", properties.get("column", 0))))
-            q_row, q_col = self._parse_quadrant(properties.get("quadrant"))
+            if properties.get("anchor"):
+                row, col = _parse_anchor(str(properties["anchor"]))
+                q_row, q_col = 0, 0
+            else:
+                row = int(properties.get("anchor_row", properties.get("row", 0)))
+                col = int(properties.get("anchor_col", properties.get("col", properties.get("column", 0))))
+                q_row, q_col = self._parse_quadrant(properties.get("quadrant"))
             _cmd_name = {
                 "liquid/Aspirate": "Aspirate",
                 "liquid/Dispense": "Dispense",

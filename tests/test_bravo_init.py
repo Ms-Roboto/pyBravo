@@ -247,7 +247,7 @@ async def test_home_all_homes_gripper_axes_and_finishes_docked():
         bravo.disconnect()
 
 
-def test_full_384_head_on_384_plate_only_allows_a1_a2_b1_b2_anchors():
+def test_full_384_head_on_384_plate_only_allows_a1_anchor():
     mode = normalize_head_mode(HeadType.HT_384_D_70, "all_barrels", "back_left")
 
     anchors = legal_plate_anchors(
@@ -277,7 +277,7 @@ def test_full_384_head_on_1536_plate_only_allows_a1_a2_b1_b2_anchors():
     assert [(anchor.row, anchor.col) for anchor in anchors] == [(0, 0), (0, 1), (1, 0), (1, 1)]
 
 
-def test_back_left_full_row_on_384_plate_allows_both_dense_phases_for_all_rows():
+def test_back_left_full_row_on_384_plate_allows_one_anchor_per_row():
     mode = normalize_head_mode(HeadType.HT_384_D_70, "row", "back_left", row_count=1)
 
     anchors = legal_plate_anchors(

@@ -1011,6 +1011,11 @@ class PlateSelectionRequest(BaseModel):
     col: int
 
 
+class WorkflowPlateSelectionRequest(BaseModel):
+    workflow: dict[str, Any]
+    node_id: int
+
+
 class VisionCalibrationRunRequest(BaseModel):
     notes: str | None = None
 
@@ -1616,6 +1621,123 @@ async def set_tip_selection(req: TipSelectionRequest):
 async def get_plate_selection(location: int):
     bravo = get_bravo()
     return bravo.get_plate_selection_state(location)
+
+
+@app.post("/api/workflows/plate_selection_options", tags=["Designer"])
+async def workflow_plate_selection_options(req: WorkflowPlateSelectionRequest):
+    """Inspect an unsaved liquid task using native mapping, without motion.
+
+    A plate anchor is the well under the first mounted barrel, not a fixed
+    quadrant enum. Catalog pitch, the mounted footprint, calibrated XY travel,
+    and neighboring labware determine which placements can be proposed.
+    """
+    from pybravo.deck.geometry import well_geometry_from_metadata
+    from pybravo.deck.labware import Labware
+    from pybravo.head_mode import normalize_head_mode, plate_footprint_wells
+    from pybravo.workflow.plate_context import resolve_plate_context
+
+    context = resolve_plate_context(req.workflow, req.node_id)
+    empty = {"status": "unresolved", "legal_anchors": [], "motion_performed": False}
+    if context["status"] != "resolved":
+        return {**empty, "message": context["message"]}
+
+    live = get_bravo()
+    profile = copy.deepcopy(live.profile)
+    try:
+        proposed_target = req.workflow.get("protocol_simulation_target")
+        simulation_target_changed = False
+        if proposed_target is not None:
+            previous_head = profile.head.head_type.name
+            previous_tip = profile.head.teach_tip_id or profile.head.default_tip_id
+            simulation_target = _apply_generated_simulation_target(profile, proposed_target)
+            # Mirror start_designer_workflow: either change discards the
+            # live runtime snapshot, including its configured footprint.
+            simulation_target_changed = (
+                simulation_target["head_type"] != previous_head
+                or simulation_target["tip_definition_id"] != previous_tip
+            )
+        virtual = Bravo(profile=profile, mode="simulation")
+        virtual._labware_catalog = live.labware_catalog
+
+        def catalog_item(item):
+            definition = virtual.labware_catalog.get_definition(item.get("labware_id", ""))
+            if definition is None:
+                raise ValueError(f"Unknown catalog labware: {item.get('labware_id')!r}")
+            result = Labware.from_definition(definition, is_lidded=bool(item.get("is_lidded")),
+                                             is_sealed=bool(item.get("is_sealed")))
+            if item.get("tip_definition_id"):
+                result.metadata["tip_definition_id"] = str(item["tip_definition_id"])
+            return result
+
+        for slot, stack in context["deck"].items():
+            for item in stack:
+                virtual.deck.add(int(slot), catalog_item(item))
+
+        requested_mode = context["head_mode"]
+        if requested_mode is None:
+            # A changed virtual head or tip cannot inherit live configuration
+            # that workflow startup intentionally removes from its snapshot.
+            if simulation_target_changed:
+                raise ValueError("Configure the Tips On footprint for the proposed head and tip before selecting plate wells.")
+            requested_mode = live.head_mode.to_dict()
+        mode = normalize_head_mode(profile.head.head_type, requested_mode.get("subset_type"),
+                                   requested_mode.get("subset_config"), requested_mode.get("row_count"),
+                                   requested_mode.get("column_count"))
+        rack = catalog_item(context["tip_labware"])
+        if "tip_box" not in (virtual._labware_base_class(rack), virtual._labware_kind(rack)):
+            raise ValueError("The preceding Tips On task must use a catalog tip rack.")
+        tip_id = virtual._tip_id_for_labware(rack)
+        supported = rack.metadata.get("supported_tip_ids") or []
+        allowed_heads = rack.metadata.get("compatible_head_types") or []
+        if supported and tip_id not in supported:
+            raise ValueError(f"Tip {tip_id!r} is not supported by the selected rack.")
+        if allowed_heads and profile.head.head_type.name not in allowed_heads:
+            raise ValueError("The selected tip rack is not compatible with this head.")
+        tip_length = virtual._tip_length_for_labware(rack)
+        if not math.isfinite(tip_length) or tip_length <= 0:
+            raise ValueError("Record a positive tip length before checking neighboring labware clearance.")
+        virtual._head_mode = mode
+        virtual._tips_on_head = True
+        virtual._tips_on_head_mode = mode
+        virtual._attached_tip_length_mm = tip_length
+        virtual._tip_definition_id = tip_id
+
+        location = context["location"]
+        plate = virtual._require_well_labware(location, operation="Plate selection")
+        if plate.is_lidded or plate.is_sealed:
+            raise ValueError("Remove the lid or seal before selecting wells for a liquid task.")
+        geometry = well_geometry_from_metadata(plate.metadata)
+        if geometry.rows * geometry.cols > 1536:
+            raise ValueError("Plate selection supports catalog grids up to 1536 wells.")
+
+        def label(row, col):
+            letters, number = "", row + 1
+            while number:
+                number, remainder = divmod(number - 1, 26)
+                letters = chr(65 + remainder) + letters
+            return f"{letters}{col + 1}"
+
+        options = []
+        for anchor in virtual._legal_plate_anchors(location, plate, mode):
+            row, col = anchor["row"], anchor["col"]
+            covered = plate_footprint_wells(profile.head.head_type, mode, geometry.rows, geometry.cols,
+                                            geometry.pitch_x_mm, geometry.pitch_y_mm, row, col)
+            options.append({"anchor": label(row, col), "row": row, "col": col,
+                            "covered_wells": [{"row": r, "col": c, "well": label(r, c)} for r, c in covered]})
+    except (ValueError, TypeError, RuntimeError, KeyError) as exc:
+        return {**empty, "message": str(exc)}
+
+    return {
+        "status": "resolved", "motion_performed": False,
+        "message": ("The starting well aligns with the top-left tip in the mounted footprint. "
+                    "Starting wells checked against the mounted tip footprint, plate pitch, XY travel and neighboring labware. "
+                    "Run SuperDex to check the complete motion path." if options else
+                    "No starting well fits this mounted footprint, plate pitch, deck position and neighboring labware."),
+        "labware": {"name": plate.name, "location": location, "rows": geometry.rows, "columns": geometry.cols},
+        "footprint": {"description": mode.to_dict()["display_text"], "head_mode": mode.to_dict(),
+                      "head_type": profile.head.head_type.name, "tip_node_id": context["tip_node_id"], "tip_id": tip_id},
+        "legal_anchors": options,
+    }
 
 
 @app.put("/api/plate_selection", **_route_meta("Head", "Update the selected plate anchor well", HEAD_MODE_DOC))

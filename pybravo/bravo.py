@@ -660,11 +660,11 @@ class Bravo:
             safe_z_position=self._profile.safety.z_safe_position,
             labware=self._deck.get_stack(location).top,
             head_type=self._profile.head.head_type,
-            head_mode=self._head_mode,
+            head_mode=self.pipetting_head_mode,
             plate_selection=self._effective_plate_selection(
                 location,
                 self._deck.get_stack(location).top,
-                self._head_mode,
+                self.pipetting_head_mode,
                 command_name="Aspirate",
             ),
             dynamic_tip_extension=dynamic_tip_extension,
@@ -715,11 +715,11 @@ class Bravo:
             safe_z_position=self._profile.safety.z_safe_position,
             labware=self._deck.get_stack(location).top,
             head_type=self._profile.head.head_type,
-            head_mode=self._head_mode,
+            head_mode=self.pipetting_head_mode,
             plate_selection=self._effective_plate_selection(
                 location,
                 self._deck.get_stack(location).top,
-                self._head_mode,
+                self.pipetting_head_mode,
                 command_name="Dispense",
             ),
             empty_tips=empty_tips,
@@ -787,11 +787,11 @@ class Bravo:
             safe_z_position=self._profile.safety.z_safe_position,
             labware=self._deck.get_stack(location).top,
             head_type=self._profile.head.head_type,
-            head_mode=self._head_mode,
+            head_mode=self.pipetting_head_mode,
             plate_selection=self._effective_plate_selection(
                 location,
                 self._deck.get_stack(location).top,
-                self._head_mode,
+                self.pipetting_head_mode,
                 command_name="Mix",
             ),
             dynamic_tip_extension=dynamic_tip_extension,
@@ -2158,6 +2158,13 @@ class Bravo:
     def head_mode(self) -> HeadMode:
         return self._head_mode
 
+    @property
+    def pipetting_head_mode(self) -> HeadMode:
+        """The physical tip footprint; changing a future pickup cannot change mounted tips."""
+        if self._tips_on_head and self._tips_on_head_mode is not None:
+            return self._tips_on_head_mode
+        return self._head_mode
+
     def set_head_mode(
         self,
         subset_type: str | None,
@@ -2213,13 +2220,14 @@ class Bravo:
         geometry = well_geometry_from_metadata(labware.metadata)
         row = int(row)
         col = int(col)
+        head_mode = self.pipetting_head_mode
         if row < 0 or row >= geometry.rows or col < 0 or col >= geometry.cols:
             raise RuntimeError(f"Plate selection ({row}, {col}) is outside the labware at location {location}")
-        if not self._is_plate_anchor_reachable(location, labware, self._head_mode, row, col):
+        if not self._is_plate_anchor_reachable(location, labware, head_mode, row, col):
             raise RuntimeError(f"Plate selection ({row}, {col}) is not reachable at location {location}")
-        if not self._is_legal_plate_anchor(labware, self._head_mode, row, col):
+        if not self._is_legal_plate_anchor(labware, head_mode, row, col):
             raise RuntimeError(f"Plate selection ({row}, {col}) is not legal for the current head mode")
-        self._assert_plate_anchor_clearance(location, labware, self._head_mode, row, col)
+        self._assert_plate_anchor_clearance(location, labware, head_mode, row, col)
         selection = plate_selection(location, row, col)
         self._plate_selection[location] = selection
         self._emit("plate_selection_changed", plate_selection=selection.to_dict())
@@ -2228,7 +2236,8 @@ class Bravo:
     def get_plate_selection_state(self, location: int) -> dict[str, Any]:
         labware = self._require_well_labware(location, operation="Plate selection")
         geometry = well_geometry_from_metadata(labware.metadata)
-        legal = self._legal_plate_anchors(location, labware, self._head_mode)
+        head_mode = self.pipetting_head_mode
+        legal = self._legal_plate_anchors(location, labware, head_mode)
         legal_keys = {(int(anchor["row"]), int(anchor["col"])) for anchor in legal}
         current = self._plate_selection.get(location)
         if current is not None and (int(current.row), int(current.col)) not in legal_keys:
@@ -2242,7 +2251,7 @@ class Bravo:
         footprint: list[dict[str, int]] = []
         if current is not None:
             fp = plate_footprint_wells(
-                self._profile.head.head_type, self._head_mode,
+                self._profile.head.head_type, head_mode,
                 geometry.rows, geometry.cols,
                 geometry.pitch_x_mm, geometry.pitch_y_mm,
                 current.row, current.col,

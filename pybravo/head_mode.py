@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 
 from pybravo.types import HeadType
@@ -493,14 +494,21 @@ def plate_footprint_wells(
     *,
     tolerance: float = 1e-6,
 ) -> list[tuple[int, int]]:
-    if plate_rows <= 0 or plate_cols <= 0 or pitch_x_mm <= 0 or pitch_y_mm <= 0:
+    if (plate_rows <= 0 or plate_cols <= 0
+            or not math.isfinite(pitch_x_mm) or not math.isfinite(pitch_y_mm)
+            or pitch_x_mm <= 0 or pitch_y_mm <= 0):
         return []
     geometry = head_geometry_for_type(head_type)
-    step_row = _near_integer(geometry.pitch_y_mm / pitch_y_mm, tolerance)
-    step_col = _near_integer(geometry.pitch_x_mm / pitch_x_mm, tolerance)
+    (sel_row_start, sel_row_stop), (sel_col_start, sel_col_stop) = head_selected_ranges(head_type, mode)
+    if sel_row_stop <= sel_row_start or sel_col_stop <= sel_col_start:
+        return []
+    # Pitch must line up only along axes that contain multiple mounted tips.
+    # A single tip can address any well even when its head pitch is smaller
+    # than the plate pitch (for example one 384-head tip on a 96-well plate).
+    step_row = _near_integer(geometry.pitch_y_mm / pitch_y_mm, tolerance) if sel_row_stop - sel_row_start > 1 else 1
+    step_col = _near_integer(geometry.pitch_x_mm / pitch_x_mm, tolerance) if sel_col_stop - sel_col_start > 1 else 1
     if step_row is None or step_col is None or step_row <= 0 or step_col <= 0:
         return []
-    (sel_row_start, _), (sel_col_start, _) = head_selected_ranges(head_type, mode)
     mapped: list[tuple[int, int]] = []
     for barrel_row, barrel_col in active_head_wells(head_type, mode):
         mapped_row = int(anchor_row) + (barrel_row - sel_row_start) * step_row
@@ -512,6 +520,8 @@ def plate_footprint_wells(
 
 
 def _near_integer(value: float, tolerance: float) -> int | None:
+    if not math.isfinite(value):
+        return None
     rounded = int(round(value))
     if abs(value - rounded) > tolerance:
         return None

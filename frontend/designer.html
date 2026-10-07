@@ -1403,6 +1403,14 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
    be picked up / returned). Painted ON TOP of `.legal` for the active one. */
 .tb-cell.selected { background: #74d890; border-color: #90e9aa; }
 .tb-cell.anchor { background: #f47f7f; border-color: #ffaaaa; }
+
+.plate-selection-grid { display: grid; gap: 3px; width: max-content; padding: 12px; }
+.plate-selection-cell { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-input); }
+.plate-selection-cell:disabled { opacity: 0.55; }
+.plate-selection-cell.legal { background: #3a6b48; cursor: pointer; }
+.plate-selection-cell.covered { background: #74d890; opacity: 1; }
+.plate-selection-cell.anchor { background: #f47f7f; }
+.plate-selection-axis { font-size: 9px; text-align: center; color: var(--text-dimmer); }
 </style>
 
 <!-- Labware Picker Modal -->
@@ -1546,6 +1554,31 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
         <div class="hm-modal-footer">
             <button class="btn" data-hm-close="tipbox">Cancel</button>
             <button class="btn btn-primary" id="hm-tipbox-save">Apply selection</button>
+        </div>
+    </div>
+</div>
+
+<div class="hm-modal-overlay" id="plate-selection-modal">
+    <div class="hm-modal" role="dialog" aria-modal="true" aria-labelledby="plate-selection-title">
+        <div class="hm-modal-header">
+            <h2 id="plate-selection-title">Plate selection</h2>
+            <button class="hm-modal-close" data-plate-selection-close aria-label="Close plate selection">&times;</button>
+        </div>
+        <div class="hm-modal-body">
+            <p id="plate-selection-context"></p>
+            <p id="plate-selection-status" role="status"></p>
+            <div style="overflow:auto;max-height:60vh;border:1px solid var(--border);border-radius:8px;">
+                <div class="plate-selection-grid" id="plate-selection-grid" aria-label="Plate wells"></div>
+            </div>
+            <div class="hm-legend" style="margin-top:12px;">
+                <span><i class="leg-dot"></i>Valid starting well</span>
+                <span><i class="sel-dot"></i>Addressed wells</span>
+                <span><i class="anc-dot"></i>Selected starting well</span>
+            </div>
+        </div>
+        <div class="hm-modal-footer">
+            <button class="btn" data-plate-selection-close>Cancel</button>
+            <button class="btn btn-primary" id="plate-selection-apply" disabled>Apply selection</button>
         </div>
     </div>
 </div>
@@ -3017,6 +3050,172 @@ function wireTipboxModal() {
     }
     const overlay = document.getElementById('hm-modal-tipbox');
     overlay.addEventListener('click', (e) => { if (e.target === overlay) closeTipboxPicker(); });
+}
+
+// Plate options come from the native geometry resolver with the whole workflow,
+// so the editor neither guesses a mounted footprint nor assumes four quadrants.
+let plateSelectionDraft = null;
+
+function plateSelectionContextCurrent(draft) {
+    return draft && draft.graph === designerState.graph && draft.tab === getActiveTab()
+        && draft.workflowSnapshot === JSON.stringify(serializeWorkflow());
+}
+
+async function openPlateSelectionPicker(node) {
+    const workflow = serializeWorkflow();
+    const draft = { node, graph: designerState.graph, tab: getActiveTab(),
+        workflowSnapshot: JSON.stringify(workflow), result: null, selected: null,
+        message: 'Checking the mounted tip footprint and plate geometry…' };
+    plateSelectionDraft = draft;
+    document.getElementById('plate-selection-modal').classList.add('open');
+    renderPlateSelectionGrid();
+    try {
+        const result = await apiCall('/api/workflows/plate_selection_options', 'POST', { workflow, node_id: node.id });
+        if (plateSelectionDraft !== draft) return;
+        if (!plateSelectionContextCurrent(draft)) throw new Error('The workflow changed. Close and reopen Plate selection to check it again.');
+        draft.result = result;
+        draft.message = result?.message || 'The mounted footprint could not be resolved. Check the preceding Tips On and selected plate.';
+        if (result?.status === 'resolved') {
+            const { rows, columns } = result.labware || {};
+            if (!Number.isInteger(rows) || rows <= 0 || !Number.isInteger(columns) || columns <= 0 ||
+                !Array.isArray(result.legal_anchors) ||
+                !result.legal_anchors.every(anchor => typeof anchor.anchor === 'string' &&
+                    Number.isInteger(anchor.row) && anchor.row >= 0 && anchor.row < rows &&
+                    Number.isInteger(anchor.col) && anchor.col >= 0 && anchor.col < columns &&
+                    Array.isArray(anchor.covered_wells) && anchor.covered_wells.length &&
+                    anchor.covered_wells.every(well => Number.isInteger(well.row) && well.row >= 0 && well.row < rows &&
+                        Number.isInteger(well.col) && well.col >= 0 && well.col < columns))) {
+                throw new Error('The plate lookup did not return a valid well pattern. Close and reopen Plate selection to try again.');
+            }
+            draft.selected = result.legal_anchors.find(anchor => anchor.anchor === node.properties.anchor) || null;
+        }
+    } catch (error) {
+        if (plateSelectionDraft !== draft) return;
+        draft.result = null;
+        draft.selected = null;
+        draft.message = error.message || 'Plate selection lookup failed. Close and reopen to try again.';
+    }
+    renderPlateSelectionGrid();
+}
+
+function plateSelectionRowLabel(row) {
+    let label = '';
+    for (let value = row + 1; value > 0; value = Math.floor((value - 1) / 26)) {
+        label = String.fromCharCode(65 + (value - 1) % 26) + label;
+    }
+    return label;
+}
+
+function renderPlateSelectionGrid() {
+    const draft = plateSelectionDraft;
+    if (!draft) return;
+    const grid = document.getElementById('plate-selection-grid');
+    const context = document.getElementById('plate-selection-context');
+    const status = document.getElementById('plate-selection-status');
+    const apply = document.getElementById('plate-selection-apply');
+    grid.textContent = '';
+    context.textContent = draft.node.title || 'Liquid task';
+    apply.disabled = true;
+    if (!plateSelectionContextCurrent(draft)) {
+        status.textContent = 'The workflow changed. Close and reopen Plate selection to check it again.';
+        return;
+    }
+    const result = draft.result;
+    if (result?.status !== 'resolved') { status.textContent = draft.message; return; }
+    const plate = result.labware;
+    context.textContent = `${draft.node.title} · Position ${plate.location} · ${plate.name}. Mounted tips: ${result.footprint?.description || 'Resolved footprint'}.`;
+    const saved = String(draft.node.properties.anchor || '');
+    const options = result.legal_anchors;
+    status.textContent = !options.length
+        ? (result.message || 'No valid placement fits the mounted tip footprint on this plate.')
+        : draft.selected
+        ? `${draft.selected.anchor}: ${draft.selected.covered_wells.length} addressed wells. Apply selection to save this pattern.`
+        : /^(?:iter|var):/i.test(saved)
+            ? `Current anchor is ${saved}. Choosing and applying a fixed starting well replaces this expression.`
+            : saved
+                ? `Saved anchor ${saved} is not a valid placement for this footprint. Choose a highlighted starting well.`
+                : 'Choose a highlighted starting well to preview the addressed wells.';
+    if (options.length) {
+        status.textContent += ` ${options.length} valid starting ${options.length === 1 ? 'well' : 'wells'}.`;
+        if (result.message) status.textContent += ` ${result.message}`;
+    }
+    apply.disabled = !draft.selected;
+    grid.style.gridTemplateColumns = `20px repeat(${plate.columns}, 14px)`;
+    const axis = text => { const element = document.createElement('span'); element.className = 'plate-selection-axis'; element.textContent = text; grid.appendChild(element); };
+    axis('');
+    for (let column = 0; column < plate.columns; column++) axis(String(column + 1));
+    const anchors = new Map(options.map(anchor => [`${anchor.row}:${anchor.col}`, anchor]));
+    const covered = new Set((draft.selected?.covered_wells || []).map(well => `${well.row}:${well.col}`));
+    for (let row = 0; row < plate.rows; row++) {
+        axis(plateSelectionRowLabel(row));
+        for (let column = 0; column < plate.columns; column++) {
+            const key = `${row}:${column}`;
+            const anchor = anchors.get(key);
+            const label = `${plateSelectionRowLabel(row)}${column + 1}`;
+            const cell = document.createElement('button');
+            cell.type = 'button';
+            cell.className = 'plate-selection-cell';
+            cell.disabled = !anchor;
+            if (anchor) cell.classList.add('legal');
+            if (covered.has(key)) cell.classList.add('covered');
+            if (draft.selected && anchor === draft.selected) cell.classList.add('anchor');
+            cell.setAttribute('aria-label', `${label}${anchor ? ' · valid starting well' : ''}${covered.has(key) ? ' · addressed' : ''}`);
+            cell.title = `${label}${anchor ? ' — select this starting well' : ''}${covered.has(key) ? ' — addressed by mounted tips' : ''}`;
+            if (anchor) cell.addEventListener('click', () => {
+                if (plateSelectionDraft !== draft || !plateSelectionContextCurrent(draft)) { renderPlateSelectionGrid(); return; }
+                draft.selected = anchor;
+                renderPlateSelectionGrid();
+            });
+            grid.appendChild(cell);
+        }
+    }
+}
+
+function closePlateSelectionPicker() {
+    plateSelectionDraft = null;
+    document.getElementById('plate-selection-modal').classList.remove('open');
+}
+
+function applyPlateSelection() {
+    const draft = plateSelectionDraft;
+    if (!draft?.selected || !plateSelectionContextCurrent(draft) || draft.result?.status !== 'resolved') {
+        renderPlateSelectionGrid();
+        return;
+    }
+    draft.node.properties.anchor = draft.selected.anchor;
+    draft.node.setDirtyCanvas(true, true);
+    markActiveDirty();
+    closePlateSelectionPicker();
+    renderPropertiesPanel(draft.node);
+}
+
+function renderPlateSelectionField(field, node) {
+    const row = document.createElement('div');
+    row.className = 'prop-pickrow';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = String(node.properties.anchor || '');
+    input.setAttribute('aria-label', 'Plate starting well');
+    input.placeholder = 'Starting well, iter:…, or var:…';
+    input.style.cssText = 'min-width:0;width:100%;padding:4px 6px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;';
+    input.addEventListener('change', () => {
+        node.properties.anchor = input.value.trim();
+        node.setDirtyCanvas(true, true);
+        markActiveDirty();
+    });
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Select wells…';
+    button.addEventListener('click', () => { void openPlateSelectionPicker(node); });
+    row.append(input, button);
+    field.appendChild(row);
+}
+
+function wirePlateSelectionModal() {
+    document.getElementById('plate-selection-apply').addEventListener('click', applyPlateSelection);
+    for (const element of document.querySelectorAll('[data-plate-selection-close]')) element.addEventListener('click', closePlateSelectionPicker);
+    const overlay = document.getElementById('plate-selection-modal');
+    overlay.addEventListener('click', event => { if (event.target === overlay) closePlateSelectionPicker(); });
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -5307,37 +5506,8 @@ function renderPropertiesPanel(node) {
             help.textContent = 'Names: data · vars · plates · result · log · math · json · re';
             field.appendChild(help);
         } else if (key === 'anchor') {
-            const isIter = typeof value === 'string' && value.startsWith('iter:');
-            const grid = document.createElement('div');
-            grid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 2px;';
-            for (const q of ['A1', 'A2', 'B1', 'B2']) {
-                const btn = document.createElement('button');
-                const active = !isIter && value === q;
-                btn.style.cssText = `padding: 4px; font-size: 10px; font-family: var(--sans); border-radius: 3px; border: 1px solid var(--border); cursor: pointer; background: ${active ? 'var(--accent-bg)' : 'var(--bg-input)'}; color: ${active ? 'var(--accent)' : 'var(--text)'}; opacity: ${isIter ? '0.5' : '1'};`;
-                btn.textContent = q;
-                btn.addEventListener('click', () => {
-                    node.properties[key] = node.properties[key] === q ? '' : q;
-                    node.setDirtyCanvas(true);
-                    renderPropertiesPanel(node);
-                });
-                grid.appendChild(btn);
-            }
-            field.appendChild(grid);
-            // Per-iteration override: free-text input that accepts
-            // `iter:A1,A2,B1,B2`. When populated, button highlights dim
-            // (value is the iter expression, not a single quadrant).
-            const iterInput = document.createElement('input');
-            iterInput.type = 'text';
-            iterInput.placeholder = 'or iter:A1,A2,B1,B2 (per-loop)';
-            iterInput.value = isIter ? value : '';
-            iterInput.style.cssText = 'width: 100%; padding: 3px 5px; margin-top: 3px; font-size: 10px; font-family: var(--sans); background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text);';
-            iterInput.addEventListener('change', () => {
-                const raw = iterInput.value.trim();
-                node.properties[key] = raw; // empty string clears; non-empty (with or without iter:) stored verbatim
-                node.setDirtyCanvas(true);
-                renderPropertiesPanel(node);
-            });
-            field.appendChild(iterInput);
+            label.textContent = 'Plate selection';
+            renderPlateSelectionField(field, node);
         } else if (key === 'color') {
             // Palette-based picker for Frame `color` properties (and any
             // other node property named `color`). Uses Tailwind v3's default
@@ -8987,7 +9157,7 @@ async function init() {
     ]);
     // Wire the head-mode + tip-box pickers that Tips On / Tips Off
     // properties open. Safe to call even if the modals' DOM isn't present.
-    try { wireHeadModeModal(); wireTipboxModal(); } catch (e) { console.warn('Tips modal wiring failed:', e); }
+    try { wireHeadModeModal(); wireTipboxModal(); wirePlateSelectionModal(); } catch (e) { console.warn('Tips modal wiring failed:', e); }
     // Initialize Litegraph canvas
     try {
         initGraph();

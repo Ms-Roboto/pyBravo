@@ -151,7 +151,7 @@ _CONSTRAINTS = {
     "gripper_docking_for_tip_handling": "For a gripper-equipped Bravo, plan a visible native DockGripper primitive before tip handling. Initialization alone may leave the fingers protruding; moving tip subsets can then collide with the rack.",
     "physical_collision_rehearsal": "Native simulated controller moves are checked with SuperDex against robot tool meshes, catalog deck and carried plate envelopes. Missing geometry blocks rehearsal. A clear sampled result is not hardware qualification.",
     "approved_liquid_class": "The chosen liquid class must match the active machine, head and selected tip.",
-    "reachable_wells": "Head footprint and selected anchors must fit each plate's verified grid and pitch.",
+    "reachable_wells": "A liquid anchor is the well under the first active mounted barrel. The whole footprint must fit the catalog plate grid and pitch and pass native deck-position X/Y travel and neighboring-labware clearance checks. Inherit the mounted footprint from Tips On; A1/A2/B1/B2 are not a global anchor restriction. Query /api/workflows/plate_selection_options for the current workflow and liquid node before proposing placements; unresolved context is not reachable evidence.",
     "source_and_destination_capacity": "Source stays above dead volume; destination stays below per-well capacity.",
     "distribute_volume_accounting": "One shared aspiration requires a permitting method, effective tip capacity and calibrated command volume; otherwise the compiler uses safe paired actions or reports a validation error.",
     "configured_gripper": "The active profile must provide the Bravo gripper axes.",
