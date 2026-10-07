@@ -3,8 +3,10 @@
 Downloads the task tree at the fixed dataset commit (or reads a checkout at
 that exact commit) and verifies every Git blob before invoking Docker. The
 task's Dockerfile and ``tests/test.sh`` are used
-unchanged. The default deliberately supplies no judge key; successful lint,
-anti-hack, and simulation gates are reported separately from judge availability.
+unchanged. The default deliberately supplies no judge key; task-specific
+anti-hack and simulation evidence is reported separately from judge availability.
+The RNA grader has no lint pass and may stop before persisting its gate record
+without a judge key, which is reported as incomplete rather than passed.
 The default verifier container has no network. ``--judge`` permits network so
 the local judge can be reached; that network policy is not Harbor's allowlist,
 and even a returned rubric is not an official score.
@@ -39,16 +41,24 @@ from scripts import evaluate_text2wetlab as saved_runner  # noqa: E402
 
 DATASET = saved_runner.DATASET
 REVISION = saved_runner.REVISION
-# The RNA task ships a different grade.py/result format and has no saved
-# accepted candidate. Keep this runner scoped to the standard Harbor verifier.
-TASKS = tuple(task for task in saved_runner.TASKS if task != "opentrons-rna-extraction")
+TASKS = saved_runner.TASKS
+RNA_TASK = "opentrons-rna-extraction"
 _HEX_40 = re.compile(r"[0-9a-f]{40}\Z")
 _HEX_64 = re.compile(r"[0-9a-f]{64}\Z")
 _REQUIRED = frozenset({
     "environment/Dockerfile", "tests/test.sh", "tests/grade.py",
     "tests/anti_hack.py", "tests/data_hashes.json", "tests/runlog.py",
-    "tests/judge_layer.py", "instruction.md",
+    "instruction.md",
 })
+_STANDARD_REQUIRED = frozenset({"tests/judge_layer.py"})
+_RNA_REQUIRED = frozenset({
+    "environment/data/paper.txt",
+    "environment/data/labware/thermo_96_wellplate_200ul.json",
+})
+
+
+def _required(task: str) -> frozenset[str]:
+    return _REQUIRED | (_RNA_REQUIRED if task == RNA_TASK else _STANDARD_REQUIRED)
 
 
 class VerificationError(ValueError):
@@ -128,7 +138,7 @@ def _download_pinned_task(task: str, destination: Path) -> dict[str, str]:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         hashes[relative] = _sha(data)
-    missing = _REQUIRED - hashes.keys()
+    missing = _required(task) - hashes.keys()
     if missing:
         raise VerificationError("pinned_dataset", f"Pinned task tree lacks {sorted(missing)}.")
     return hashes
@@ -172,7 +182,7 @@ def _copy_pinned_checkout_task(task: str, destination: Path, checkout: Path) -> 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         hashes[relative] = _sha(data)
-    missing = _REQUIRED - hashes.keys()
+    missing = _required(task) - hashes.keys()
     if missing:
         raise VerificationError("pinned_dataset", f"Local pinned task tree lacks {sorted(missing)}.")
     return hashes
@@ -284,6 +294,103 @@ def _read_verifier(verifier_dir: Path, candidate_sha: str, *, judge_requested: b
     }
 
 
+def _read_rna_verifier(verifier_dir: Path, candidate_sha: str, *, judge_requested: bool,
+                       test_exit_code: int, stderr: bytes, key: str | None) -> dict[str, Any]:
+    """Parse RNA's judge.json format and its no-key pre-report interruption.
+
+    The pinned RNA grader creates its Anthropic client outside the retry block.
+    With no key it may write protocol.py and events.json, then fail before
+    judge.json/reward.json. Those files show that simulation was reached, but
+    do not retain its suspicious-token or trap lists, so no gate pass is claimed.
+    """
+    try:
+        graded_sha = _sha((verifier_dir / "protocol.py").read_bytes())
+    except OSError as exc:
+        raise VerificationError("verifier_result", "Pinned RNA grader did not retain the candidate.") from exc
+    if graded_sha != candidate_sha:
+        raise VerificationError("verifier_result", "RNA verifier graded a different candidate digest.")
+    events_path = verifier_dir / "events.json"
+    events_sha = None
+    event_count = None
+    if events_path.is_file():
+        try:
+            events_bytes = events_path.read_bytes()
+            events = json.loads(events_bytes)
+            if not isinstance(events, list):
+                raise ValueError("events.json is not a list")
+            events_sha, event_count = _sha(events_bytes), len(events)
+        except (OSError, ValueError) as exc:
+            raise VerificationError("verifier_result", f"Pinned RNA events are invalid: {exc}") from exc
+    retained = {
+        "test_script_exit_code": test_exit_code,
+        "graded_copy_sha256": graded_sha,
+        "verifier_result_path": None,
+        "verifier_events_path": str(events_path) if events_sha else None,
+        "verifier_events_sha256": events_sha,
+    }
+    judge_path = verifier_dir / "judge.json"
+    reward_path = verifier_dir / "reward.json"
+    if not judge_path.is_file() and not reward_path.is_file():
+        auth_error = (b"Could not resolve authentication method" in stderr
+                      or b"The api_key client option must be set" in stderr)
+        if judge_requested or test_exit_code == 0 or not auth_error or events_sha is None:
+            raise VerificationError("verifier_result", "RNA grader did not persist its judge and reward record.")
+        return {
+            **retained,
+            "status": "pre_judge_incomplete",
+            "pre_judge_gates": {
+                "status": "incomplete", "lint_status": "not_applicable",
+                "lint_violations": None, "anti_hack_traps": None,
+                "anti_hack_inference": "Events were written after the pinned trap check, but the trap list was not retained.",
+                "suspicious_tokens": None,
+                "simulation": {"ok": True, "event_count": event_count,
+                               "evidence": "pinned RNA grader events.json"},
+            },
+            "judge": {"status": "unavailable_no_key",
+                      "error": "Pinned RNA grader stopped before persisting judge.json/reward.json."},
+        }
+    try:
+        record = json.loads(judge_path.read_text(encoding="utf-8"))
+        reward = json.loads(reward_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise VerificationError("verifier_result", f"Pinned RNA judge evidence is unavailable: {exc}") from exc
+    if not isinstance(record, dict) or not isinstance(reward, dict) or record.get("rewards") != reward:
+        raise VerificationError("verifier_result", "Pinned RNA judge and reward files disagree.")
+    suspicious, traps, simulation = (record.get("suspicious_tokens"), record.get("traps"),
+                                    record.get("simulation"))
+    if (not isinstance(suspicious, list) or not isinstance(traps, list)
+            or not isinstance(simulation, dict)):
+        raise VerificationError("verifier_result", "Pinned RNA grader omitted a gate result.")
+    passed = (suspicious == [] and traps == [] and simulation.get("ok") is True
+              and reward.get("sim_pass") == 1.0 and test_exit_code == 0 and events_sha is not None)
+    verdict = record.get("judge")
+    if not isinstance(verdict, dict):
+        judge = {"status": "not_reached"}
+    elif "error" in verdict:
+        detail = str(verdict["error"])
+        if key:
+            detail = detail.replace(key, "[REDACTED]")
+        judge = {"status": "error" if judge_requested else "unavailable_no_key",
+                 "model": record.get("judge_model"), "error": detail[:1200]}
+    elif judge_requested and isinstance(verdict.get("scores"), dict):
+        judge = {"status": "local_judge_returned", "model": record.get("judge_model"),
+                 "scores": verdict["scores"], "local_reward": reward.get("reward")}
+    else:
+        judge = {"status": "unexpected_result_without_requested_key",
+                 "model": record.get("judge_model")}
+    return {
+        **retained,
+        "status": "pre_judge_passed" if passed else "pre_judge_failed",
+        "pre_judge_gates": {
+            "status": "passed" if passed else "failed", "lint_status": "not_applicable",
+            "lint_violations": None, "anti_hack_traps": traps,
+            "suspicious_tokens": suspicious, "simulation": simulation,
+        },
+        "judge": judge,
+        "verifier_result_path": str(judge_path),
+    }
+
+
 def verify_saved_candidate(task: str, *, saved_run_root: Path, candidate: Path,
                            output_dir: Path, judge: bool = False,
                            dataset_root: Path | None = None) -> dict[str, Any]:
@@ -361,8 +468,16 @@ def verify_saved_candidate(task: str, *, saved_run_root: Path, candidate: Path,
         args.extend([image, "bash", "/tests/test.sh"])
         run_env = {**env, "ANTHROPIC_API_KEY": key} if judge and key else env
         completed = _docker(args, env=run_env, timeout=900)
-        summary.update(_read_verifier(verifier_dir, candidate_sha, judge_requested=judge,
-                                      test_exit_code=completed.returncode, key=key))
+        if task == RNA_TASK:
+            summary.update(_read_rna_verifier(
+                verifier_dir, candidate_sha, judge_requested=judge,
+                test_exit_code=completed.returncode, stderr=completed.stderr, key=key,
+            ))
+        else:
+            summary.update(_read_verifier(
+                verifier_dir, candidate_sha, judge_requested=judge,
+                test_exit_code=completed.returncode, key=key,
+            ))
         if _sha(candidate.read_bytes()) != candidate_sha:
             raise VerificationError("candidate_integrity", "Candidate changed during container verification.")
     except (VerificationError, OSError, subprocess.TimeoutExpired, ValueError) as exc:
