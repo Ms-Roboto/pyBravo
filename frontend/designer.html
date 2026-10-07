@@ -1567,6 +1567,10 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
         </div>
         <div class="hm-modal-body">
             <p id="plate-selection-context"></p>
+            <label id="plate-selection-location-field" hidden style="margin:8px 0;">
+                Plate
+                <select id="plate-selection-location" aria-label="Plate for liquid task" style="margin-left:8px;padding:5px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;"></select>
+            </label>
             <p id="plate-selection-status" role="status"></p>
             <div style="overflow:auto;max-height:60vh;border:1px solid var(--border);border-radius:8px;">
                 <div class="plate-selection-grid" id="plate-selection-grid" aria-label="Plate wells"></div>
@@ -3066,15 +3070,29 @@ async function openPlateSelectionPicker(node) {
     const workflow = serializeWorkflow();
     const draft = { node, graph: designerState.graph, tab: getActiveTab(),
         workflowSnapshot: JSON.stringify(workflow), result: null, selected: null,
+        location: node.properties.location, plateOptions: [], request: 0, loading: false,
         message: 'Checking the mounted tip footprint and plate geometry…' };
     plateSelectionDraft = draft;
     document.getElementById('plate-selection-modal').classList.add('open');
+    await loadPlateSelectionOptions(draft);
+}
+
+async function loadPlateSelectionOptions(draft) {
+    const request = ++draft.request;
+    draft.result = null;
+    draft.selected = null;
+    draft.loading = true;
+    draft.message = 'Checking the mounted tip footprint and plate geometry…';
     renderPlateSelectionGrid();
     try {
-        const result = await apiCall('/api/workflows/plate_selection_options', 'POST', { workflow, node_id: node.id });
-        if (plateSelectionDraft !== draft) return;
+        const workflow = JSON.parse(draft.workflowSnapshot);
+        const target = workflow.graph.nodes.find(node => node.id === draft.node.id);
+        target.properties = {...target.properties, location: draft.location};
+        const result = await apiCall('/api/workflows/plate_selection_options', 'POST', { workflow, node_id: draft.node.id });
+        if (plateSelectionDraft !== draft || request !== draft.request) return;
         if (!plateSelectionContextCurrent(draft)) throw new Error('The workflow changed. Close and reopen Plate selection to check it again.');
         draft.result = result;
+        draft.plateOptions = (result?.plate_options || []).filter(plate => Number.isInteger(plate.location) && plate.location >= 1 && plate.location <= 9);
         draft.message = result?.message || 'The mounted footprint could not be resolved. Check the preceding Tips On and selected plate.';
         if (result?.status === 'resolved') {
             const { rows, columns } = result.labware || {};
@@ -3088,15 +3106,25 @@ async function openPlateSelectionPicker(node) {
                         Number.isInteger(well.col) && well.col >= 0 && well.col < columns))) {
                 throw new Error('The plate lookup did not return a valid well pattern. Close and reopen Plate selection to try again.');
             }
-            draft.selected = result.legal_anchors.find(anchor => anchor.anchor === node.properties.anchor) || null;
+            draft.selected = result.legal_anchors.find(anchor => anchor.anchor === draft.node.properties.anchor) || null;
         }
     } catch (error) {
-        if (plateSelectionDraft !== draft) return;
+        if (plateSelectionDraft !== draft || request !== draft.request) return;
         draft.result = null;
         draft.selected = null;
         draft.message = error.message || 'Plate selection lookup failed. Close and reopen to try again.';
     }
+    draft.loading = false;
     renderPlateSelectionGrid();
+}
+
+async function choosePlateSelectionLocation(value) {
+    const draft = plateSelectionDraft;
+    const location = Number(value);
+    if (!draft || !plateSelectionContextCurrent(draft) ||
+        !draft.plateOptions.some(plate => plate.location === location)) return;
+    draft.location = location;
+    await loadPlateSelectionOptions(draft);
 }
 
 function plateSelectionRowLabel(row) {
@@ -3114,6 +3142,24 @@ function renderPlateSelectionGrid() {
     const context = document.getElementById('plate-selection-context');
     const status = document.getElementById('plate-selection-status');
     const apply = document.getElementById('plate-selection-apply');
+    const locationField = document.getElementById('plate-selection-location-field');
+    const locationSelect = document.getElementById('plate-selection-location');
+    locationField.hidden = !draft.plateOptions.length;
+    locationSelect.textContent = '';
+    locationSelect.disabled = draft.loading || !plateSelectionContextCurrent(draft);
+    if (!draft.plateOptions.some(plate => plate.location === Number(draft.location))) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Choose a plate…';
+        locationSelect.appendChild(option);
+    }
+    for (const plate of draft.plateOptions) {
+        const option = document.createElement('option');
+        option.value = String(plate.location);
+        option.textContent = `Position ${plate.location} · ${plate.name}`;
+        locationSelect.appendChild(option);
+    }
+    locationSelect.value = draft.plateOptions.some(plate => plate.location === Number(draft.location)) ? String(draft.location) : '';
     grid.textContent = '';
     context.textContent = draft.node.title || 'Liquid task';
     apply.disabled = true;
@@ -3183,6 +3229,7 @@ function applyPlateSelection() {
         return;
     }
     draft.node.properties.anchor = draft.selected.anchor;
+    draft.node.properties.location = draft.location;
     draft.node.setDirtyCanvas(true, true);
     markActiveDirty();
     closePlateSelectionPicker();
@@ -3213,6 +3260,7 @@ function renderPlateSelectionField(field, node) {
 
 function wirePlateSelectionModal() {
     document.getElementById('plate-selection-apply').addEventListener('click', applyPlateSelection);
+    document.getElementById('plate-selection-location').addEventListener('change', event => { void choosePlateSelectionLocation(event.target.value); });
     for (const element of document.querySelectorAll('[data-plate-selection-close]')) element.addEventListener('click', closePlateSelectionPicker);
     const overlay = document.getElementById('plate-selection-modal');
     overlay.addEventListener('click', event => { if (event.target === overlay) closePlateSelectionPicker(); });

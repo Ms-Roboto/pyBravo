@@ -1637,7 +1637,7 @@ async def workflow_plate_selection_options(req: WorkflowPlateSelectionRequest):
     from pybravo.workflow.plate_context import resolve_plate_context
 
     context = resolve_plate_context(req.workflow, req.node_id)
-    empty = {"status": "unresolved", "legal_anchors": [], "motion_performed": False}
+    empty = {"status": "unresolved", "plate_options": [], "legal_anchors": [], "motion_performed": False}
     if context["status"] != "resolved":
         return {**empty, "message": context["message"]}
 
@@ -1673,6 +1673,29 @@ async def workflow_plate_selection_options(req: WorkflowPlateSelectionRequest):
             for item in stack:
                 virtual.deck.add(int(slot), catalog_item(item))
 
+        def liquid_plate(labware):
+            base_class = virtual._labware_base_class(labware)
+            kind = virtual._labware_kind(labware)
+            if "tip_box" in (base_class, kind) or "tip_trash" in (base_class, kind):
+                return False
+            # SBS describes the footprint, including racks and accessories;
+            # require an explicit liquid-labware class before offering it.
+            return (base_class or kind) in {"microplate", "filter_plate", "filter plate", "reservoir"}
+
+        for slot in sorted(map(int, context["deck"])):
+            candidate = virtual.deck.get_stack(slot).top
+            if candidate is None or not liquid_plate(candidate) or candidate.is_lidded or candidate.is_sealed:
+                continue
+            try:
+                virtual._require_well_labware(slot, operation="Plate selection")
+                candidate_geometry = well_geometry_from_metadata(candidate.metadata)
+                if candidate_geometry.rows * candidate_geometry.cols > 1536:
+                    continue
+            except (ValueError, TypeError, RuntimeError):
+                continue
+            empty["plate_options"].append({"location": slot, "name": candidate.name,
+                                           "labware_id": candidate.definition_id})
+
         requested_mode = context["head_mode"]
         if requested_mode is None:
             # A changed virtual head or tip cannot inherit live configuration
@@ -1703,6 +1726,15 @@ async def workflow_plate_selection_options(req: WorkflowPlateSelectionRequest):
         virtual._tip_definition_id = tip_id
 
         location = context["location"]
+        selected = virtual.deck.get_stack(location).top
+        if selected is None:
+            raise ValueError(f"Position {location} is empty. Choose a plate or reservoir for this liquid task.")
+        if not liquid_plate(selected):
+            base_class = virtual._labware_base_class(selected)
+            kind = virtual._labware_kind(selected)
+            description = "tip rack" if "tip_box" in (base_class, kind) else (base_class or kind or "unknown labware").replace("_", " ")
+            raise ValueError(f"Position {location} contains {selected.name} ({description}). "
+                             "This liquid task requires plate-style labware. Choose a plate or reservoir.")
         plate = virtual._require_well_labware(location, operation="Plate selection")
         if plate.is_lidded or plate.is_sealed:
             raise ValueError("Remove the lid or seal before selecting wells for a liquid task.")
@@ -1728,7 +1760,7 @@ async def workflow_plate_selection_options(req: WorkflowPlateSelectionRequest):
         return {**empty, "message": str(exc)}
 
     return {
-        "status": "resolved", "motion_performed": False,
+        "status": "resolved", "motion_performed": False, "plate_options": empty["plate_options"],
         "message": ("The starting well aligns with the top-left tip in the mounted footprint. "
                     "Starting wells checked against the mounted tip footprint, plate pitch, XY travel and neighboring labware. "
                     "Run SuperDex to check the complete motion path." if options else

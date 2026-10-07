@@ -15,9 +15,11 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node is needed for Designe
 
 def _run(tmp_path, assertions):
     html = (ROOT / "frontend" / "designer.html").read_text()
-    names = ("plateSelectionContextCurrent", "openPlateSelectionPicker", "plateSelectionRowLabel",
+    names = ("plateSelectionContextCurrent", "openPlateSelectionPicker", "loadPlateSelectionOptions",
+             "choosePlateSelectionLocation", "plateSelectionRowLabel",
              "renderPlateSelectionGrid", "closePlateSelectionPicker", "applyPlateSelection",
-             "renderPlateSelectionField", "renderPropertiesPanel", "serializeWorkflow")
+             "renderPlateSelectionField", "liquidLocationInfo", "renderLiquidLocationField",
+             "renderPropertiesPanel", "serializeWorkflow")
     functions = []
     for name in names:
         match = re.search(rf"(?:async )?function {name}\([^\n]*\) \{{[\s\S]*?\n\}}", html)
@@ -37,10 +39,10 @@ class Element {
   get textContent(){return this.text+this.children.map(child=>child.textContent||'').join('');}
 }
 const elements=new Map();
-for(const id of ['plate-selection-modal','plate-selection-grid','plate-selection-context','plate-selection-status','plate-selection-apply','properties-body'])elements.set(id,new Element());
+for(const id of ['plate-selection-modal','plate-selection-grid','plate-selection-context','plate-selection-status','plate-selection-apply','plate-selection-location','plate-selection-location-field','properties-body'])elements.set(id,new Element());
 const document={getElementById(id){assert.ok(elements.has(id),id);return elements.get(id);},createElement(tag){return new Element(tag);}};
 let plateSelectionDraft=null, dirty=0;
-const liquid={id:5,type:'liquid/Dispense',title:'Dispense sample',properties:{anchor:'A1'},setDirtyCanvas(){}};
+const liquid={id:5,type:'liquid/Dispense',title:'Dispense sample',properties:{location:5,anchor:'A1'},setDirtyCanvas(){}};
 const tips={id:3,type:'tips/TipsOn',properties:{head_mode:{subset_type:'all_barrels'}}};
 const graph={_nodes:[tips,liquid],serialize(){return structuredClone({nodes:this._nodes,links:[[1,3,0,5,0]]});}};
 // LiteGraph serialization omits methods.
@@ -50,21 +52,24 @@ let activeTab=tab;
 function getActiveTab(){return activeTab;}
 function markActiveDirty(){dirty++;}
 function isCompiledProtocolPreviewTab(){return false;}
+function appendVarHint(){}
 const designerState={graph,deckConfig:{'2':[{labware_id:'source384'}],'5':[{labware_id:'destination'}]}};
 let currentWorkflowId='saved-workflow',currentWorkflowName='Unsaved changes';
 const calls=[];
 let response=null;
-async function apiCall(path,method,body){calls.push({path,method,body:structuredClone(body)});return typeof response==='function'?response():structuredClone(response);}
+async function apiCall(path,method,body){calls.push({path,method,body:structuredClone(body)});return typeof response==='function'?response(body):structuredClone(response);}
 const el=id=>elements.get(id);
 const cells=()=>el('plate-selection-grid').children.filter(child=>child.tag==='button');
 const legal=()=>cells().filter(cell=>!cell.disabled);
 const covered=()=>cells().filter(cell=>cell.className.split(' ').includes('covered'));
 function pattern(anchor,row,col,rows,cols,rowStride=1,colStride=1){return {anchor,row,col,covered_wells:Array.from({length:rows},(_,r)=>Array.from({length:cols},(_,c)=>({row:row+r*rowStride,col:col+c*colStride,well:'fixture'}))).flat()};}
-function resolved(rows,columns,anchors,description='384 channels, all barrels'){
-  return {status:'resolved',message:'Native plate geometry',labware:{name:'Labcyte plate',location:5,rows,columns},footprint:{description,tip_node_id:3},legal_anchors:anchors};
+function resolved(rows,columns,anchors,description='384 channels, all barrels',location=5){
+  return {status:'resolved',message:'Native plate geometry',labware:{name:'Labcyte plate',location,rows,columns},footprint:{description,tip_node_id:3},legal_anchors:anchors,
+    plate_options:[{location:2,name:'Source plate',labware_id:'source384'},{location:5,name:'Destination plate',labware_id:'destination'}]};
 }
 """ + "\n".join(functions) + "\n(async()=>{\n" + assertions + "\n})().catch(error=>{console.error(error);process.exitCode=1;});")
-    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+    result = subprocess.run([NODE, str(script)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_full_384_plate_has_one_start_and_preserves_invalid_saved_anchor_until_applied(tmp_path):
@@ -184,5 +189,129 @@ assert.match(el('plate-selection-status').textContent,/SuperDex rehearsal is sti
 assert.equal(plateSelectionDraft.result.status,'resolved');
 assert.equal(liquid.properties.anchor,'A1');
 applyPlateSelection();
+assert.equal(dirty,0);
+""")
+
+
+def test_rack_target_offers_plate_without_switching_and_cancel_preserves_saved_target(tmp_path):
+    _run(tmp_path, """
+liquid.properties.location=1;
+liquid.properties.anchor='B2';
+tips.properties.head_mode={subset_type:'single_column',subset_index:8};
+designerState.deckConfig={'1':[{labware_id:'tip-rack'}],'2':[{labware_id:'source384'}]};
+const original=serializeWorkflow();
+response={status:'unresolved',message:'Position 1 contains a tip rack, not a plate.',
+  plate_options:[{location:2,name:'Source 384 plate',labware_id:'source384'}]};
+await openPlateSelectionPicker(liquid);
+assert.equal(calls.length,1,'A single available plate does not trigger an automatic switch');
+assert.equal(plateSelectionDraft.location,1);
+assert.equal(el('plate-selection-location-field').hidden,false);
+assert.equal(el('plate-selection-location').value,'');
+assert.deepEqual(el('plate-selection-location').children.map(option=>option.value),['','2']);
+assert.match(el('plate-selection-location').textContent,/Position 2.*Source 384 plate/);
+assert.match(el('plate-selection-status').textContent,/tip rack/);
+assert.equal(legal().length,0);
+assert.equal(el('plate-selection-apply').disabled,true);
+await choosePlateSelectionLocation('1');
+await choosePlateSelectionLocation('9');
+assert.equal(calls.length,1,'Only returned plate locations may be queried');
+response=resolved(16,24,[pattern('A9',0,8,16,1),pattern('A10',0,9,16,1)],'One mounted column',2);
+response.plate_options=[{location:2,name:'Source 384 plate',labware_id:'source384'}];
+await choosePlateSelectionLocation('2');
+const expected=structuredClone(original);
+expected.graph.nodes.find(node=>node.id===liquid.id).properties.location=2;
+assert.deepEqual(calls[1].body.workflow,expected,'Preview overrides only the selected liquid task location');
+assert.deepEqual(serializeWorkflow(),original,'Preview leaves the live workflow untouched');
+assert.equal(plateSelectionContextCurrent(plateSelectionDraft),true);
+assert.equal(el('plate-selection-location').value,'2');
+assert.equal(cells().length,384);
+assert.equal(legal().length,2);
+legal().find(cell=>cell.attrs['aria-label'].startsWith('A10 ')).handlers.click();
+assert.equal(covered().length,16);
+assert.ok(covered().every(cell=>/^[A-P]10 /.test(cell.attrs['aria-label'])));
+closePlateSelectionPicker();
+assert.equal(plateSelectionDraft,null);
+assert.deepEqual(serializeWorkflow(),original,'Cancel preserves the saved rack target and well');
+assert.equal(dirty,0);
+""")
+
+
+def test_apply_saves_chosen_plate_and_starting_well_together(tmp_path):
+    _run(tmp_path, """
+liquid.properties.location=1;
+liquid.properties.anchor='B2';
+response={status:'unresolved',message:'Position 1 contains a tip rack.',
+  plate_options:[{location:2,name:'Source plate',labware_id:'source384'}]};
+await openPlateSelectionPicker(liquid);
+response=resolved(16,24,[pattern('A9',0,8,16,1),pattern('A10',0,9,16,1)],'One mounted column',2);
+await choosePlateSelectionLocation('2');
+assert.equal(el('plate-selection-apply').disabled,true,'A new plate still needs a valid starting well');
+legal().find(cell=>cell.attrs['aria-label'].startsWith('A10 ')).handlers.click();
+assert.equal(liquid.properties.location,1);
+assert.equal(liquid.properties.anchor,'B2');
+assert.equal(el('plate-selection-apply').disabled,false);
+applyPlateSelection();
+assert.equal(liquid.properties.location,2);
+assert.equal(liquid.properties.anchor,'A10');
+assert.equal(dirty,1);
+assert.equal(plateSelectionDraft,null);
+assert.equal(serializeWorkflow().graph.nodes.find(node=>node.id===liquid.id).properties.location,2);
+""")
+
+
+def test_failed_plate_change_clears_old_selection_and_blocks_apply(tmp_path):
+    _run(tmp_path, """
+response=resolved(16,24,[pattern('A1',0,0,16,24)]);
+await openPlateSelectionPicker(liquid);
+assert.equal(el('plate-selection-apply').disabled,false);
+let fail;
+response=()=>new Promise((resolve,reject)=>{fail=reject;});
+const pending=choosePlateSelectionLocation('2');
+assert.equal(cells().length,0);
+assert.equal(plateSelectionDraft.selected,null);
+assert.equal(el('plate-selection-apply').disabled,true);
+applyPlateSelection();
+assert.equal(dirty,0);
+fail(Error('Connection unavailable'));await pending;
+assert.match(el('plate-selection-status').textContent,/Connection unavailable/);
+assert.equal(el('plate-selection-apply').disabled,true);
+assert.equal(cells().length,0);
+applyPlateSelection();
+assert.equal(dirty,0);
+assert.equal(liquid.properties.location,5);
+assert.equal(liquid.properties.anchor,'A1');
+""")
+
+
+@pytest.mark.parametrize("late_failure", [False, True])
+def test_stale_plate_lookup_cannot_replace_newer_plate_geometry(tmp_path, late_failure):
+    _run(tmp_path, f"const lateFailure={str(late_failure).lower()};\n" + """
+liquid.properties.location=1;
+liquid.properties.anchor='B2';
+response={status:'unresolved',message:'Position 1 contains a tip rack.',plate_options:[
+  {location:2,name:'Source plate',labware_id:'source384'},
+  {location:5,name:'Destination plate',labware_id:'destination'}]};
+await openPlateSelectionPicker(liquid);
+let release,fail;
+response=()=>new Promise((resolve,reject)=>{release=resolve;fail=reject;});
+const earlier=choosePlateSelectionLocation('2');
+response=resolved(16,24,[pattern('A10',0,9,16,1)],'One mounted column',5);
+await choosePlateSelectionLocation('5');
+legal()[0].handlers.click();
+if(lateFailure)fail(Error('Old plate lookup failed'));
+else release(resolved(16,24,[pattern('A1',0,0,16,24)],'384 channels, all barrels',2));
+await earlier;
+assert.equal(calls.length,3);
+assert.equal(plateSelectionDraft.location,5);
+assert.equal(plateSelectionDraft.result.labware.location,5);
+assert.equal(plateSelectionDraft.selected.anchor,'A10');
+assert.equal(el('plate-selection-location').value,'5');
+assert.match(el('plate-selection-context').textContent,/Position 5/);
+assert.equal(legal().length,1);
+assert.equal(covered().length,16);
+assert.ok(covered().every(cell=>/^[A-P]10 /.test(cell.attrs['aria-label'])));
+assert.equal(el('plate-selection-apply').disabled,false);
+assert.equal(liquid.properties.location,1);
+assert.equal(liquid.properties.anchor,'B2');
 assert.equal(dirty,0);
 """)

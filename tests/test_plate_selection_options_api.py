@@ -122,11 +122,104 @@ async def test_tiprack_cannot_be_offered_as_a_liquid_plate(live):
     assert "plate-style labware" in report["message"]
 
 
+async def test_dispense_at_rack_offers_the_loaded_plate_without_rewriting_saved_target(live):
+    data = workflow()
+    data["deck"]["2"] = data["deck"].pop("5")
+    data["graph"]["nodes"][2]["properties"]["location"] = 2
+    data["graph"]["nodes"][3]["properties"]["location"] = 1
+    before, live_state = deepcopy(data), live.get_state()
+
+    report = await options(data, 4)
+
+    assert report["status"] == "unresolved" and report["legal_anchors"] == []
+    assert report["plate_options"] == [{"location": 2, "name": "plate384", "labware_id": "plate384"}]
+    assert "Position 1 contains Synthetic ST rack (tip rack)" in report["message"]
+    assert "Choose a plate" in report["message"]
+    assert report["motion_performed"] is False
+    assert data == before and live.get_state() == live_state and not live.is_connected
+
+    selected = deepcopy(data)
+    selected["graph"]["nodes"][3]["properties"]["location"] = 2
+    dispense = await options(selected, 4)
+    aspirate = await options(data, 3)
+    assert dispense["status"] == aspirate["status"] == "resolved"
+    for field in ("plate_options", "labware", "footprint", "legal_anchors"):
+        assert dispense[field] == aspirate[field]
+    assert data == before
+
+
+async def test_plate_options_follow_connected_moves_and_only_offer_top_labware(live):
+    data = workflow()
+    data["deck"]["5"].insert(0, {"labware_id": "plate96"})
+    data["graph"]["nodes"].insert(3, {"id": 6, "type": "plate/PickPlace", "properties": {
+        "pick_location": 5, "place_location": 2}})
+    sequence = [1, 2, 3, 6, 4, 5]
+    data["graph"]["links"] = [[i, source, 0, target, 0, -1]
+        for i, (source, target) in enumerate(zip(sequence, sequence[1:]), 1)]
+    data["graph"]["nodes"][4]["properties"]["location"] = 1
+    before = deepcopy(data)
+
+    assert (await options(data, 3))["plate_options"] == [
+        {"location": 5, "name": "plate384", "labware_id": "plate384"}]
+    report = await options(data, 4)
+    assert report["plate_options"] == [
+        {"location": 2, "name": "plate384", "labware_id": "plate384"},
+        {"location": 5, "name": "plate96", "labware_id": "plate96"}]
+    assert report["status"] == "unresolved" and report["legal_anchors"] == []
+    assert data == before
+
+
+@pytest.mark.parametrize("base_class,flags,offered", [
+    ("reservoir", {}, True),
+    ("filter plate", {}, True),
+    ("lid", {}, False),
+    ("seal", {}, False),
+    ("accessory", {}, False),
+    ("", {}, False),
+    ("microplate", {"is_lidded": True}, False),
+    ("microplate", {"is_sealed": True}, False),
+])
+async def test_plate_options_exclude_non_liquid_or_covered_top_labware(live, base_class, flags, offered):
+    definitions = live.labware_catalog.list_definitions()
+    definitions.append(replace(definitions[0], id="candidate", name="Candidate", base_class=base_class))
+    live._labware_catalog = InMemoryLabwareCatalog(definitions)
+    data = workflow()
+    data["deck"]["2"] = [{"labware_id": "plate96"}, {"labware_id": "candidate", **flags}]
+    report = await options(data)
+    assert (2 in [item["location"] for item in report["plate_options"]]) is offered
+    assert all(item["labware_id"] != "plate96" for item in report["plate_options"])
+
+
+async def test_unknown_catalog_labware_does_not_offer_a_partial_deck(live):
+    data = workflow()
+    data["deck"]["2"] = [{"labware_id": "unknown"}]
+    report = await options(data)
+    assert report["status"] == "unresolved"
+    assert report["plate_options"] == [] and report["legal_anchors"] == []
+    assert "Unknown catalog labware" in report["message"]
+
+
+async def test_known_plate_without_fitting_geometry_still_offered_without_anchors(live):
+    report = await options(workflow(plate="plate96"))
+    assert report["status"] == "resolved" and report["legal_anchors"] == []
+    assert report["plate_options"] == [{"location": 5, "name": "plate96", "labware_id": "plate96"}]
+    assert "No starting well fits" in report["message"]
+
+
 async def test_dynamic_target_does_not_guess_a_plate(live):
     data = workflow()
     data["graph"]["nodes"][2]["properties"]["location"] = "var:destination"
     report = await options(data)
     assert report["status"] == "unresolved" and report["legal_anchors"] == []
+    assert report["plate_options"] == []
+
+
+async def test_unresolved_task_sequence_does_not_offer_initial_deck_plates(live):
+    data = workflow()
+    data["graph"]["links"] = []
+    report = await options(data)
+    assert report["status"] == "unresolved"
+    assert report["plate_options"] == [] and report["legal_anchors"] == []
 
 
 @pytest.mark.parametrize("head,tip", [
