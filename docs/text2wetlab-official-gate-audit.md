@@ -9,10 +9,9 @@ it checks `protocol_lint.violations`, then `anti_hack.tripped`, then runs the
 Opentrons simulator through `runlog.py`, and finally asks its judge to score five
 binary rubric items. Its `simulate()` accepts only the runlog's output **file**;
 the verifier comments that protocol stdout can contain a forged result. The
-local runner currently accepts stdout when that file is absent. That fallback
-is useful for [RNA's different verifier](https://huggingface.co/datasets/EvanOLeary/Text2WetLab/blob/d7c8a9b93428997447eeaf2ee9e27ac3ce026872/tasks/harbor/opentrons-rna-extraction/tests/grade.py),
-which reads the runlog's last stdout line, but it is weaker than the six standard
-verifiers. A future runner change should restrict stdout fallback to RNA.
+local runner now also requires that file for those six tasks. It accepts stdout
+only for [RNA's different verifier](https://huggingface.co/datasets/EvanOLeary/Text2WetLab/blob/d7c8a9b93428997447eeaf2ee9e27ac3ce026872/tasks/harbor/opentrons-rna-extraction/tests/grade.py),
+which reads the runlog's last stdout line.
 
 The local runner applies pinned static lint, a simulator, the pinned runlog and
 additional deterministic safety checks. It does **not** run the pinned
