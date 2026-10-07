@@ -11,6 +11,7 @@ from pybravo.evals.text2wetlab.action_ir import (
     ActionPlan,
     ActionPlanError,
     LabwareFacts,
+    ModuleFacts,
     PipetteFacts,
     compile_actions,
 )
@@ -47,8 +48,12 @@ def _draft() -> dict:
     }
 
 
-def _compile(draft: dict, *, labware=LABWARE, pipettes=PIPETTES) -> str:
-    return compile_actions(draft, labware_catalog=labware, pipette_catalog=pipettes)
+def _compile(draft: dict, *, labware=LABWARE, pipettes=PIPETTES,
+             modules=None, refill_authorized=False) -> str:
+    return compile_actions(
+        draft, labware_catalog=labware, pipette_catalog=pipettes,
+        module_catalog=modules, refill_authorized=refill_authorized,
+    )
 
 
 def test_explicit_actions_lower_to_fixed_primitives_without_inferred_steps():
@@ -216,3 +221,135 @@ def test_eight_channel_loop_accepts_only_trusted_full_column_anchors():
     draft["actions"][0]["bindings"][1]["target_well"] = "B2"
     with pytest.raises(ActionPlanError, match="invalid multichannel column anchor"):
         _compile(draft, labware=facts, pipettes=multi)
+
+
+def _thermocycler_draft() -> tuple[dict, dict[str, ModuleFacts]]:
+    draft = _draft()
+    draft["modules"] = [{"id": "tc", "model": "trusted_tc"}]
+    draft["labware"][2].pop("slot")
+    draft["labware"][2]["module_id"] = "tc"
+    draft["actions"] = [
+        {"kind": "open_lid", "module": "tc"},
+        *draft["actions"][:3],
+        {"kind": "drop", "pipette": "small"},
+        {"kind": "close_lid", "module": "tc"},
+        {"kind": "set_lid_temperature", "module": "tc", "celsius": 75},
+        {"kind": "set_block_temperature", "module": "tc", "celsius": 42,
+         "hold_seconds": 30},
+        {"kind": "open_lid", "module": "tc"},
+    ]
+    modules = {"trusted_tc": ModuleFacts(
+        "thermocycler", fixed_occupied_slots=frozenset({7, 8, 10, 11}),
+        compatible_labware_load_names=frozenset({"synthetic_target"}),
+        temperature_range_c=(4, 99), lid_temperature_range_c=(37, 110),
+    )}
+    return draft, modules
+
+
+def test_trusted_module_footprint_and_state_lower_to_sdk_methods():
+    draft, modules = _thermocycler_draft()
+    code = _compile(draft, modules=modules)
+    ast.parse(code)
+    assert "protocol.load_module('trusted_tc')" in code
+    assert "mod_0.load_labware('synthetic_target')" in code
+    assert "mod_0.open_lid()" in code
+    assert "mod_0.close_lid()" in code
+    assert "mod_0.set_lid_temperature(75.0)" in code
+    assert "mod_0.set_block_temperature(42.0, hold_time_seconds=30.0)" in code
+    draft["labware"].append({"id": "colliding", "load_name": "synthetic_source", "slot": 8})
+    with pytest.raises(ActionPlanError, match="slot 8 is assigned more than once"):
+        _compile(draft, modules=modules)
+
+
+def test_thermocycler_lid_and_temperature_bounds_are_hard_gates():
+    draft, modules = _thermocycler_draft()
+    draft["actions"].pop(0)
+    with pytest.raises(ActionPlanError, match="without an open lid"):
+        _compile(draft, modules=modules)
+    draft, modules = _thermocycler_draft()
+    draft["actions"][-2]["celsius"] = 105
+    with pytest.raises(ActionPlanError, match="exceeds trusted limits"):
+        _compile(draft, modules=modules)
+    draft, modules = _thermocycler_draft()
+    draft["modules"][0]["slot"] = 7
+    with pytest.raises(ActionPlanError, match="must not specify a slot"):
+        _compile(draft, modules=modules)
+
+
+def test_module_labware_requires_trusted_compatibility():
+    draft, modules = _thermocycler_draft()
+    modules["trusted_tc"] = ModuleFacts(
+        "thermocycler", fixed_occupied_slots=frozenset({7, 8, 10, 11}),
+        temperature_range_c=(4, 99), lid_temperature_range_c=(37, 110),
+    )
+    with pytest.raises(ActionPlanError, match="no trusted compatibility"):
+        _compile(draft, modules=modules)
+
+
+def test_magnet_and_temperature_actions_require_correct_trusted_module_kind():
+    draft = _draft()
+    draft["modules"] = [
+        {"id": "mag", "model": "trusted_magnet", "slot": 4},
+        {"id": "temp", "model": "trusted_temperature", "slot": 5},
+    ]
+    modules = {
+        "trusted_magnet": ModuleFacts(
+            "magnetic", allowed_slots=frozenset({4}),
+            magnet_height_range_mm=(0, 20),
+        ),
+        "trusted_temperature": ModuleFacts(
+            "temperature", allowed_slots=frozenset({5}),
+            temperature_range_c=(4, 95),
+        ),
+    }
+    draft["actions"] = [
+        {"kind": "set_temperature", "module": "temp", "celsius": 4},
+        {"kind": "magnet_engage", "module": "mag", "height_from_base_mm": 6},
+        {"kind": "delay", "seconds": 10},
+        {"kind": "magnet_disengage", "module": "mag"},
+    ]
+    code = _compile(draft, modules=modules)
+    assert "mod_1.set_temperature(4.0)" in code
+    assert "mod_0.engage(height_from_base=6.0)" in code
+    assert "mod_0.disengage()" in code
+    draft["actions"][1]["height_from_base_mm"] = 30
+    with pytest.raises(ActionPlanError, match="exceeds trusted limits"):
+        _compile(draft, modules=modules)
+    draft["actions"][1]["height_from_base_mm"] = 6
+    draft["actions"][1]["module"] = "temp"
+    with pytest.raises(ActionPlanError, match="not supported by module"):
+        _compile(draft, modules=modules)
+
+
+def test_refill_requires_task_authorization_and_actual_rack_exhaustion():
+    draft = _mapped_draft()  # Two pickups exhaust the trusted two-tip rack.
+    draft["actions"].extend([
+        {"kind": "refill_tips", "pipette": "small",
+         "message": "Operator: replace all used tips with fresh tips."},
+        {"kind": "pickup", "pipette": "small"},
+        {"kind": "aspirate", "pipette": "small", "labware": "source",
+         "well": "A1", "volume_ul": 5},
+        {"kind": "dispense", "pipette": "small", "labware": "target",
+         "well": "A1", "volume_ul": 5},
+        {"kind": "drop", "pipette": "small"},
+    ])
+    with pytest.raises(ActionPlanError, match="no task-authorized"):
+        _compile(draft)
+    code = _compile(draft, refill_authorized=True)
+    assert code.count(".pick_up_tip()") == 3
+    assert code.index("protocol.pause('Operator: replace") < code.index(".reset_tipracks()")
+    draft["actions"].insert(0, draft["actions"][1])
+    with pytest.raises(ActionPlanError, match="before its tip racks are exhausted"):
+        _compile(draft, refill_authorized=True)
+
+
+def test_refill_cannot_reset_a_rack_while_tip_remains_attached():
+    draft = _draft()
+    draft["actions"] = [
+        {"kind": "pickup", "pipette": "small"},
+        {"kind": "drop", "pipette": "small"},
+        {"kind": "pickup", "pipette": "small"},
+        {"kind": "refill_tips", "pipette": "small", "message": "Load fresh tips."},
+    ]
+    with pytest.raises(ActionPlanError, match="cannot refill while"):
+        _compile(draft, refill_authorized=True)
