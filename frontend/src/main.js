@@ -711,13 +711,16 @@ const JOINT_AXIS_MAP = {
     // under the main Z carriage, so the viewer has to synthesize the hidden Z
     // contribution explicitly: the gripper should follow Z and then apply its
     // own relative Zg travel on top of that. DARWIN's nested/resting Zg is
-    // about -20 mm, so that offset should render as zero extra travel.
+    // about -20 mm, so that offset renders as zero extra Zg travel. The head
+    // and gripper share the gantry: both need the teach-tip Z datum correction
+    // or the docked gripper hangs one teach-tip length below its cutout.
     'zaxis-gripper':  {
         bravoAxis: 'Zg',
         homeOffset: -20,
         scale: 1,
         coupledAxis: 'Z',
         coupledScale: 1,
+        useTeachTipLength: true,
     },
     // Both fingers get half the G distance. Their opposite rpy values mean the
     // same positive joint value opens one finger left and the other right.

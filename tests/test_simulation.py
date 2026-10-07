@@ -5,6 +5,7 @@ import pytest
 from pybravo.controllers.base import AxisMoveInfo, JogParams
 from pybravo.controllers.simulation import SimulationController
 from pybravo.protocol.commands import LightCommandData
+from pybravo.protocol.errors import BravoError, ErrorType
 from pybravo.types import (
     Axis,
     DeviceStateFlag,
@@ -71,6 +72,51 @@ class TestMotion:
         )
         pos = sim.jog(params)
         assert pos == 5.0
+
+    def test_zg_move_rejects_out_of_range_targets_without_partial_motion(self, sim):
+        sim.move([AxisMoveInfo(axis=Axis.Zg, position=-20.0)])
+        with pytest.raises(BravoError, match="outside software limits") as exc:
+            sim.move([
+                AxisMoveInfo(axis=Axis.X, position=100.0),
+                AxisMoveInfo(axis=Axis.Zg, position=-80.0),
+            ])
+        assert exc.value.error_type == ErrorType.COULD_NOT_MOVE_TO_POSITION
+        assert sim.get_position(Axis.X) == 0.0
+        assert sim.get_position(Axis.Zg) == -20.0
+
+        with pytest.raises(BravoError, match="outside software limits"):
+            sim.move([AxisMoveInfo(axis=Axis.Zg, position=-0.1, absolute=False)])
+        assert sim.get_position(Axis.Zg) == -20.0
+
+        sim.move([AxisMoveInfo(axis=Axis.Zg, position=105.0)])
+        with pytest.raises(BravoError, match="outside software limits"):
+            sim.move([AxisMoveInfo(axis=Axis.Zg, position=0.1, absolute=False)])
+        assert sim.get_position(Axis.Zg) == 105.0
+
+    def test_zg_force_jog_uses_absolute_limit_and_enforces_travel(self, sim):
+        sim.move([AxisMoveInfo(axis=Axis.Zg, position=-15.0)])
+
+        def jog_to(target):
+            return sim.jog(JogParams(
+                axis=Axis.Zg, velocity=10.0, acceleration=100.0,
+                max_position=target, tolerance=1.0, peak_current=0.5,
+            ))
+
+        assert jog_to(-20.0) == -20.0
+        with pytest.raises(BravoError, match="outside software limits"):
+            jog_to(-25.0)
+        assert sim.get_position(Axis.Zg) == -20.0
+
+    def test_zg_scan_rejects_out_of_range_travel(self, sim):
+        with pytest.raises(BravoError, match="outside software limits"):
+            sim.scan_stack_with_gripper(
+                start_zg=-100.0, end_zg=10.0, speed=SpeedLevel.MED,
+            )
+        assert sim.get_position(Axis.Zg) == 0.0
+
+    def test_zg_homing_offset_cannot_start_outside_travel(self):
+        with pytest.raises(BravoError, match="outside software limits"):
+            SimulationController(homing_offsets={Axis.Zg: -100.0})
 
     def test_get_all_positions(self, sim):
         positions = sim.get_all_positions()

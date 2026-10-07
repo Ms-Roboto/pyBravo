@@ -18,8 +18,9 @@ from pybravo.controllers.base import (
     JogParams,
 )
 from pybravo.protocol.commands import LightCommandData
-from pybravo.protocol.errors import BravoError
+from pybravo.protocol.errors import BravoError, ErrorType
 from pybravo.types import (
+    AXIS_RANGES,
     NUM_AXES_WITH_GRIPPER,
     OPEN_GRIPPER_POSITION,
     Axis,
@@ -53,7 +54,8 @@ class SimulationController(BravoController):
     ):
         # Initialise each axis at its homing offset so the coordinate system
         # matches the teachpoint coordinate system from the start.
-        offsets = homing_offsets or {}
+        offsets = dict(homing_offsets or {})
+        self._validate_zg_target(offsets.get(Axis.Zg, 0.0))
         self._homing_offsets: dict[Axis, float] = offsets
         self._axes: list[SimulatedAxis] = [
             SimulatedAxis(position=offsets.get(Axis(i), 0.0), homed=True)
@@ -108,8 +110,34 @@ class SimulationController(BravoController):
 
     # -- Motion --
 
+    @staticmethod
+    def _validate_zg_target(target: float) -> None:
+        # The simulator must observe Bravo's Zg travel envelope. The -20 mm
+        # endpoint is the recessed dock position; a further negative move
+        # cannot retract the gripper into the head.
+        limits = AXIS_RANGES[Axis.Zg]
+        if not (limits.min_pos <= target <= limits.max_pos):
+            raise BravoError(
+                ErrorType.COULD_NOT_MOVE_TO_POSITION,
+                axis=Axis.Zg,
+                custom_text=(
+                    f"Move target {target:.4f} mm on Zg is outside software "
+                    f"limits [{limits.min_pos:.4f}, {limits.max_pos:.4f}]."
+                ),
+            )
+
     def move(self, moves: list[AxisMoveInfo], wait: bool = True,
              timeout_ms: int = 30000) -> None:
+        # Validate the complete command before changing any simulated axis.
+        # Multiple entries for one axis are interpreted in their given order.
+        targets: dict[Axis, float] = {}
+        for m in moves:
+            current = targets.get(m.axis, self._axes[m.axis].position)
+            target = m.position if m.absolute else current + m.position
+            if m.axis == Axis.Zg:
+                self._validate_zg_target(target)
+            targets[m.axis] = target
+
         max_duration = 0.0
         for m in moves:
             ax = self._axes[m.axis]
@@ -146,7 +174,11 @@ class SimulationController(BravoController):
 
     def jog(self, params: JogParams) -> float:
         ax = self._axes[params.axis]
-        ax.position += params.max_position
+        # JogParams.max_position is an absolute stop, as on the hardware
+        # controllers and in Bravo.jog_axis's force-limited path.
+        if params.axis == Axis.Zg:
+            self._validate_zg_target(params.max_position)
+        ax.position = params.max_position
         logger.debug(
             "Simulation: jog %s to %.3f (max_pos=%.3f)",
             params.axis.label, ax.position, params.max_position,
@@ -246,6 +278,8 @@ class SimulationController(BravoController):
         speed: SpeedLevel,
         transient_ms: int = 0,
     ) -> dict[str, float | bool | None]:
+        self._validate_zg_target(start_zg)
+        self._validate_zg_target(end_zg)
         self._axes[Axis.Zg].position = start_zg
         if self._simulated_scan_height_mm is None:
             self._axes[Axis.Zg].position = end_zg

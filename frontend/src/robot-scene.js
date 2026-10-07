@@ -69,6 +69,9 @@ const JOINT_AXIS_MAP = {
         scale: 1,
         coupledAxis: 'Z',
         coupledScale: 1,
+        // This carriage shares the head's teach-tip Z datum. Omitting it
+        // leaves the nested gripper hanging below the cutout by one tip length.
+        useTeachTipLength: true,
     },
     'ygripper-left':  { bravoAxis: 'G',  homeOffset: 0,      scale:  0.5 },
     'ygripper-right': { bravoAxis: 'G',  homeOffset: 0,      scale:  0.5 },
