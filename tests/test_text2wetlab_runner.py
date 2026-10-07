@@ -28,6 +28,7 @@ def test_runner_reports_simulator_gate_separately_from_official_score(tmp_path, 
     monkeypatch.setattr(runner, "_official_lint", lambda *args: {"status": "passed", "violations": []})
     monkeypatch.setattr(runner, "_official_runlog", lambda *args: {
         "status": "passed", "event_count": 5, "adapter_event_validation": {"status": "passed"},
+        "local_rubric_audit": {"status": "supported"},
     })
     result = runner.run_task("split-200ul-two-wells", output_dir=tmp_path,
                              simulator=Path("/tmp/opentrons_simulate"),
@@ -129,6 +130,7 @@ def test_rna_task_has_no_separate_lint_but_still_runs_simulator(tmp_path, monkey
     monkeypatch.setattr(runner, "_run", fake_run)
     monkeypatch.setattr(runner, "_official_runlog", lambda *args: {
         "status": "passed", "event_count": 5, "adapter_event_validation": {"status": "passed"},
+        "local_rubric_audit": {"status": "supported"},
     })
     result = runner.run_task("opentrons-rna-extraction", output_dir=tmp_path,
                              simulator=Path("/tmp/opentrons_simulate"))

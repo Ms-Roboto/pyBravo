@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -246,6 +247,194 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
             "labware": payload.get("labware") or {}}
 
 
+def _evaluate_candidate(task: str, protocol: Path, task_dir: Path, simulator: Path,
+                        dataset_root: Path | None, instruction: bytes,
+                        labware_dir: Path | None, record: dict) -> dict:
+    """Apply the current pinned local gates to a validated candidate."""
+    record["protocol_sha256"] = _digest(protocol.read_bytes())
+    record["official_protocol_lint"] = _official_lint(task, protocol, task_dir, dataset_root)
+    if record["official_protocol_lint"]["status"] not in {"passed", "not_applicable"}:
+        record["status"] = "official_lint_failed_or_unavailable"
+        return record
+    simulator_command = [str(simulator)]
+    if labware_dir:
+        simulator_command.extend(["-L", str(labware_dir)])
+    simulator_command.append(str(protocol))
+    record["ot2_simulator_gate"] = _run(simulator_command, timeout=600)
+    if record["ot2_simulator_gate"]["status"] != "passed":
+        record["status"] = "simulator_failed"
+        return record
+    record["official_runlog_gate"] = _official_runlog(task, protocol, task_dir, simulator,
+                                                       dataset_root, labware_dir,
+                                                       instruction.decode("utf-8"))
+    runlog = record["official_runlog_gate"]
+    if runlog["status"] != "passed":
+        record["status"] = "official_runlog_failed_or_unavailable"
+    elif (runlog.get("adapter_event_validation") or {}).get("status") != "passed":
+        record["status"] = "simulator_passed_semantic_review_required"
+    elif runlog.get("cross_well_aspiration_risk_count", 0):
+        record["status"] = "simulator_passed_semantic_review_required"
+    elif (runlog.get("local_rubric_audit") or {}).get("status") not in {"supported", "needs_review"}:
+        record["status"] = "local_rubric_failed_or_unavailable"
+    else:
+        record["status"] = "simulator_passed"
+    return record
+
+
+def _saved_candidate_provenance(task: str, saved_run_root: Path, instruction: bytes,
+                                source_paper: bytes | None) -> dict:
+    """Check a prior Qwen trace and report before executing their saved code."""
+    root = saved_run_root.expanduser().resolve()
+    task_dir = root / task
+    protocol = task_dir / "protocol.py"
+    trace_path = task_dir / "generation_trace.json"
+    report_path = root / "report.json"
+
+    def failed(detail: str) -> dict:
+        return {"status": "failed", "detail": detail, "saved_run_root": str(root)}
+
+    try:
+        report_bytes = report_path.read_bytes()
+        trace_bytes = trace_path.read_bytes()
+        report = json.loads(report_bytes)
+        trace = json.loads(trace_bytes)
+        candidate_bytes = protocol.read_bytes()
+        saved_instruction = (task_dir / "instruction.md").read_bytes()
+    except (OSError, ValueError) as exc:
+        return failed(f"Saved report, trace, protocol, or instruction is missing or invalid: {exc}")
+    if not isinstance(report, dict) or not isinstance(trace, dict):
+        return failed("Saved report and generation trace must be JSON objects")
+    if report.get("dataset") != DATASET or report.get("revision") != REVISION:
+        return failed("Saved report is not for the pinned Text2WetLab revision")
+    cases = report.get("cases")
+    if not isinstance(cases, list):
+        return failed("Saved report has no task cases")
+    matches = [case for case in cases if isinstance(case, dict) and case.get("task") == task]
+    if len(matches) != 1:
+        return failed("Saved report must contain exactly one case for this task")
+    case = matches[0]
+    instruction_sha256 = _digest(instruction)
+    if (_digest(saved_instruction) != instruction_sha256
+            or case.get("instruction_sha256") != instruction_sha256
+            or trace.get("task_sha256") != instruction_sha256):
+        return failed("Saved instruction, report, or generation trace differs from the pinned instruction")
+    prior_generation = case.get("generation")
+    if not isinstance(prior_generation, dict) or prior_generation.get("status") != "passed":
+        return failed("Saved report does not record a successful prior generation")
+    expected_paper_sha256 = (_digest(source_paper) if source_paper is not None else
+                             ECOLI_PAPER_SHA256 if task == "ecoli-heat-shock-transformation" else None)
+    if case.get("source_paper_sha256") != expected_paper_sha256:
+        return failed("Saved paper digest differs from the pinned source")
+    scientific_source = trace.get("scientific_source")
+    if scientific_source is not None and (not isinstance(scientific_source, dict)
+                                          or scientific_source.get("source_sha256") != expected_paper_sha256):
+        return failed("Generation trace scientific source digest differs from the pinned paper")
+    candidate_sha256 = _digest(candidate_bytes)
+    if (not re.fullmatch(r"[0-9a-f]{64}", str(case.get("protocol_sha256")))
+            or case["protocol_sha256"] != candidate_sha256):
+        return failed("Saved protocol differs from the candidate digest in the prior report")
+    if (trace.get("status") != "simulated" or trace.get("static_validation_passed") is not True
+            or ("event_validation_passed" in trace
+                and trace["event_validation_passed"] is not True)):
+        return failed("Generation trace does not confirm the accepted candidate's safety gates")
+    attempts = trace.get("attempts")
+    if not isinstance(attempts, list) or not attempts or not isinstance(attempts[-1], dict):
+        return failed("Generation trace has no accepted model attempt")
+    attempt = attempts[-1]
+    model = attempt.get("model")
+    attempt_number = attempt.get("number")
+    if (not isinstance(model, str) or "qwen" not in model.casefold()
+            or attempt.get("validation") != "passed"
+            or not isinstance(attempt_number, int) or attempt_number != len(attempts)):
+        return failed("Accepted trace attempt is not a numbered, validated Qwen candidate")
+    accepted_patch = attempt.get("accepted_via_patch") is True
+    if accepted_patch:
+        patches = attempt.get("patches")
+        if not isinstance(patches, list) or not patches or not isinstance(patches[-1], dict):
+            return failed("Accepted patch is missing from the generation trace")
+        patch = patches[-1]
+        patch_model = patch.get("model")
+        prior_patch_hashes = [attempt.get("code_sha256")]
+        prior_patch_hashes.extend(item.get("code_sha256") for item in patches[:-1]
+                                  if isinstance(item, dict))
+        if (patch.get("status") != "accepted" or patch.get("simulation") != "passed"
+                or patch.get("event_validation") != "passed"
+                or patch.get("input_code_sha256") not in prior_patch_hashes
+                or not isinstance(patch_model, str) or "qwen" not in patch_model.casefold()
+                or patch.get("code_sha256") != candidate_sha256):
+            return failed("Accepted Qwen patch does not match the saved candidate")
+        patch_number = patch.get("number")
+        if not isinstance(patch_number, int) or patch_number != len(patches):
+            return failed("Accepted patch has no numbered attempt")
+        base_candidate = task_dir / f"candidate_attempt_{attempt_number}.py"
+        if (not base_candidate.is_file()
+                or _digest(base_candidate.read_bytes()) != attempt.get("code_sha256")):
+            return failed("Original Qwen draft differs from its generation trace")
+        patch_candidate = task_dir / f"candidate_attempt_{attempt_number}_patch_{patch_number}.py"
+        if not patch_candidate.is_file() or _digest(patch_candidate.read_bytes()) != candidate_sha256:
+            return failed("Accepted patch source file differs from the saved candidate")
+    elif attempt.get("simulation") != "passed" or attempt.get("code_sha256") != candidate_sha256:
+        return failed("Accepted Qwen attempt does not match the saved candidate")
+    return {"status": "passed", "saved_run_root": str(root),
+            "saved_report_path": str(report_path), "saved_report_sha256": _digest(report_bytes),
+            "generation_trace_path": str(trace_path), "generation_trace_sha256": _digest(trace_bytes),
+            "candidate_path": str(protocol), "candidate_sha256": candidate_sha256,
+            "instruction_sha256": instruction_sha256,
+            "source_paper_sha256": expected_paper_sha256,
+            "model": model, "attempt_number": attempt.get("number"),
+            "accepted_via_patch": accepted_patch,
+            "prior_generation_status": "passed"}
+
+
+def recheck_task(task: str, *, saved_run_root: Path, output_dir: Path, simulator: Path,
+                 dataset_root: Path | None = None) -> dict:
+    """Recheck a saved Qwen candidate without calling a model or writing protocol code."""
+    if task not in TASKS:
+        raise ValueError(f"Unknown Text2WetLab task: {task}")
+    saved_root = saved_run_root.expanduser().resolve()
+    target_root = output_dir.expanduser().resolve()
+    if saved_root == target_root or saved_root in target_root.parents or target_root in saved_root.parents:
+        raise ValueError("Recheck output must be separate from the saved candidate run")
+    instruction = _source_bytes(task, "instruction.md", dataset_root)
+    assert instruction is not None
+    source_paper = _source_bytes(task, "environment/data/paper.txt", dataset_root)
+    provenance = _saved_candidate_provenance(task, saved_root, instruction, source_paper)
+    record = {"task": task, "instruction_sha256": _digest(instruction),
+              "source_paper_sha256": _digest(source_paper) if source_paper is not None else
+              ECOLI_PAPER_SHA256 if task == "ecoli-heat-shock-transformation" else None,
+              "generation": None, "saved_candidate_provenance": provenance,
+              "current_static_validation": None, "official_protocol_lint": None,
+              "ot2_simulator_gate": None, "official_runlog_gate": None,
+              "official_score": None}
+    if provenance["status"] != "passed":
+        record["status"] = "saved_candidate_provenance_unconfirmed"
+        return record
+    from pybravo.evals.text2wetlab.adapter import ProtocolValidationError, validate_ot2_source
+
+    protocol = saved_root / task / "protocol.py"
+    try:
+        validate_ot2_source(protocol.read_text(encoding="utf-8"))
+    except (UnicodeError, ProtocolValidationError) as exc:
+        record["current_static_validation"] = {"status": "failed", "detail": str(exc)}
+        record["status"] = "current_static_validation_failed"
+        return record
+    record["current_static_validation"] = {"status": "passed"}
+    task_dir = target_root / task
+    task_dir.mkdir(parents=True, exist_ok=True)
+    labware_dir = None
+    if task == "opentrons-rna-extraction":
+        custom_labware = _source_bytes(task, RNA_LABWARE, dataset_root)
+        if custom_labware is None:
+            record["status"] = "blocked_missing_custom_labware"
+            return record
+        labware_dir = task_dir / "labware"
+        labware_dir.mkdir(exist_ok=True)
+        (labware_dir / Path(RNA_LABWARE).name).write_bytes(custom_labware)
+        record["custom_labware_sha256"] = _digest(custom_labware)
+    return _evaluate_candidate(task, protocol, task_dir, simulator, dataset_root,
+                               instruction, labware_dir, record)
+
+
 def run_task(task: str, *, output_dir: Path, simulator: Path,
              dataset_root: Path | None = None, generation_timeout: int = 1800,
              paper_override: Path | None = None, repair_attempts: int = 2,
@@ -337,31 +526,8 @@ def run_task(task: str, *, output_dir: Path, simulator: Path,
     if not protocol.is_file():
         record["status"] = "no_protocol_generated"
         return record
-    record["protocol_sha256"] = _digest(protocol.read_bytes())
-    record["official_protocol_lint"] = _official_lint(task, protocol, task_dir, dataset_root)
-    if record["official_protocol_lint"]["status"] not in {"passed", "not_applicable"}:
-        record["status"] = "official_lint_failed_or_unavailable"
-        return record
-    simulator_command = [str(simulator)]
-    if labware_dir:
-        simulator_command.extend(["-L", str(labware_dir)])
-    simulator_command.append(str(protocol))
-    record["ot2_simulator_gate"] = _run(simulator_command, timeout=600)
-    if record["ot2_simulator_gate"]["status"] != "passed":
-        record["status"] = "simulator_failed"
-        return record
-    record["official_runlog_gate"] = _official_runlog(task, protocol, task_dir, simulator,
-                                                     dataset_root, labware_dir,
-                                                     instruction.decode("utf-8"))
-    if record["official_runlog_gate"]["status"] != "passed":
-        record["status"] = "official_runlog_failed_or_unavailable"
-    elif (record["official_runlog_gate"].get("adapter_event_validation") or {}).get("status") != "passed":
-        record["status"] = "simulator_passed_semantic_review_required"
-    elif record["official_runlog_gate"].get("cross_well_aspiration_risk_count", 0):
-        record["status"] = "simulator_passed_semantic_review_required"
-    else:
-        record["status"] = "simulator_passed"
-    return record
+    return _evaluate_candidate(task, protocol, task_dir, simulator, dataset_root,
+                               instruction, labware_dir, record)
 
 
 def main() -> int:
@@ -375,6 +541,9 @@ def main() -> int:
     parser.add_argument("--simulator", type=Path, required=True,
                         help="Path to opentrons_simulate 7.5.0 in an isolated environment.")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--recheck-from", type=Path, metavar="SAVED_RUN_ROOT",
+                        help="Recheck saved Qwen candidates and their traces without a model call. "
+                             "The root must contain report.json and TASK/protocol.py.")
     parser.add_argument("--generation-timeout", type=int, default=1800)
     parser.add_argument("--model-timeout", type=int, default=300,
                         help="Per-request local Qwen timeout (1–300 seconds).")
@@ -400,22 +569,40 @@ def main() -> int:
         if not path.is_file():
             parser.error(f"Paper override is not a file: {path}")
         paper_overrides[task] = path
+    if args.recheck_from and paper_overrides:
+        parser.error("--paper-override applies only to new generation runs")
+    if args.recheck_from:
+        saved_root = args.recheck_from.expanduser().resolve()
+        target_root = args.output_dir.expanduser().resolve()
+        if (saved_root == target_root or saved_root in target_root.parents
+                or target_root in saved_root.parents):
+            parser.error("Recheck output must be separate from the saved candidate run")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    cases = [run_task(task, output_dir=args.output_dir, simulator=args.simulator,
-                      dataset_root=args.dataset_root, generation_timeout=args.generation_timeout,
-                      paper_override=paper_overrides.get(task), repair_attempts=args.repair_attempts,
-                      patch_attempts=args.patch_attempts, evidence_planning=args.evidence_planning,
-                      model_timeout=args.model_timeout, max_output_tokens=args.max_output_tokens)
-             for task in dict.fromkeys(args.task)]
+    if args.recheck_from:
+        cases = [recheck_task(task, saved_run_root=args.recheck_from,
+                              output_dir=args.output_dir, simulator=args.simulator,
+                              dataset_root=args.dataset_root)
+                 for task in dict.fromkeys(args.task)]
+    else:
+        cases = [run_task(task, output_dir=args.output_dir, simulator=args.simulator,
+                          dataset_root=args.dataset_root, generation_timeout=args.generation_timeout,
+                          paper_override=paper_overrides.get(task), repair_attempts=args.repair_attempts,
+                          patch_attempts=args.patch_attempts, evidence_planning=args.evidence_planning,
+                          model_timeout=args.model_timeout, max_output_tokens=args.max_output_tokens)
+                 for task in dict.fromkeys(args.task)]
     result = {"dataset": DATASET, "revision": REVISION,
-              "metric": "local_static_simulator_runlog_and_event_safety_gates", "official_score": None,
-              "official_score_note": "Available standalone lint, the pinned runlog, and OT-2 simulation are checked only for candidates that clear prior gates. Harbor anti-hack checks and rubric judge did not run.",
+              "metric": ("saved_candidate_current_local_gate_recheck" if args.recheck_from else
+                         "local_static_simulator_runlog_and_event_safety_gates"),
+              "official_score": None,
+              "official_score_note": "Available standalone lint, the pinned runlog, OT-2 simulation, event safety, and local rubric audit are checked only for candidates that clear prior gates. Harbor anti-hack checks and rubric judge did not run.",
               "cases": cases,
               "simulator_passed": sum((c.get("ot2_simulator_gate") or {}).get("status") == "passed"
                                       and (c.get("official_runlog_gate") or {}).get("status") == "passed"
                                       for c in cases),
               "local_acceptance_passed": sum(c["status"] == "simulator_passed" for c in cases),
               "total_selected": len(cases)}
+    if args.recheck_from:
+        result["saved_run_root"] = str(args.recheck_from.expanduser().resolve())
     report = args.output_dir / "report.json"
     report.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({"report": str(report), "simulator_passed": result["simulator_passed"],
