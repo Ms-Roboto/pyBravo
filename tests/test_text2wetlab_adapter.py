@@ -174,6 +174,28 @@ def test_out_of_tips_diagnostic_respects_task_refill_permission():
     assert "only one step" in advice
     assert "If the task explicitly allows rack refilling" in advice
     assert "reset_tipracks()" in advice
+    assert "At the exact exhaustion boundary" in advice
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("permission", [False, True])
+async def test_fresh_tip_refill_skill_is_loaded_only_when_task_allows_it(
+    tmp_path, monkeypatch, permission,
+):
+    monkeypatch.setattr(adapter, "labware_geometry_context", lambda *a, **k: {})
+    monkeypatch.setattr(adapter, "simulate_protocol",
+                        lambda *a, **k: adapter.SimulationResult("passed", "ok"))
+    instruction = ("Transfer 100 µL. Tips are unlimited: call pipette.reset_tipracks() "
+                   "after loading fresh racks." if permission else "Transfer 100 µL.")
+
+    async def completion(messages, schema, **kwargs):
+        assert ("per-pipette pickup counter" in messages[0]["content"]) is permission
+        return StructuredResponse({"code": VALID_PROTOCOL}, {"model": "local-qwen"})
+
+    await adapter.generate_ot2_protocol(
+        instruction, tmp_path, completion=completion,
+        event_reader=lambda _: adapter.EventLog([], {}),
+    )
 
 
 def test_out_of_range_stroke_diagnostic_preserves_stock_equivalent_dose():

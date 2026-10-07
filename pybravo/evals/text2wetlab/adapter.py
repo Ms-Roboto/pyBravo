@@ -100,6 +100,8 @@ Use `from opentrons import protocol_api`, `metadata = {"apiLevel": "2.15"}` unle
 
 Translate the written task faithfully: preserve stated deck slots, labware, pipettes, tip use, liquid volumes, well order, repetitions, mixing, pauses, and any specified parameters. Use loops and helper functions when they make the mapping clear. Opentrons labware indexing uses well-name strings, not integer positions or Well objects from another plate: for positional loops use `plate.wells()[i]` or zip the actual well objects from multiple labware; never use `plate[i]` or `plate[other_plate_well]`. A single `aspirate()` or `dispense()` location must be one Well, not a Python list of wells; iterate or use a suitable transfer helper. `.wells()` is column-major: derive the number of rows from `len(plate.columns()[0])` when calculating indices, and confirm that multichannel spacing matches the actual labware geometry. A multichannel pipette can address one full, pitch-compatible column at a time, not a four-row tube rack as if it were an eight-row plate. Budget tip pickups against the loaded racks before writing loops; reserve source-isolated tips for sample contact, and use a compatible multichannel pipette for full-column operations when that reduces rack use without crossing samples. Always pass an explicit target well to `pipette.mix(repetitions, volume, well)`, because the implicit current location may be a tip rack. Balance reaction volumes and stated reagent concentrations from the materials actually loaded; do not create an unlisted water or reagent source. For a 2× reagent that must end at 1×, its transferred volume must be exactly half the final reaction volume. Sum every component, including primers and template, and check the final concentration before writing pipetting code. If a stock concentration or diluent is missing, state the narrowest workable assumption in a protocol comment instead of silently changing the final concentration; a source solution may be assumed pre-diluted only when that is consistent with the stated reagents and the assumed stock concentration is explicit. Distinguish one aspiration feeding several dispenses from separate aspirations and tip changes: follow the task's requested grouping and tip policy; when grouping is requested, split at pipette-capacity boundaries. For loops over distinct sample/reaction wells, pick up and drop a fresh tip inside each per-sample iteration once the tip touches sample liquid; do not carry one used tip across sample wells or back into a shared reagent reservoir. A tip that has entered a reagent stock or dispensed into a mixture cannot enter a different stock well; change tips between different reagent stocks. `transfer()`, `distribute()`, and similar helpers manage their own tip pickup by default. Never call a helper with its default tip policy while a manually picked-up tip is already attached: either let the helper manage tips, or use explicit aspirate/dispense (or `new_tip='never'`) with a manual pick/drop cycle. Call `reset_tipracks()` only after a rack is exhausted and the task permits refilling. The OT-2 GEN2 working ranges are P20 1–20 µL, P300 20–300 µL, and P1000 100–1000 µL. Effective capacity is the smaller of pipette capacity and loaded tip capacity; never aspirate beyond either one, dispense more than the current tip holds, or perform a liquid action without an attached tip. Finish with no tip attached. When a task is underspecified, make the narrowest workable assumption and state it in a protocol comment. Include no Markdown fences or explanation outside the code string."""
 
+_TIP_REFILL_GUIDANCE = """The task explicitly permits refilling fresh tip racks. Before code generation, count pickups per pipette across every stage, including loops and mixing. Keep a per-pipette pickup counter and compare it with the total number of wells in that pipette's loaded tip racks. Only when the counter reaches actual rack capacity, pause for the operator to replenish fresh tips, call that pipette's reset_tipracks() once before its next pickup, then reset its counter. Never reset on every pickup, reset a partly used rack, or omit the physical fresh-rack handoff."""
+
 _ALLOWED_IMPORTS = {
     "opentrons.protocol_api",
     "opentrons.types",
@@ -222,9 +224,12 @@ def _repair_guidance(error: str, code: str) -> str:
         return (
             "This pipette has consumed every tip in its configured rack. Check the number "
             "of fresh tips needed by all loops, not only one step. If the task explicitly "
-            "allows rack refilling, call this pipette's `reset_tipracks()` after its rack is "
-            "exhausted and before its next `pick_up_tip()`; do not reset early or silently "
-            "reuse a contaminated tip. If refilling is not authorized, plan a new rack or "
+            "allows rack refilling, track the number of pickups per pipette against the "
+            "actual capacity of its loaded tip racks. At the exact exhaustion boundary, "
+            "pause for an operator to load fresh tips, call that pipette's `reset_tipracks()` "
+            "once before its next `pick_up_tip()`, then reset the counter. Never call "
+            "`reset_tipracks()` before every pickup or silently reuse a contaminated tip. "
+            "If refilling is not authorized, plan a new rack or "
             "an operator handoff instead. Preserve sample-isolated tip changes."
             + snippet
         )
@@ -1101,8 +1106,11 @@ async def generate_ot2_protocol(
         simulator_command=simulator_command, labware_dir=resolved_labware_dir,
     )
     trace["labware_geometry"] = geometry
+    system_prompt = _SYSTEM_PROMPT + "\n\n" + SOURCE_FIDELITY_GUIDANCE
+    if task_allows_tip_refill(instruction):
+        system_prompt += "\n\n" + _TIP_REFILL_GUIDANCE
     base_messages = [
-        {"role": "system", "content": _SYSTEM_PROMPT + "\n\n" + SOURCE_FIDELITY_GUIDANCE},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": task_text},
     ]
     if geometry:
