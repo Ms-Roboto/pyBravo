@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pybravo.evals.text2wetlab.rubric_audit import RUBRIC_IDS, audit_rubric_coverage
+from pybravo.evals.text2wetlab.rubric_audit import RUBRIC_IDS, _source_facts, audit_rubric_coverage
 
 
 def _transfer(events: list[dict], source: tuple[str, str], destination: tuple[str, str],
@@ -19,6 +19,10 @@ def _transfer(events: list[dict], source: tuple[str, str], destination: tuple[st
 
 def _item(result: dict, rubric_id: str) -> dict:
     return next(item for item in result["items"] if item["id"] == rubric_id)
+
+
+def _check(result: dict, rubric_id: str, name: str) -> dict:
+    return next(check for check in _item(result, rubric_id)["checks"] if check["name"] == name)
 
 
 def test_every_pinned_task_has_five_audited_items_and_no_official_score() -> None:
@@ -130,7 +134,141 @@ def test_rna_expands_six_eight_channel_elutions_to_48_matched_wells() -> None:
         _transfer(events, (extraction, f"A{column}"), (elution, f"A{column}"), 80,
                   instrument="P300 8-Channel GEN2 on right mount", channels=8)
     result = audit_rubric_coverage("opentrons-rna-extraction", events, "metadata = {'apiLevel': '2.15'}\n")
-    assert _item(result, "sample_handling")["status"] == "supported"
-    assert _item(result, "elution_recovery")["checks"][1]["status"] == "supported"
+    assert _check(result, "sample_handling", "48 one-to-one 250 µL samples")["status"] == "supported"
+    assert _check(result, "elution_recovery", "matched recovery into 4 °C plate")["status"] == "supported"
     assert _item(result, "elution_recovery")["status"] == "failed"  # no off-magnet 100 µL elution
     assert result["official_score"] is None
+
+
+def test_source_facts_resolve_string_slots_and_module_labware() -> None:
+    source = """\
+def run(protocol):
+    protocol.load_labware('nest_12_reservoir_15ml', '5')
+    mag = protocol.load_module('magnetic module', '4')
+    mag.load_labware('usascientific_96_wellplate_2.4ml_deep')
+    temp = protocol.load_module('tempdeck', '6')
+    temp.load_labware('thermo_96_wellplate_200ul')
+"""
+    loads, _, _, error = _source_facts(source)
+    assert error is None
+    assert {("nest_12_reservoir_15ml", 5), ("module:magnetic module", 4),
+            ("usascientific_96_wellplate_2.4ml_deep", 4), ("module:tempdeck", 6),
+            ("thermo_96_wellplate_200ul", 6)} <= {(name, slot) for name, slot, _ in loads}
+
+
+def test_rna_fixed_deck_check_detects_missing_rack_without_relying_on_labels() -> None:
+    source = """\
+def run(protocol):
+    protocol.load_labware('usascientific_96_wellplate_2.4ml_deep', '1')
+    protocol.load_labware('opentrons_96_filtertiprack_200ul', '2')
+    protocol.load_labware('opentrons_96_filtertiprack_200ul', '3')
+    mag = protocol.load_module('magnetic module', '4')
+    mag.load_labware('usascientific_96_wellplate_2.4ml_deep')
+    protocol.load_labware('nest_12_reservoir_15ml', '5')
+    temp = protocol.load_module('tempdeck', '6')
+    temp.load_labware('thermo_96_wellplate_200ul')
+    protocol.load_labware('opentrons_24_tuberack_eppendorf_2ml_safelock_snapcap', '7')
+    protocol.load_labware('opentrons_96_filtertiprack_200ul', '9')
+    protocol.load_labware('opentrons_24_tuberack_eppendorf_2ml_safelock_snapcap', '10')
+    protocol.load_labware('opentrons_96_filtertiprack_1000ul', '11')
+"""
+    task = "opentrons-rna-extraction"
+    assert _check(audit_rubric_coverage(task, [], source),
+                  "sample_handling", "fixed deck and modules")["status"] == "supported"
+    missing = source.replace("protocol.load_labware('opentrons_96_filtertiprack_200ul', '9')", "")
+    assert _check(audit_rubric_coverage(task, [], missing),
+                  "sample_handling", "fixed deck and modules")["status"] == "failed"
+
+
+def test_rna_binding_and_settling_delays_must_bracket_sample_and_removal() -> None:
+    source = "metadata = {'apiLevel': '2.15'}\n"
+    sample = ("Opentrons 24 Tube Rack on 10", "A1")
+    extraction = ("USA Scientific 96 Deep Well Plate on Magnetic Module GEN1 on 4", "A1")
+    waste = ("USA Scientific 96 Deep Well Plate on 1", "A1")
+    sample_events: list[dict] = []
+    _transfer(sample_events, sample, extraction, 250,
+              instrument="P1000 Single-Channel GEN2 on left mount")
+    removal_events: list[dict] = []
+    _transfer(removal_events, extraction, waste, 500,
+              instrument="P1000 Single-Channel GEN2 on left mount")
+    wrong = ([{"kind": "delay", "seconds": 300}, *sample_events,
+              {"kind": "engage"}, *removal_events, {"kind": "delay", "seconds": 240}])
+    right = ([*sample_events, {"kind": "delay", "seconds": 300},
+              {"kind": "engage"}, {"kind": "delay", "seconds": 240}, *removal_events])
+    name = "binding/settling waits and magnetic removal"
+    assert _check(audit_rubric_coverage("opentrons-rna-extraction", wrong, source),
+                  "binding_and_separation", name)["status"] == "failed"
+    assert _check(audit_rubric_coverage("opentrons-rna-extraction", right, source),
+                  "binding_and_separation", name)["status"] == "supported"
+
+
+def test_rna_requires_initial_supernatant_removal_before_first_wash() -> None:
+    source = "metadata = {'apiLevel': '2.15'}\n"
+    extraction = "USA Scientific 96 Deep Well Plate on Magnetic Module GEN1 on 4"
+    waste = "USA Scientific 96 Deep Well Plate on 1"
+    reservoir = "NEST 12 Well Reservoir on 5"
+    multi = "P300 8-Channel GEN2 on right mount"
+    events: list[dict] = [{"kind": "engage"}]
+    for column in (1, 3, 5, 7, 9, 11):
+        well = f"A{column}"
+        _transfer(events, (extraction, well), (waste, well), 200,
+                  instrument=multi, channels=8)
+    _transfer(events, (reservoir, "A9"), (extraction, "A1"), 200,
+              instrument=multi, channels=8)
+    name = "initial supernatant removed before washes"
+    task = "opentrons-rna-extraction"
+    good = audit_rubric_coverage(task, events, source)
+    assert _check(good, "binding_and_separation", name)["status"] == "supported"
+    missing_well = audit_rubric_coverage(task, events[:1] + events[5:], source)
+    assert _check(missing_well, "binding_and_separation", name)["status"] == "failed"
+
+
+def _rna_elution_events(*, wait_after_magnet: bool = True,
+                        wrong_recovery_temperature: bool = False) -> list[dict]:
+    events: list[dict] = [{"kind": "temp", "celsius": 4}, {"kind": "disengage"}]
+    extraction = "USA Scientific 96 Deep Well Plate on Magnetic Module GEN1 on 4"
+    elution = "Plate_thermo_96_elutions on Temperature Module GEN1 on 6"
+    reservoir = "NEST 12 Well Reservoir on 5"
+    multi = "P300 8-Channel GEN2 on right mount"
+    for column in (1, 3, 5, 7, 9, 11):
+        well = f"A{column}"
+        _transfer(events, (reservoir, "A4"), (extraction, well), 100,
+                  instrument=multi, channels=8)
+        events.extend([
+            {"kind": "pick", "instrument": multi, "channels": 8},
+            {"kind": "aspirate", "volume": 50, "labware": extraction,
+             "well": well, "instrument": multi, "channels": 8},
+            {"kind": "dispense", "volume": 50, "labware": extraction,
+             "well": well, "instrument": multi, "channels": 8},
+            {"kind": "drop", "instrument": multi, "channels": 8},
+        ])
+    events.append({"kind": "delay", "seconds": 30})
+    if not wait_after_magnet:
+        events.append({"kind": "delay", "seconds": 90})
+    events.append({"kind": "engage"})
+    if wait_after_magnet:
+        events.append({"kind": "delay", "seconds": 90})
+    if wrong_recovery_temperature:
+        events.append({"kind": "temp", "celsius": 25})
+    for column in (1, 3, 5, 7, 9, 11):
+        well = f"A{column}"
+        _transfer(events, (extraction, well), (elution, well), 80,
+                  instrument=multi, channels=8)
+    return events
+
+
+def test_rna_elution_clearing_wait_must_follow_magnet_engagement() -> None:
+    source = "metadata = {'apiLevel': '2.15'}\n"
+    name = "30 s incubation, 90 s magnetic clearing and mixing"
+    wrong = audit_rubric_coverage("opentrons-rna-extraction",
+                                  _rna_elution_events(wait_after_magnet=False), source)
+    right = audit_rubric_coverage("opentrons-rna-extraction", _rna_elution_events(), source)
+    assert _check(wrong, "elution_recovery", name)["status"] == "failed"
+    assert _check(right, "elution_recovery", name)["status"] == "supported"
+
+
+def test_rna_recovery_checks_current_temperature_not_any_earlier_four_degrees() -> None:
+    source = "metadata = {'apiLevel': '2.15'}\n"
+    result = audit_rubric_coverage("opentrons-rna-extraction",
+                                   _rna_elution_events(wrong_recovery_temperature=True), source)
+    assert _check(result, "elution_recovery", "matched recovery into 4 °C plate")["status"] == "failed"

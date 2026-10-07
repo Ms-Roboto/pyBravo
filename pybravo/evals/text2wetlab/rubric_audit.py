@@ -57,21 +57,44 @@ def _source_facts(source: str) -> tuple[list[tuple[str, int | None, str | None]]
     loads: list[tuple[str, int | None, str | None]] = []
     notes: list[str] = []
     api_level = None
+    module_slots: dict[str, int] = {}
+
+    def slot_number(value: Any) -> int | None:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.isdecimal():
+            return int(value)
+        return None
+
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "metadata" for t in node.targets):
             value = _literal(node.value)
             if isinstance(value, dict):
                 api_level = value.get("apiLevel")
     for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "load_module" and node.value.args):
+            name = _literal(node.value.args[0])
+            slot = slot_number(_literal(node.value.args[1])) if len(node.value.args) > 1 else None
+            if isinstance(name, str):
+                loads.append((f"module:{name}", slot, None))
+                if slot is not None:
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            module_slots[target.id] = slot
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
         method = node.func.attr
         if method == "load_labware" and node.args:
             load_name = _literal(node.args[0])
-            slot = _literal(node.args[1]) if len(node.args) > 1 else None
+            slot = slot_number(_literal(node.args[1])) if len(node.args) > 1 else None
+            if slot is None and isinstance(node.func.value, ast.Name):
+                slot = module_slots.get(node.func.value.id)
             label = next((_literal(kw.value) for kw in node.keywords if kw.arg == "label"), None)
             if isinstance(load_name, str):
-                loads.append((load_name, slot if isinstance(slot, int) else None,
+                loads.append((load_name, slot,
                               label if isinstance(label, str) else None))
         elif method in {"comment", "pause"} and node.args:
             note = _literal(node.args[0])
@@ -217,6 +240,26 @@ def _magnet_state(events: list[dict], index: int) -> bool:
 
 def _manual_notes(notes: list[str], *patterns: str) -> bool:
     return all(any(re.search(pattern, note, re.IGNORECASE) for note in notes) for pattern in patterns)
+
+
+def _delay_between(events: list[dict], start: int, stop: int,
+                   low_seconds: float, high_seconds: float) -> bool:
+    """Find a simulator-observed delay inside an ordered physical stage."""
+    if not 0 <= start < stop <= len(events):
+        return False
+    return any(event.get("kind") == "delay"
+               and isinstance(event.get("seconds"), (int, float))
+               and not isinstance(event["seconds"], bool)
+               and low_seconds <= event["seconds"] <= high_seconds
+               for event in events[start:stop])
+
+
+def _temperature_at(events: list[dict], index: int) -> float | None:
+    """Return the latest observed temperature-module setpoint before an action."""
+    for event in reversed(events[:index]):
+        if event.get("kind") == "temp" and isinstance(event.get("celsius"), (int, float)):
+            return float(event["celsius"])
+    return None
 
 
 def _mix_cycles(events: list[dict], task: str, role: str, well: str,
@@ -509,13 +552,33 @@ def _audit_golden(a: _Audit, events: list[dict], transfers: list[Transfer], note
           "An independent per-tip inspection should confirm no shared stock is re-entered after touching a reaction.")
 
 
-def _audit_rna(a: _Audit, events: list[dict], transfers: list[Transfer]) -> None:
+def _audit_rna(a: _Audit, events: list[dict], transfers: list[Transfer], loads: list[tuple]) -> None:
     task = a.task
     wells = set(_RNA_WELLS)
+    expected_deck = {
+        ("usascientific_96_wellplate_2.4ml_deep", 1),
+        ("opentrons_96_filtertiprack_200ul", 2),
+        ("opentrons_96_filtertiprack_200ul", 3),
+        ("module:magnetic module", 4),
+        ("usascientific_96_wellplate_2.4ml_deep", 4),
+        ("nest_12_reservoir_15ml", 5),
+        ("module:tempdeck", 6),
+        ("thermo_96_wellplate_200ul", 6),
+        ("opentrons_24_tuberack_eppendorf_2ml_safelock_snapcap", 7),
+        ("opentrons_96_filtertiprack_200ul", 9),
+        ("opentrons_24_tuberack_eppendorf_2ml_safelock_snapcap", 10),
+        ("opentrons_96_filtertiprack_1000ul", 11),
+    }
+    a.add("sample_handling", "fixed deck and modules",
+          expected_deck <= {(name, slot) for name, slot, _ in loads},
+          "The source must load the fixed plates, filter-tip racks, magnetic and temperature modules in their specified slots.")
     samples = _matching(transfers, task, source="samples", destination="extraction")
     sample_wells = {(t.source_labware, t.source_well) for t in samples}
     sample_ok = (len(sample_wells) == 48
                  and {t.destination_well for t in samples} == wells
+                 and {(_slot(labware), well) for labware, well in sample_wells}
+                 == {(slot, f"{row}{column}") for slot in (7, 10)
+                     for column in range(1, 7) for row in "ABCD"}
                  and all(len({t.destination_well for t in samples
                               if (t.source_labware, t.source_well) == src}) == 1
                          and _close(_volume([t for t in samples
@@ -540,15 +603,15 @@ def _audit_rna(a: _Audit, events: list[dict], transfers: list[Transfer]) -> None
     a.add("binding_and_separation", "beads → isopropanol → sample", binding_ok,
           "Every extraction well needs 40 µL beads, then 250 µL isopropanol, then 250 µL sample.")
     first_engage = next((i for i, e in enumerate(events) if e.get("kind") == "engage"), -1)
-    binding_delay = any(e.get("kind") == "delay" and 270 <= e.get("seconds", 0) <= 330
-                        for e in events[:first_engage]) if first_engage >= 0 else False
-    settle_delay = any(e.get("kind") == "delay" and 210 <= e.get("seconds", 0) <= 300
-                       for e in events[first_engage + 1:]) if first_engage >= 0 else False
     removed = _matching(transfers, task, source="extraction", destination="waste")
+    first_removal = min((t.index for t in removed), default=len(events))
+    last_sample = max((t.index for t in samples), default=-1)
+    binding_delay = _delay_between(events, last_sample + 1, first_engage, 270, 330)
+    settle_delay = _delay_between(events, first_engage + 1, first_removal, 210, 300)
     removal_after_magnet = bool(removed) and all(_magnet_state(events, t.index) for t in removed)
     a.add("binding_and_separation", "binding/settling waits and magnetic removal",
           binding_delay and settle_delay and removal_after_magnet,
-          "A ~5 min binding wait, magnet engagement/~4 min settling, then waste removal with magnet on are required.")
+          "A ~5 min binding wait after the final sample, magnet engagement/~4 min settling before the first waste removal, then waste removal with magnet on are required.")
     mixed = all(_mix_cycles(events, task, "extraction", w,
                             start=min((t.index for t in samples if t.destination_well == w), default=len(events)),
                             stop=first_engage if first_engage >= 0 else len(events)) >= 5 for w in wells)
@@ -556,6 +619,15 @@ def _audit_rna(a: _Audit, events: list[dict], transfers: list[Transfer]) -> None
           "Each sample needs at least five same-well mix cycles after sample addition and before magnetic separation.")
     etoh = [t for t in _matching(transfers, task, source="reservoir", destination="extraction")
             if t.source_well in {"A9", "A10", "A11", "A12"}]
+    first_wash = min((t.index for t in etoh), default=len(events))
+    initial_removals = [t for t in removed if t.index < first_wash]
+    initial_removal_ok = ({t.source_well for t in initial_removals} == wells
+                          and all(_magnet_state(events, t.index) for t in initial_removals)
+                          and all(0 < _volume([t for t in initial_removals if t.source_well == well]) <= 540
+                                  for well in wells)
+                          and first_wash > max((t.index for t in initial_removals), default=len(events)))
+    a.add("binding_and_separation", "initial supernatant removed before washes", initial_removal_ok,
+          "All 48 wells must have supernatant removed to waste with the magnet on before ethanol is first added.")
     def wash_cycles(well: str) -> list[tuple[float, float, bool]]:
         additions = [t for t in etoh if t.destination_well == well]
         if not additions:
@@ -599,25 +671,36 @@ def _audit_rna(a: _Audit, events: list[dict], transfers: list[Transfer]) -> None
     recovered = _matching(transfers, task, source="extraction", destination="elution")
     recovery_ok = ({t.source_well for t in recovered} == wells
                    and all(t.source_well == t.destination_well for t in recovered)
-                   and all(_close(_volume([t for t in recovered if t.source_well == w]), 80) for w in wells)
-                   and any(e.get("kind") == "temp" and _close(float(e.get("celsius", -1)), 4)
-                           for e in events[:min((t.index for t in recovered), default=0)]))
+                   and all(0 < _volume([t for t in recovered if t.source_well == w]) <= 100
+                           for w in wells)
+                   and all(_close(_temperature_at(events, t.index) or -1, 4) for t in recovered))
     a.add("elution_recovery", "100 µL off-magnet elution", buffer_ok and off_magnet,
           "Each extraction well needs 100 µL elution buffer while the magnet is off.")
-    a.add("elution_recovery", "80 µL matched recovery at 4 °C", recovery_ok,
-          "Every source well must recover about 80 µL to its own 4 °C elution well.")
+    a.add("elution_recovery", "matched recovery into 4 °C plate", recovery_ok,
+          "Every source well must recover a nonzero amount, no more than the 100 µL added, to its own elution well while the last observed temperature-module setpoint is 4 °C.")
+    a.add("elution_recovery", "recovered yield", None,
+          "The paper specifies 100 µL elution buffer but no exact transfer volume; residual beads and actual recovery yield need experimental review.")
+    last_buffer = max((t.index for t in elution_buffer), default=-1)
+    first_reengage = next((i for i, e in enumerate(events)
+                           if i > last_buffer and e.get("kind") == "engage"), len(events))
     mixed_elution = all(_mix_cycles(events, task, "extraction", w,
                                  start=min((t.index for t in elution_buffer if t.destination_well == w), default=len(events)),
-                                 stop=min((t.index for t in recovered if t.source_well == w), default=len(events))) >= 1
+                                 stop=first_reengage) >= 1
                         for w in wells)
-    clearing = all(any(e.get("kind") == "delay" and 75 <= e.get("seconds", 0) <= 110
-                       for e in events[max(0, min((t.index for t in elution_buffer if t.destination_well == w),
-                                                    default=len(events))):
-                                       min((t.index for t in recovered if t.source_well == w), default=len(events))])
-                   for w in wells)
+    first_recovery = min((t.index for t in recovered), default=len(events))
+    last_mix = max((i + 1 for i in range(last_buffer + 1, first_reengage - 1)
+                    if events[i].get("kind") == "aspirate" and events[i + 1].get("kind") == "dispense"
+                    and events[i].get("labware") == events[i + 1].get("labware")
+                    and events[i].get("well") == events[i + 1].get("well")
+                    and _role(task, str(events[i].get("labware"))) == "extraction"),
+                   default=last_buffer)
+    elution_wait = _delay_between(events, max(last_buffer, last_mix) + 1,
+                                  first_reengage, 25, 40)
+    clearing = _delay_between(events, first_reengage + 1, first_recovery, 75, 110)
     recovery_on_magnet = bool(recovered) and all(_magnet_state(events, t.index) for t in recovered)
-    a.add("elution_recovery", "90 s magnetic clearing and mixing", mixed_elution and clearing and recovery_on_magnet,
-          "Each well needs a mix after elution buffer and an approximately 90 s clearing wait before recovery.")
+    a.add("elution_recovery", "30 s incubation, 90 s magnetic clearing and mixing",
+          mixed_elution and elution_wait and clearing and recovery_on_magnet,
+          "Each well needs a mix off-magnet, about 30 s incubation before magnet engagement, then about 90 s clearing before recovery.")
     a.add("fidelity_to_paper", "paper and reagent fidelity", None,
           "The complete paper method, stock identities and comments/metadata require scientist review.")
 
@@ -655,5 +738,5 @@ def audit_rubric_coverage(task: str, events: list[dict], source: str,
     elif task == "golden-gate-assembly":
         _audit_golden(audit, events, transfers, notes)
     elif task == "opentrons-rna-extraction":
-        _audit_rna(audit, events, transfers)
+        _audit_rna(audit, events, transfers, loads)
     return audit.result()
