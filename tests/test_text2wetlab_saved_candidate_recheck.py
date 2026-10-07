@@ -13,14 +13,15 @@ INSTRUCTION = b"Move 200 uL from a reservoir into two wells.\n"
 CODE = b"metadata = {}\n"
 
 
-def _saved_run(root: Path, *, patched: bool = False) -> tuple[Path, Path]:
+def _saved_run(root: Path, *, patched: bool = False, instruction: bytes = INSTRUCTION,
+               code: bytes = CODE, source_paper: bytes | None = None) -> tuple[Path, Path]:
     task_dir = root / TASK
     task_dir.mkdir(parents=True)
     protocol = task_dir / "protocol.py"
-    protocol.write_bytes(CODE)
-    (task_dir / "instruction.md").write_bytes(INSTRUCTION)
+    protocol.write_bytes(code)
+    (task_dir / "instruction.md").write_bytes(instruction)
     attempt = {"number": 1, "model": "qwen", "validation": "passed",
-               "simulation": "passed", "code_sha256": runner._digest(CODE)}
+               "simulation": "passed", "code_sha256": runner._digest(code)}
     if patched:
         attempt["code_sha256"] = runner._digest(b"original Qwen draft\n")
         attempt["simulation"] = "failed"
@@ -28,24 +29,28 @@ def _saved_run(root: Path, *, patched: bool = False) -> tuple[Path, Path]:
         attempt["patches"] = [{"number": 1, "model": "qwen", "status": "accepted",
                                "simulation": "passed", "event_validation": "passed",
                                "input_code_sha256": attempt["code_sha256"],
-                               "code_sha256": runner._digest(CODE)}]
-        (task_dir / "candidate_attempt_1_patch_1.py").write_bytes(CODE)
+                               "code_sha256": runner._digest(code)}]
+        (task_dir / "candidate_attempt_1_patch_1.py").write_bytes(code)
         (task_dir / "candidate_attempt_1.py").write_bytes(b"original Qwen draft\n")
-    trace = {"task_sha256": runner._digest(INSTRUCTION), "status": "simulated",
+    trace = {"task_sha256": runner._digest(instruction), "status": "simulated",
              "static_validation_passed": True, "event_validation_passed": True,
              "attempts": [attempt]}
     (task_dir / "generation_trace.json").write_text(json.dumps(trace), encoding="utf-8")
     report = {"dataset": runner.DATASET, "revision": runner.REVISION,
-              "cases": [{"task": TASK, "instruction_sha256": runner._digest(INSTRUCTION),
-                         "source_paper_sha256": None, "protocol_sha256": runner._digest(CODE),
+              "cases": [{"task": TASK, "instruction_sha256": runner._digest(instruction),
+                         "source_paper_sha256": (runner._digest(source_paper)
+                                                 if source_paper is not None else None),
+                         "protocol_sha256": runner._digest(code),
                          "generation": {"status": "passed"}}]}
     (root / "report.json").write_text(json.dumps(report), encoding="utf-8")
     return protocol, task_dir / "generation_trace.json"
 
 
-def _pin_source(monkeypatch):
+def _pin_source(monkeypatch, *, instruction: bytes = INSTRUCTION,
+                source_paper: bytes | None = None):
     monkeypatch.setattr(runner, "_source_bytes", lambda task, name, root: (
-        INSTRUCTION if name == "instruction.md" else None))
+        instruction if name == "instruction.md" else
+        source_paper if name == "environment/data/paper.txt" else None))
 
 
 @pytest.mark.parametrize("patched", [False, True])
@@ -85,6 +90,65 @@ def test_recheck_uses_saved_candidate_and_current_gates_without_generation(tmp_p
     assert protocol.read_bytes() == CODE
     assert not (output_root / TASK / "protocol.py").exists()
     assert not (output_root / TASK / "generation_trace.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("instruction", "source_paper", "expected_case", "expected_audit", "paper_status"),
+    [
+        (b"Incubate samples for 5 min on deck.\n", None,
+         "timed_comment_failed", "failed", "not_applicable"),
+        (b"(Not simulated, record with protocol.comment) Incubate samples for 5 min on deck.\n",
+         None, "simulator_passed", "needs_review", "not_applicable"),
+        (b"Follow /data/paper.txt. Incubate samples for 5 min on deck.\n", None,
+         "simulator_passed_semantic_review_required", "needs_review", "unavailable"),
+        (b"Follow /data/paper.txt.\n", b"Incubate samples for 5 min on deck.\n",
+         "timed_comment_failed", "failed", "available"),
+    ],
+)
+def test_recheck_reports_timed_claims_without_accepting_observable_errors(
+    tmp_path, monkeypatch, instruction, source_paper, expected_case, expected_audit,
+    paper_status,
+):
+    code = (b"def run(protocol):\n"
+            b"    protocol.comment('Incubate samples for 5 min on deck')\n"
+            b"    protocol.comment('Continue')\n")
+    saved_root = tmp_path / "saved"
+    protocol, _ = _saved_run(saved_root, instruction=instruction, code=code,
+                             source_paper=source_paper)
+    _pin_source(monkeypatch, instruction=instruction, source_paper=source_paper)
+    monkeypatch.setattr("pybravo.evals.text2wetlab.adapter.validate_ot2_source",
+                        lambda code: None)
+    monkeypatch.setattr(runner, "_run", lambda *args, **kwargs: {"status": "passed"})
+    monkeypatch.setattr(runner, "_official_lint", lambda *args: {"status": "passed"})
+    monkeypatch.setattr(runner, "_official_runlog", lambda *args: {
+        "status": "passed", "adapter_event_validation": {"status": "passed"},
+        "cross_well_aspiration_risk_count": 0,
+        "local_rubric_audit": {"status": "supported"},
+    })
+    simulator = tmp_path / "opentrons_simulate"
+    simulator.touch()
+    output = tmp_path / "rechecked"
+    monkeypatch.setattr(sys, "argv", ["evaluate_text2wetlab.py", "--task", TASK,
+                                  "--recheck-from", str(saved_root),
+                                  "--simulator", str(simulator), "--output-dir", str(output)])
+
+    assert runner.main() == (0 if expected_case == "simulator_passed" else 1)
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    case = report["cases"][0]
+    audit = case["timed_comment_audit"]
+    assert case["status"] == expected_case
+    assert audit["status"] == expected_audit
+    assert audit["source_paper_status"] == paper_status
+    assert audit["error_count"] == (0 if expected_case == "simulator_passed" else 1)
+    assert audit["findings"][0]["code"] == "timed_comment_without_action"
+    assert audit["findings"][0]["severity"] == (
+        "warning" if expected_case == "simulator_passed" else "error")
+    assert report["local_acceptance_passed"] == (1 if expected_case == "simulator_passed" else 0)
+    assert report["official_score"] is None
+    assert case["official_score"] is None
+    assert case["saved_candidate_provenance"]["status"] == "passed"
+    assert protocol.read_bytes() == code
+    assert not (output / TASK / "protocol.py").exists()
 
 
 @pytest.mark.parametrize("tamper", ["protocol", "instruction", "trace_hash", "model",

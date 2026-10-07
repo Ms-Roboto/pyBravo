@@ -247,11 +247,36 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
             "labware": payload.get("labware") or {}}
 
 
+def _timed_comment_audit(code: str, instruction: bytes, source_paper: bytes | None) -> dict:
+    """Review source-grounded timed comments without changing candidate code."""
+    from pybravo.evals.text2wetlab.timed_claims import audit_timed_comments
+
+    paper_status = ("available" if source_paper is not None else
+                    "unavailable" if b"/data/paper.txt" in instruction else "not_applicable")
+    findings = audit_timed_comments(
+        code, instruction=instruction.decode("utf-8"),
+        scientific_source=source_paper.decode("utf-8") if source_paper is not None else None,
+    )
+    errors = sum(issue.severity == "error" for issue in findings)
+    return {
+        "status": ("needs_review" if errors and paper_status == "unavailable" else
+                   "failed" if errors else "needs_review" if findings else "passed"),
+        "source_paper_status": paper_status,
+        "error_count": errors,
+        "findings": [issue.__dict__ for issue in findings],
+    }
+
+
 def _evaluate_candidate(task: str, protocol: Path, task_dir: Path, simulator: Path,
                         dataset_root: Path | None, instruction: bytes,
-                        labware_dir: Path | None, record: dict) -> dict:
+                        source_paper: bytes | None, labware_dir: Path | None,
+                        record: dict) -> dict:
     """Apply the current pinned local gates to a validated candidate."""
-    record["protocol_sha256"] = _digest(protocol.read_bytes())
+    candidate = protocol.read_bytes()
+    record["protocol_sha256"] = _digest(candidate)
+    record["timed_comment_audit"] = _timed_comment_audit(
+        candidate.decode("utf-8"), instruction, source_paper,
+    )
     record["official_protocol_lint"] = _official_lint(task, protocol, task_dir, dataset_root)
     if record["official_protocol_lint"]["status"] not in {"passed", "not_applicable"}:
         record["status"] = "official_lint_failed_or_unavailable"
@@ -276,6 +301,10 @@ def _evaluate_candidate(task: str, protocol: Path, task_dir: Path, simulator: Pa
         record["status"] = "simulator_passed_semantic_review_required"
     elif (runlog.get("local_rubric_audit") or {}).get("status") not in {"supported", "needs_review"}:
         record["status"] = "local_rubric_failed_or_unavailable"
+    elif record["timed_comment_audit"]["error_count"]:
+        record["status"] = ("simulator_passed_semantic_review_required"
+                            if record["timed_comment_audit"]["source_paper_status"] == "unavailable"
+                            else "timed_comment_failed")
     else:
         record["status"] = "simulator_passed"
     return record
@@ -405,6 +434,7 @@ def recheck_task(task: str, *, saved_run_root: Path, output_dir: Path, simulator
               "generation": None, "saved_candidate_provenance": provenance,
               "current_static_validation": None, "official_protocol_lint": None,
               "ot2_simulator_gate": None, "official_runlog_gate": None,
+              "timed_comment_audit": None,
               "official_score": None}
     if provenance["status"] != "passed":
         record["status"] = "saved_candidate_provenance_unconfirmed"
@@ -432,7 +462,7 @@ def recheck_task(task: str, *, saved_run_root: Path, output_dir: Path, simulator
         (labware_dir / Path(RNA_LABWARE).name).write_bytes(custom_labware)
         record["custom_labware_sha256"] = _digest(custom_labware)
     return _evaluate_candidate(task, protocol, task_dir, simulator, dataset_root,
-                               instruction, labware_dir, record)
+                               instruction, source_paper, labware_dir, record)
 
 
 def run_task(task: str, *, output_dir: Path, simulator: Path,
@@ -466,6 +496,7 @@ def run_task(task: str, *, output_dir: Path, simulator: Path,
               "source_paper_sha256": _digest(source_paper) if source_paper else None,
               "generation": None, "official_protocol_lint": None,
               "ot2_simulator_gate": None, "official_runlog_gate": None,
+              "timed_comment_audit": None,
               "official_score": None}
     if needs_paper and source_paper is None:
         record["status"] = "blocked_missing_source_paper"
@@ -527,7 +558,7 @@ def run_task(task: str, *, output_dir: Path, simulator: Path,
         record["status"] = "no_protocol_generated"
         return record
     return _evaluate_candidate(task, protocol, task_dir, simulator, dataset_root,
-                               instruction, labware_dir, record)
+                               instruction, source_paper, labware_dir, record)
 
 
 def main() -> int:
