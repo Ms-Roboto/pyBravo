@@ -921,10 +921,15 @@ def prepare_protocol(plan: ProtocolPlan | dict, setup: ProtocolSetup | dict, con
                 legacy_props = {"volume": aspiration_ul,
                     "liquid_class": (liquid_class or {}).get("name") or setup.liquid_class,
                     "distance_from_bottom": setup.distance_from_bottom_mm,
-                    "pre_aspirate_volume": 0, "post_aspirate_volume": 0,
-                    "blowout_volume": 0, "tip_touch": False}
-                aspirate_props = legacy_props
-                dispense_props = legacy_props
+                    "tip_touch": False}
+                # Keep the same phase-specific property shape as tasks a
+                # scientist adds by hand in Designer. The old shared dict put
+                # blowout on Aspirate and air gaps on Dispense; those values
+                # were ignored by the executor but misleading in preview.
+                aspirate_props = {**legacy_props, "pre_aspirate_volume": 0,
+                    "post_aspirate_volume": 0, "dynamic_tip_extension": 0}
+                dispense_props = {**legacy_props, "blowout_volume": 0,
+                    "dynamic_tip_retraction": 0, "empty_tips": False}
                 aspirate_class = liquid_class
                 dispense_class = liquid_class
             distribute_strategy = "single_aspiration"

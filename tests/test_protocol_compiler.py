@@ -44,6 +44,15 @@ def test_deterministic_compile_has_only_connected_allowlisted_nodes_and_sources(
     first = compile_plan(plan, setup, context, sources=sources)
     assert first == compile_plan(plan, setup, context, sources=sources)
     assert [node["type"] for node in first["graph"]["nodes"]] == ["flow/Start", "tips/TipsOn", "liquid/Aspirate", "liquid/Dispense", "tips/TipsOff", "flow/End"]
+    assert [node["title"] for node in first["graph"]["nodes"]] == [
+        "Start", "Tips On · slot 3", "Aspirate 20 µL · slot 1:A1",
+        "Dispense 20 µL · slot 2:A1", "Tips Off · slot 4", "End",
+    ]
+    aspirate, dispense = first["graph"]["nodes"][2:4]
+    assert {"pre_aspirate_volume", "post_aspirate_volume", "dynamic_tip_extension"} <= aspirate["properties"].keys()
+    assert "blowout_volume" not in aspirate["properties"]
+    assert {"blowout_volume", "dynamic_tip_retraction", "empty_tips"} <= dispense["properties"].keys()
+    assert "pre_aspirate_volume" not in dispense["properties"]
     for index, node in enumerate(first["graph"]["nodes"]):
         assert node["type"] in ALLOWED_NODE_TYPES
         if index:
@@ -476,6 +485,10 @@ def test_mix_wait_manual_and_evolving_plate_locations_compile():
     workflow = compile_plan(plan, setup, context, sources=sources)
     types = [n["type"] for n in workflow["graph"]["nodes"]]
     assert types[-6:] == ["liquid/Mix", "tips/TipsOff", "system/Wait", "system/Manual", "plate/PickPlace", "flow/End"]
+    assert [n["title"] for n in workflow["graph"]["nodes"][-6:]] == [
+        "Mix 5 µL × 3 · slot 2:A1", "Tips Off · slot 4", "Wait 120 s",
+        "Manual · Centrifuge the sample plate and return…", "Pick/Place · 2 → 5", "End",
+    ]
     assert workflow["protocol"]["run_sheet"]["final_deck"]["5"] == "samples"
     context["has_gripper"] = False
     assert "gripper_unavailable" in codes(validate_plan(plan, setup, context, sources=sources))
@@ -735,6 +748,8 @@ def test_four_stacked_384_sources_fill_both_1536_plates_with_four_isolated_st10_
     assert returns == [1, 2, 3, 4]
     assert len([node for node in nodes if node["type"] == "plate/Destack"]) == 3
     assert len([node for node in nodes if node["type"] == "plate/Stack"]) == 3
+    assert all(node["title"].startswith("Destack · 9 → 6") for node in nodes if node["type"] == "plate/Destack")
+    assert all(node["title"].startswith("Stack · 6 → 7") for node in nodes if node["type"] == "plate/Stack")
     checkpoints = [node["properties"]["message"] for node in nodes if node["type"] == "system/Manual"]
     assert len(checkpoints) == 2
     assert "Before every run" in checkpoints[0]
