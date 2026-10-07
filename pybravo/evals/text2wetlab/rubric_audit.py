@@ -224,7 +224,9 @@ def _tip_isolation(task: str, transfers: list[Transfer], specimen_roles: set[str
     by_tip: dict[int, set[tuple[str, str]]] = defaultdict(set)
     for transfer in transfers:
         if _role(task, transfer.source_labware) in specimen_roles:
-            by_tip[transfer.tip].add((_role(task, transfer.source_labware), transfer.source_well))
+            # Two racks can each have an A1 sample. Role and well alone would
+            # merge those different specimens and miss a shared-tip exposure.
+            by_tip[transfer.tip].add((transfer.source_labware, transfer.source_well))
     return all(tip > 0 and len(sources) <= 1 for tip, sources in by_tip.items())
 
 
@@ -262,11 +264,11 @@ def _temperature_at(events: list[dict], index: int) -> float | None:
     return None
 
 
-def _mix_cycles(events: list[dict], task: str, role: str, well: str,
-                start: int = 0, stop: int | None = None) -> int:
-    """Count paired same-well aspirations/dispenses in a bounded phase."""
+def _mix_completion_indices(events: list[dict], task: str, role: str, well: str,
+                            start: int = 0, stop: int | None = None) -> list[int]:
+    """Find paired same-well mixing dispenses in a bounded phase."""
     stop = len(events) if stop is None else stop
-    count = 0
+    completions: list[int] = []
     for index in range(max(start, 0), min(stop - 1, len(events) - 1)):
         first, second = events[index], events[index + 1]
         if first.get("kind") != "aspirate" or second.get("kind") != "dispense":
@@ -282,8 +284,14 @@ def _mix_cycles(events: list[dict], task: str, role: str, well: str,
         channels = first.get("channels", 1)
         channel_count = channels if isinstance(channels, int) else 1
         if well in _expanded_wells(task, str(first.get("labware")), str(first.get("well")), channel_count):
-            count += 1
-    return count
+            completions.append(index + 1)
+    return completions
+
+
+def _mix_cycles(events: list[dict], task: str, role: str, well: str,
+                start: int = 0, stop: int | None = None) -> int:
+    """Count paired same-well aspirations/dispenses in a bounded phase."""
+    return len(_mix_completion_indices(events, task, role, well, start, stop))
 
 
 class _Audit:
@@ -680,27 +688,37 @@ def _audit_rna(a: _Audit, events: list[dict], transfers: list[Transfer], loads: 
           "Every source well must recover a nonzero amount, no more than the 100 µL added, to its own elution well while the last observed temperature-module setpoint is 4 °C.")
     a.add("elution_recovery", "recovered yield", None,
           "The paper specifies 100 µL elution buffer but no exact transfer volume; residual beads and actual recovery yield need experimental review.")
-    last_buffer = max((t.index for t in elution_buffer), default=-1)
-    first_reengage = next((i for i, e in enumerate(events)
-                           if i > last_buffer and e.get("kind") == "engage"), len(events))
-    mixed_elution = all(_mix_cycles(events, task, "extraction", w,
-                                 start=min((t.index for t in elution_buffer if t.destination_well == w), default=len(events)),
-                                 stop=first_reengage) >= 1
-                        for w in wells)
-    first_recovery = min((t.index for t in recovered), default=len(events))
-    last_mix = max((i + 1 for i in range(last_buffer + 1, first_reengage - 1)
-                    if events[i].get("kind") == "aspirate" and events[i + 1].get("kind") == "dispense"
-                    and events[i].get("labware") == events[i + 1].get("labware")
-                    and events[i].get("well") == events[i + 1].get("well")
-                    and _role(task, str(events[i].get("labware"))) == "extraction"),
-                   default=last_buffer)
-    elution_wait = _delay_between(events, max(last_buffer, last_mix) + 1,
-                                  first_reengage, 25, 40)
-    clearing = _delay_between(events, first_reengage + 1, first_recovery, 75, 110)
+    def elution_phase_ok(well: str) -> bool:
+        # A single global magnet cycle and one cycle per eight-well column are
+        # both valid. Pair each well's mix, magnet engagement, clearing wait and
+        # recovery rather than assuming every well is mixed before the first
+        # global engagement.
+        last_buffer = max((t.index for t in elution_buffer if t.destination_well == well),
+                          default=-1)
+        first_recovery = min((t.index for t in recovered if t.source_well == well),
+                             default=len(events))
+        if last_buffer < 0 or first_recovery == len(events):
+            return False
+        engage = max((i for i in range(last_buffer + 1, first_recovery)
+                      if events[i].get("kind") == "engage"), default=-1)
+        if engage < 0 or any(event.get("kind") == "disengage"
+                             for event in events[engage + 1:first_recovery]):
+            return False
+        if not _delay_between(events, engage + 1, first_recovery, 75, 110):
+            return False
+        for mix_end in reversed(_mix_completion_indices(
+            events, task, "extraction", well, last_buffer + 1, engage
+        )):
+            if (not _magnet_state(events, mix_end)
+                    and _delay_between(events, mix_end + 1, engage, 25, 40)):
+                return True
+        return False
+
+    elution_sequence = all(elution_phase_ok(well) for well in wells)
     recovery_on_magnet = bool(recovered) and all(_magnet_state(events, t.index) for t in recovered)
     a.add("elution_recovery", "30 s incubation, 90 s magnetic clearing and mixing",
-          mixed_elution and elution_wait and clearing and recovery_on_magnet,
-          "Each well needs a mix off-magnet, about 30 s incubation before magnet engagement, then about 90 s clearing before recovery.")
+          elution_sequence and recovery_on_magnet,
+          "Each well needs a mix off-magnet, about 30 s incubation before its magnet engagement, then about 90 s clearing before its recovery; columns may be processed in sequence.")
     a.add("fidelity_to_paper", "paper and reagent fidelity", None,
           "The complete paper method, stock identities and comments/metadata require scientist review.")
 

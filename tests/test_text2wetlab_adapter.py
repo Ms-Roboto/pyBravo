@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
-from pybravo.evals.text2wetlab import adapter
+from pybravo.evals.text2wetlab import adapter, contact_logger
 from pybravo.evals.text2wetlab.planning import DeckSource, OT2Plan, PlannedAddition, PlannedReaction
 from pybravo.evals.text2wetlab.planning_runtime import PlanningResult
 from pybravo.evals.text2wetlab.reaction import Addition
@@ -86,6 +87,35 @@ def test_static_gate_accepts_normal_ot2_protocol():
     adapter.validate_ot2_source(VALID_PROTOCOL)
 
 
+def test_static_gate_reports_multiple_literal_stroke_ranges_in_one_repair() -> None:
+    source = VALID_PROTOCOL.replace(
+        "    for well in plate.rows()[0]:",
+        "    pipette.aspirate(8, source['A1'])\n"
+        "    pipette.dispense(4, plate['A1'])\n"
+        "    for well in plate.rows()[0]:",
+    )
+    with pytest.raises(adapter.ProtocolValidationError) as caught:
+        adapter.validate_ot2_source(source)
+    message = str(caught.value)
+    assert "Literal pipette volumes outside working range" in message
+    assert "pipette.aspirate(8 µL)" in message
+    assert "pipette.dispense(4 µL)" in message
+    assert message.count("Line ") == 2
+
+
+def test_static_gate_rejects_well_name_slice_with_ordered_well_guidance() -> None:
+    source = VALID_PROTOCOL.replace("plate.rows()[0]", "plate['A1':'G1']")
+    with pytest.raises(adapter.ProtocolValidationError) as caught:
+        adapter.validate_ot2_source(source)
+    message = str(caught.value)
+    assert "Line " in message
+    assert "well-name slices" in message
+    assert "plate[name]" in message
+    assert "plate.columns()[0][:7]" in message
+    assert "plate.rows_by_name()['A'][0:7] instead selects A1:A7" in message
+    assert "requested well order" in message
+
+
 def test_static_gate_rejects_a_literal_p300_stroke_below_working_range():
     source = VALID_PROTOCOL.replace(
         '    for well in plate.rows()[0]:',
@@ -152,6 +182,16 @@ def test_out_of_range_well_index_diagnostic_uses_actual_labware_geometry():
     assert "plate.columns()[column_index][row_index]" in advice
     assert "tube rack" in advice
     assert "sample-to-destination mapping" in advice
+
+
+def test_below_minimum_stroke_repair_uses_loaded_smaller_pipette_before_dilution():
+    advice = adapter._repair_guidance(
+        "Event 17: P300 dispense volume 8 µL is outside this pipette's "
+        "20–300 µL working range.", VALID_PROTOCOL,
+    )
+    assert "loaded smaller pipette" in advice
+    assert "splitting a below-minimum stroke" in advice
+    assert "listed deck includes a suitable diluent" in advice
 
 
 def test_thermocycler_diagnostics_use_public_opentrons_75_api():
@@ -279,6 +319,32 @@ async def test_observable_scientific_failure_requests_source_grounded_full_repai
     trace = json.loads(result.trace_path.read_text())
     assert [attempt["scientific_audit"] for attempt in trace["attempts"]] == ["failed", "passed"]
     assert trace["attempts"][0]["local_rubric_audit"]["official_score"] is None
+
+
+def test_scientific_repair_quotes_relevant_methods_from_long_paragraph(monkeypatch) -> None:
+    monkeypatch.setattr(adapter, "audit_rubric_coverage", lambda *_: {
+        "items": [{"checks": [{"name": "PCR reaction volume", "status": "failed",
+                                "evidence": "PCR volumes observable; INTERNAL RUBRIC DETAIL"}]}],
+    })
+    instruction = (
+        "| Labware | Label |\n|---|---|\n"
+        "| corning_96_wellplate_360ul_flat | pcr_plate |\n"
+        "| corning_96_wellplate_360ul_flat | primer_plate |\n"
+    )
+    methods = (
+        "Materials and methods > DNA construction\n"
+        "PCRs were performed in 25 µL volumes using polymerase with primers and template DNA. "
+        "Amplification was performed for 34 cycles. "
+        "For plasmid digestion, water and buffer were added before incubation.\n"
+        + "The assay uses several additional calibrated parameters and reagent descriptions. " * 9
+    )
+    _audit, diagnostic = adapter._scientific_audit(
+        "example", adapter.EventLog([], {}), "", instruction, methods,
+    )
+    assert diagnostic is not None
+    assert "PCRs were performed in 25 µL volumes" in diagnostic
+    assert "| corning_96_wellplate_360ul_flat" not in diagnostic
+    assert "INTERNAL RUBRIC DETAIL" not in diagnostic
 
 
 @pytest.mark.asyncio
@@ -477,6 +543,96 @@ def test_event_gate_requires_fresh_tip_between_reagent_stocks():
     assert "A2 of stocks on 2" in result.detail
 
 
+def _specimen_fanout_events(*, at_rim: bool) -> adapter.EventLog:
+    dispense = {"at_or_above_well_rim": True} if at_rim else {}
+    events = [
+        _event("pick"),
+        _event("aspirate", labware="reagent on 2", well="A1"),
+        {**_event("dispense", labware="sample plate on 1", well="A1"), **dispense},
+        _event("aspirate", labware="reagent on 2", well="A1"),
+        {**_event("dispense", labware="sample plate on 1", well="A3"), **dispense},
+        _event("drop"),
+        _event("pick"),
+        _event("aspirate", labware="sample plate on 1", well="A1"),
+        _event("dispense", labware="waste on 5", well="A1"),
+        _event("drop"),
+    ]
+    labware = {"reagent on 2": "nest_1_reservoir_195ml",
+               "sample plate on 1": "corning_96_wellplate_360ul_flat",
+               "waste on 5": "nest_1_reservoir_195ml"}
+    return adapter.EventLog(events, labware)
+
+
+def test_contact_sidecar_requires_observed_dispense_at_or_above_well_rim() -> None:
+    class Well:
+        def top(self):
+            return SimpleNamespace(point=SimpleNamespace(z=12.5))
+
+    class LabwareLike:
+        def as_well(self):
+            return Well()
+
+    def payload(z):
+        return {"location": SimpleNamespace(
+            point=SimpleNamespace(z=z), labware=LabwareLike(),
+        )}
+
+    assert contact_logger._at_or_above_well_rim(payload(12.5)) is True
+    assert contact_logger._at_or_above_well_rim(payload(13.0)) is True
+    assert contact_logger._at_or_above_well_rim(payload(12.4)) is False
+    assert contact_logger._at_or_above_well_rim({}) is None
+
+
+def test_contact_sidecar_preserves_pinned_events_and_adds_only_dispense_evidence(tmp_path) -> None:
+    logger = tmp_path / "pinned_logger.py"
+    logger.write_text('''from types import SimpleNamespace
+
+class Well:
+    def top(self):
+        return SimpleNamespace(point=SimpleNamespace(z=10.0))
+
+class WellLike:
+    def as_well(self):
+        return Well()
+
+def parse(text, payload):
+    return {"kind": text, "volume": payload["volume"], "well": "A1"}
+
+def main(protocol, labware_dir):
+    payload = {"volume": 5, "location": SimpleNamespace(
+        point=SimpleNamespace(z=10.0), labware=WellLike())}
+    return {"ok": True, "events": [parse("aspirate", payload),
+                                   parse("dispense", payload)]}
+''', encoding="utf-8")
+    result = contact_logger.record(logger, tmp_path / "protocol.py", tmp_path)
+    assert result == {"ok": True, "events": [
+        {"kind": "aspirate", "volume": 5, "well": "A1"},
+        {"kind": "dispense", "volume": 5, "well": "A1", "at_or_above_well_rim": True},
+    ]}
+
+
+def test_event_gate_allows_trusted_rim_dispense_from_one_stock_to_specimen_columns():
+    assert adapter.validate_event_contamination(_specimen_fanout_events(at_rim=True)).status == "passed"
+
+
+def test_event_gate_does_not_infer_noncontact_from_source_only_lineage():
+    result = adapter.validate_event_contamination(_specimen_fanout_events(at_rim=False))
+    assert result.status == "failed"
+    assert "A1 of sample plate on 1" in result.detail
+    assert "A3 of sample plate on 1" in result.detail
+
+
+def test_event_gate_rejects_stock_backflow_after_rim_fanout_and_specimen_aspiration():
+    log = _specimen_fanout_events(at_rim=True)
+    events = log.events[:-1] + [
+        _event("aspirate", labware="reagent on 2", well="A1"),
+        _event("drop"),
+    ]
+    result = adapter.validate_event_contamination(adapter.EventLog(events, log.labware))
+    assert result.status == "failed"
+    assert "re-entered A1 of reagent on 2" in result.detail
+
+
 def test_event_gate_allows_one_specimen_source_to_one_reaction_well_and_mix():
     log = adapter.EventLog([
         _event("pick"),
@@ -525,6 +681,9 @@ async def test_generation_uses_verbatim_methods_passage_with_source_digest(tmp_p
     )
     assert "Use 40 µL beads." in messages_seen[1]["content"]
     assert "irrelevant result" not in messages_seen[1]["content"]
+    assert "premix before adding primers or templates separately" in messages_seen[0]["content"]
+    assert "Do not reinterpret a stated starting stock identity or concentration" in messages_seen[0]["content"]
+    assert "A vertical range such as A1:G1" in messages_seen[0]["content"]
     trace = json.loads(result.trace_path.read_text(encoding="utf-8"))
     assert trace["scientific_source"]["source_sha256"] == hashlib.sha256(source.encode()).hexdigest()
     assert trace["scientific_source"]["strategy"] == "verbatim_methods_section"

@@ -98,7 +98,7 @@ _SYSTEM_PROMPT = """You write a single, self-contained Python Protocol API v2 fi
 
 Use `from opentrons import protocol_api`, `metadata = {"apiLevel": "2.15"}` unless the task specifies another compatible API level, and `def run(protocol: protocol_api.ProtocolContext):`. This benchmark uses an OT-2 and Opentrons software 7.5.0. Use OT-2 deck slots 1 through 11; slot 12 is fixed trash. Load labware with its Opentrons load name and deck location, and load OT-2 pipettes with an explicit mount and suitable tip racks. For a ThermocyclerContext, `set_block_temperature(temperature, hold_time_minutes=...)` waits for the block and accepts 4–99 °C; it can instead take `hold_time_seconds=...`. `close_lid()` and `open_lid()` control the lid. The optional heated-lid `set_lid_temperature()` accepts only 37–110 °C. There is no public `wait_for_block()` or `wait_for_block_temperature()` method on ThermocyclerContext. If a task requires samples to be handled on a preconditioned module, explicitly set that module's temperature before the first sample-handling action; start the timed incubation only after all requested additions are complete. After a timed temperature pulse, change the block to the required next-stage temperature before serial pipetting into every sample; do not leave the first samples at the pulse temperature while the remaining additions are made. The protocol must remain importable and simulatable by Opentrons. Do not use Bravo APIs, robot connection APIs, external files, network access, environment variables, or code execution helpers.
 
-Translate the written task faithfully: preserve stated deck slots, labware, pipettes, tip use, liquid volumes, well order, repetitions, mixing, pauses, and any specified parameters. Use loops and helper functions when they make the mapping clear. Opentrons labware indexing uses well-name strings, not integer positions or Well objects from another plate: for positional loops use `plate.wells()[i]` or zip the actual well objects from multiple labware; never use `plate[i]` or `plate[other_plate_well]`. A single `aspirate()` or `dispense()` location must be one Well, not a Python list of wells; iterate or use a suitable transfer helper. `.wells()` is column-major: derive the number of rows from `len(plate.columns()[0])` when calculating indices, and confirm that multichannel spacing matches the actual labware geometry. A multichannel pipette can address one full, pitch-compatible column at a time, not a four-row tube rack as if it were an eight-row plate. Budget tip pickups against the loaded racks before writing loops; reserve source-isolated tips for sample contact, and use a compatible multichannel pipette for full-column operations when that reduces rack use without crossing samples. Always pass an explicit target well to `pipette.mix(repetitions, volume, well)`, because the implicit current location may be a tip rack. Balance reaction volumes and stated reagent concentrations from the materials actually loaded; do not create an unlisted water or reagent source. For a 2× reagent that must end at 1×, its transferred volume must be exactly half the final reaction volume. Sum every component, including primers and template, and check the final concentration before writing pipetting code. If a stock concentration or diluent is missing, state the narrowest workable assumption in a protocol comment instead of silently changing the final concentration; a source solution may be assumed pre-diluted only when that is consistent with the stated reagents and the assumed stock concentration is explicit. Distinguish one aspiration feeding several dispenses from separate aspirations and tip changes: follow the task's requested grouping and tip policy; when grouping is requested, split at pipette-capacity boundaries. For loops over distinct sample/reaction wells, pick up and drop a fresh tip inside each per-sample iteration once the tip touches sample liquid; do not carry one used tip across sample wells or back into a shared reagent reservoir. A tip that has entered a reagent stock or dispensed into a mixture cannot enter a different stock well; change tips between different reagent stocks. `transfer()`, `distribute()`, and similar helpers manage their own tip pickup by default. Never call a helper with its default tip policy while a manually picked-up tip is already attached: either let the helper manage tips, or use explicit aspirate/dispense (or `new_tip='never'`) with a manual pick/drop cycle. Call `reset_tipracks()` only after a rack is exhausted and the task permits refilling. The OT-2 GEN2 working ranges are P20 1–20 µL, P300 20–300 µL, and P1000 100–1000 µL. Effective capacity is the smaller of pipette capacity and loaded tip capacity; never aspirate beyond either one, dispense more than the current tip holds, or perform a liquid action without an attached tip. Finish with no tip attached. When a task is underspecified, make the narrowest workable assumption and state it in a protocol comment. Include no Markdown fences or explanation outside the code string."""
+Translate the written task faithfully: preserve stated deck slots, labware, pipettes, tip use, liquid volumes, well order, repetitions, mixing, pauses, and any specified parameters. Use loops and helper functions when they make the mapping clear. Opentrons labware indexing uses well-name strings, not integer positions or Well objects from another plate: for positional loops use `plate.wells()[i]` or zip the actual well objects from multiple labware; never use `plate[i]` or `plate[other_plate_well]`. A single `aspirate()` or `dispense()` location must be one Well, not a Python list of wells; iterate or use a suitable transfer helper. `.wells()` is column-major: derive the number of rows from `len(plate.columns()[0])` when calculating indices, and confirm that multichannel spacing matches the actual labware geometry. A vertical range such as A1:G1 is the first seven wells of column 1 (`plate.columns()[0][:7]`); slicing row A would select A1:A7 instead. A multichannel pipette can address one full, pitch-compatible column at a time, not a four-row tube rack as if it were an eight-row plate. Budget tip pickups against the loaded racks before writing loops; reserve source-isolated tips for sample contact, and use a compatible multichannel pipette for full-column operations when that reduces rack use without crossing samples. Always pass an explicit target well to `pipette.mix(repetitions, volume, well)`, because the implicit current location may be a tip rack. Balance reaction volumes and stated reagent concentrations from the materials actually loaded; do not create an unlisted water or reagent source. For a 2× reagent that must end at 1×, its transferred volume must be exactly half the final reaction volume. Sum every component, including primers and template, and check the final concentration before writing pipetting code. When distributing a premix before adding primers or templates separately, its dispense volume must equal the final per-well volume minus every later addition; do not dispense the full final volume of premix and then add more. Do not reinterpret a stated starting stock identity or concentration as pre-diluted: a fixed deck inventory is authoritative. If an exact required aliquot falls below every loaded pipette minimum, use a supported smaller pipette, a documented in-range dilution from the actual stock with an available diluent and vessel, or an explicit manual handoff when permitted; never round up or invent a changed source stock. If a stock concentration or diluent is genuinely unspecified, state the narrowest workable assumption in a protocol comment without contradicting any supplied inventory. Distinguish one aspiration feeding several dispenses from separate aspirations and tip changes: follow the task's requested grouping and tip policy; when grouping is requested, split at pipette-capacity boundaries. For loops over distinct sample/reaction wells, pick up and drop a fresh tip inside each per-sample iteration once the tip touches sample liquid; do not carry one used tip across sample wells or back into a shared reagent reservoir. A tip that has entered a reagent stock or dispensed into a mixture cannot enter a different stock well; change tips between different reagent stocks. `transfer()`, `distribute()`, and similar helpers manage their own tip pickup by default. Never call a helper with its default tip policy while a manually picked-up tip is already attached: either let the helper manage tips, or keep manual pickup/drop and use explicit aspirate/dispense (or `new_tip='never'`). Call `reset_tipracks()` only after a rack is exhausted and the task permits refilling. The OT-2 GEN2 working ranges are P20 1–20 µL, P300 20–300 µL, and P1000 100–1000 µL. Effective capacity is the smaller of pipette capacity and loaded tip capacity; never aspirate beyond either one, dispense more than the current tip holds, or perform a liquid action without an attached tip. Finish with no tip attached. When a task is underspecified, make the narrowest workable assumption and state it in a protocol comment. Include no Markdown fences or explanation outside the code string."""
 
 _TIP_REFILL_GUIDANCE = """The task explicitly permits refilling fresh tip racks. Before code generation, count pickups per pipette across every stage, including loops and mixing. Keep a per-pipette pickup counter and compare it with the total number of wells in that pipette's loaded tip racks. Only when the counter reaches actual rack capacity, pause for the operator to replenish fresh tips, call that pipette's reset_tipracks() once before its next pickup, then reset its counter. Never reset on every pickup, reset a partly used rack, or omit the physical fresh-rack handoff."""
 
@@ -166,8 +166,11 @@ def _repair_guidance(error: str, code: str) -> str:
         return (
             "This individual liquid stroke is outside the loaded pipette's stated working "
             "range. For a stroke above its maximum, split the same total into valid strokes "
-            "or use a loaded larger pipette. For a subminimum aliquot, never round up or "
-            "silently change concentration: if the listed deck includes a suitable diluent "
+            "or use a loaded larger pipette. For a subminimum aliquot, use an already loaded "
+            "smaller pipette if its working range and tip capacity include the original "
+            "volume; splitting a below-minimum stroke into even smaller strokes is invalid. "
+            "For any subminimum aliquot, never round up or silently change concentration: "
+            "if the listed deck includes a suitable diluent "
             "and vessel, prepare a batch dilution using in-range stock and diluent strokes, "
             "then deliver the same stock-equivalent dose and rebalance the reaction total. "
             "Otherwise record the exact addition as an explicit manual handoff if the task "
@@ -223,10 +226,12 @@ def _repair_guidance(error: str, code: str) -> str:
     if "OutOfTipsError" in error:
         return (
             "This pipette has consumed every tip in its configured rack. Check the number "
-            "of fresh tips needed by all loops, not only one step. If the task explicitly "
+            "of fresh tips needed by all steps, not only one step: include master-mix "
+            "preparation and every loop. A loop can cross the rack boundary before it "
+            "ends. If the task explicitly "
             "allows rack refilling, track the number of pickups per pipette against the "
             "actual capacity of its loaded tip racks. At the exact exhaustion boundary, "
-            "pause for an operator to load fresh tips, call that pipette's `reset_tipracks()` "
+            "pause for an operator to load a fresh permitted rack, call that pipette's `reset_tipracks()` "
             "once before its next `pick_up_tip()`, then reset the counter. Never call "
             "`reset_tipracks()` before every pickup or silently reuse a contaminated tip. "
             "If refilling is not authorized, plan a new rack or "
@@ -267,25 +272,63 @@ def _scientific_audit(
     if not failed_checks:
         return audit, None
 
-    source_lines = [line.strip() for line in (instruction + "\n" + (scientific_source or "")).splitlines()
-                    if 12 <= len(line.strip()) <= 500 and not line.strip().startswith("```")]
+    # Papers often place an entire Methods paragraph (including several decisive
+    # numeric steps) on one very long line. Split it into verbatim sentences so it
+    # is not discarded by the prompt-size bound. Preserve provenance for ranking:
+    # deck inventories answer mapping checks, while Methods answer scientific ones.
+    source_passages: list[tuple[str, bool, bool]] = []
+    for origin, source in (("task", instruction), ("paper", scientific_source or "")):
+        in_methods = origin == "paper"
+        for raw_line in source.splitlines():
+            line = raw_line.strip()
+            lowered = line.casefold()
+            if lowered.startswith(("materials and methods", "methods")):
+                in_methods = True
+            elif lowered.startswith(("results", "discussion", "conclusion")):
+                in_methods = False
+            if not line or line.startswith(("```", "|---")):
+                continue
+            for passage in re.split(r"(?<=[.!?])\s+(?=[A-Z])", line):
+                passage = passage.strip()
+                if not 12 <= len(passage) <= 500:
+                    continue
+                inventory = passage.startswith("|") or bool(re.match(
+                    r"(?i)^[-*]\s*(?:`?\w+`?\s+(?:well|wells|slot)|slot\s+\d+)", passage))
+                source_passages.append((passage, origin == "task", in_methods and not inventory))
     stopwords = {"and", "the", "for", "with", "from", "into", "each", "after", "before",
                  "that", "this", "must", "well", "wells", "volume", "volumes", "source",
                  "destination", "needs", "use", "used", "per", "all", "one", "two"}
 
     def words(value: str) -> set[str]:
-        return {word.lower() for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]*|\d+(?:\.\d+)?", value)
-                if word.lower() not in stopwords}
+        found = {word.lower() for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]*|\d+(?:\.\d+)?", value)
+                 if word.lower() not in stopwords}
+        return found | {word[:-1] for word in found if len(word) > 3 and word.endswith("s")
+                        and not word.endswith("ss")}
 
     relevant: list[str] = []
     for check in failed_checks[:5]:
         anchors = words(check["name"] + " " + check["evidence"])
-        ranked = sorted(((len(words(line) & anchors), line) for line in source_lines), reverse=True)
-        for score, line in ranked[:2]:
-            if score and line not in relevant:
-                relevant.append(line)
+        mapping_check = bool(anchors & {"mapping", "labware", "deck", "slot", "plate", "well"})
+        ranked: list[tuple[int, int, str]] = []
+        for index, (passage, from_task, is_method) in enumerate(source_passages):
+            overlap = len(words(passage) & anchors)
+            if not overlap:
+                continue
+            method_signal = bool(re.search(
+                r"(?i)\b(?:add(?:ed)?|aspirat(?:e|ed)|dispens(?:e|ed)|incubat(?:e|ed)|"
+                r"mix(?:ed)?|digest(?:ed|ion)?|elut(?:e|ed)|amplif(?:y|ied)|"
+                r"transform(?:ed|ation)?|cycl(?:e|ed))\b", passage))
+            has_measure = bool(re.search(r"(?i)\d\s*(?:µl|μl|ul|ml|°c|min|s\b|cycles?\b|ng|nm)", passage))
+            score = overlap * 3 + int(method_signal) * 2 + int(has_measure) * 2
+            score += (5 if from_task else 0) if mapping_check else (5 if is_method else 0)
+            if passage.startswith("|") and not mapping_check:
+                score -= 6
+            ranked.append((score, -index, passage))
+        for _score, _order, passage in sorted(ranked, reverse=True)[:2]:
+            if passage not in relevant:
+                relevant.append(passage)
     if not relevant:
-        relevant = source_lines[:3]
+        relevant = [passage for passage, _from_task, _is_method in source_passages[:3]]
     quoted = "\n".join(f"- {line[:350]}" for line in relevant[:8])
     diagnostic = (
         "Read-only review of the simulated actions found observable gaps against the supplied "
@@ -360,6 +403,7 @@ def _validate_literal_pipette_volumes(run: ast.FunctionDef) -> None:
                 instruments[node.targets[0].id] = (minimum, maximum)
                 break
     volume_positions = {"aspirate": 0, "dispense": 0, "transfer": 0, "distribute": 0, "mix": 1}
+    volume_errors: list[tuple[int, str]] = []
     for node in ast.walk(run):
         if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute)
                 or not isinstance(node.func.value, ast.Name)
@@ -381,10 +425,18 @@ def _validate_literal_pipette_volumes(run: ast.FunctionDef) -> None:
             continue
         minimum, maximum = instruments[node.func.value.id]
         if not minimum <= volume_arg.value <= maximum:
-            raise ProtocolValidationError(
+            volume_errors.append((node.lineno,
                 f"Line {node.lineno}: {node.func.value.id}.{node.func.attr}({volume_arg.value:g} µL) "
                 f"is outside this pipette's {minimum:g}–{maximum:g} µL working range."
-            )
+            ))
+    if volume_errors:
+        errors = [message for _, message in sorted(volume_errors)]
+        if len(errors) == 1:
+            raise ProtocolValidationError(errors[0])
+        summary = "\n".join(errors[:12])
+        if len(errors) > 12:
+            summary += f"\n… and {len(errors) - 12} more literal volume violations."
+        raise ProtocolValidationError("Literal pipette volumes outside working range:\n" + summary)
 
 
 def validate_ot2_source(code: str) -> None:
@@ -490,6 +542,19 @@ def validate_ot2_source(code: str) -> None:
     run_nodes = set(ast.walk(run))
     action_seen = False
     for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+            bounds = (node.slice.lower, node.slice.upper)
+            if any(isinstance(bound, ast.Constant) and isinstance(bound.value, str)
+                   and re.fullmatch(r"[A-P]\d{1,2}", bound.value, re.IGNORECASE)
+                   for bound in bounds):
+                raise ProtocolValidationError(
+                    f"Line {node.lineno}: Opentrons labware does not support well-name "
+                    "slices such as plate['A1':'G1']. Build an explicit ordered list "
+                    "of wells using plate[name] for each desired well name. For a vertical "
+                    "A1:G1 range, plate.columns()[0][:7] selects the first seven wells of "
+                    "column 1; plate.rows_by_name()['A'][0:7] instead selects A1:A7. "
+                    "Preserve the requested well order."
+                )
         if isinstance(node, (ast.Import, ast.ImportFrom)) and node not in tree.body:
             raise ProtocolValidationError("Imports inside protocol functions are unsupported.")
         if isinstance(node, (ast.Global, ast.Nonlocal)):
@@ -599,7 +664,8 @@ def record_simulation_events(
         output = temp_dir / "events.json"
         try:
             completed = subprocess.run(
-                [str(interpreter), str(logger_path), str(path), str(event_labware_dir), str(output)],
+                [str(interpreter), str(Path(__file__).with_name("contact_logger.py")),
+                 str(logger_path), str(path), str(event_labware_dir), str(output)],
                 capture_output=True, text=True, timeout=timeout_s, check=False,
                 env=_sanitized_simulator_env(),
             )
@@ -617,7 +683,9 @@ def record_simulation_events(
             detail = str(completed.stderr or "unknown error")[-3000:]
             raise GenerationError(f"Structured event logger failed: {detail}")
         events = payload.get("events")
-        labware = payload.get("labware")
+        # The RNA task's pinned logger emits no labware-name map; its fixed
+        # slot identities remain present in each event's labware string.
+        labware = payload.get("labware", {})
         if not isinstance(events, list) or not all(isinstance(event, dict) for event in events):
             raise GenerationError("Structured event logger did not return an events array.")
         if not isinstance(labware, dict) or not all(isinstance(key, str) and isinstance(value, str)
@@ -697,6 +765,15 @@ def validate_event_contamination(log: EventLog) -> EventValidationResult:
             prior = touched.setdefault(instrument, set())
             source = specimen_sources.get(instrument)
             target = specimen_targets.get(instrument)
+            if (kind == "dispense" and event.get("at_or_above_well_rim") is True
+                    and reagent_sources.get(instrument) and not prior
+                    and source is None and target is None):
+                # The trusted simulator located this shared-reagent dispense
+                # at or above the destination rim. The tip has only aspirated
+                # from one reagent stock, so it can feed another well without
+                # being treated as a specimen-contact tip. The first later
+                # aspiration from a specimen enters the ordinary strict path.
+                continue
             invalid = False
             if kind == "aspirate":
                 if source is None:

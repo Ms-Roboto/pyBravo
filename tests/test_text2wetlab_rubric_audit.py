@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from pybravo.evals.text2wetlab.rubric_audit import RUBRIC_IDS, _source_facts, audit_rubric_coverage
+from pybravo.evals.text2wetlab.rubric_audit import (
+    RUBRIC_IDS,
+    Transfer,
+    _source_facts,
+    _tip_isolation,
+    audit_rubric_coverage,
+)
 
 
 def _transfer(events: list[dict], source: tuple[str, str], destination: tuple[str, str],
@@ -33,6 +39,16 @@ def test_every_pinned_task_has_five_audited_items_and_no_official_score() -> Non
         assert result["official_score"] is None
         assert result["metric"] == "local_rubric_coverage_audit"
         assert [item["id"] for item in result["items"]] == list(ids)
+
+
+def test_tip_isolation_distinguishes_same_well_name_on_two_sample_racks() -> None:
+    transfers = [
+        Transfer(1, "Opentrons 24 Tube Rack on 7", "A1", "Deep well plate on 4",
+                 "A1", 250, "P1000 Single on left mount", 1),
+        Transfer(2, "Opentrons 24 Tube Rack on 10", "A1", "Deep well plate on 4",
+                 "B1", 250, "P1000 Single on left mount", 1),
+    ]
+    assert not _tip_isolation("opentrons-rna-extraction", transfers, {"samples"})
 
 
 def test_colony_audit_catches_wrong_2x_dilution_even_with_complete_well_mapping() -> None:
@@ -265,6 +281,47 @@ def test_rna_elution_clearing_wait_must_follow_magnet_engagement() -> None:
     right = audit_rubric_coverage("opentrons-rna-extraction", _rna_elution_events(), source)
     assert _check(wrong, "elution_recovery", name)["status"] == "failed"
     assert _check(right, "elution_recovery", name)["status"] == "supported"
+
+
+def _rna_sequential_elution_events(*, omit_second_column_wait: bool = False) -> list[dict]:
+    events: list[dict] = [{"kind": "temp", "celsius": 4}, {"kind": "disengage"}]
+    extraction = "USA Scientific 96 Deep Well Plate on Magnetic Module GEN1 on 4"
+    elution = "Plate_thermo_96_elutions on Temperature Module GEN1 on 6"
+    reservoir = "NEST 12 Well Reservoir on 5"
+    multi = "P300 8-Channel GEN2 on right mount"
+    for column in (1, 3, 5, 7, 9, 11):
+        well = f"A{column}"
+        _transfer(events, (reservoir, "A4"), (extraction, well), 100,
+                  instrument=multi, channels=8)
+    for column in (1, 3, 5, 7, 9, 11):
+        well = f"A{column}"
+        events.extend([
+            {"kind": "pick", "instrument": multi, "channels": 8},
+            {"kind": "aspirate", "volume": 50, "labware": extraction,
+             "well": well, "instrument": multi, "channels": 8},
+            {"kind": "dispense", "volume": 50, "labware": extraction,
+             "well": well, "instrument": multi, "channels": 8},
+            {"kind": "drop", "instrument": multi, "channels": 8},
+        ])
+        if not (omit_second_column_wait and column == 3):
+            events.append({"kind": "delay", "seconds": 30})
+        events.extend([{"kind": "engage"}, {"kind": "delay", "seconds": 90}])
+        _transfer(events, (extraction, well), (elution, well), 80,
+                  instrument=multi, channels=8)
+        events.append({"kind": "disengage"})
+    return events
+
+
+def test_rna_elution_allows_sequential_column_magnet_cycles() -> None:
+    source = "metadata = {'apiLevel': '2.15'}\n"
+    name = "30 s incubation, 90 s magnetic clearing and mixing"
+    right = audit_rubric_coverage("opentrons-rna-extraction",
+                                  _rna_sequential_elution_events(), source)
+    wrong = audit_rubric_coverage("opentrons-rna-extraction",
+                                  _rna_sequential_elution_events(omit_second_column_wait=True),
+                                  source)
+    assert _check(right, "elution_recovery", name)["status"] == "supported"
+    assert _check(wrong, "elution_recovery", name)["status"] == "failed"
 
 
 def test_rna_recovery_checks_current_temperature_not_any_earlier_four_degrees() -> None:
