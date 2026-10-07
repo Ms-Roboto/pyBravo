@@ -47,29 +47,33 @@ need to agree. Draft review issues are grouped diagnostics, not a release decisi
 
 These are outcomes from **separate saved runs**, not one simultaneous seven-task evaluation
 with the current code. Six distinct tasks reached the independent static/lint, Opentrons
-simulation, run-log, and event-safety gates at least once, including a newer colony PCR
-candidate. Only the colony run has a complete saved report under the current pinned-evidence
-audit; four older candidates are being rechecked against that audit. The newer
-scientific-coverage gate makes Golden Gate a known failure despite its older report's
-simulator_passed status. All local passes still have needs_review scientific or manual-stage
-checks; none has an official score.
+simulation, run-log, and event-safety gates at least once. Provenance-checked replays of
+four older Qwen-authored candidates plus the newer colony run give **5/7 tasks with complete
+local mechanical evidence** under the current audit. The newer scientific-coverage gate
+makes Golden Gate a known failure despite its older report's simulator_passed status. All
+five local acceptances still have needs_review scientific or manual-stage checks; none has
+an official score.
 
 | Task | Saved local mechanical evidence | Outstanding scientific or generation issue |
 | --- | --- | --- |
-| A1–A12 100 µL transfer | Local gates passed | Official rubric not run; Bravo draft remains unreviewed. |
-| Split 200 µL between two wells | Local gates passed | Official rubric not run; Bravo draft remains unreviewed. |
-| AMPure cleanup | Local gates passed after a revised candidate isolated samples with fresh tips | Physical tip replenishment and non-pipetting stages require review. |
-| E. coli heat shock | Local gates passed after a Qwen line repair put the 37 °C transition before SOC additions | Scientific and external-module fidelity still require review. |
+| A1–A12 100 µL transfer | Current pinned recheck passed | Task fidelity still needs review; Bravo draft remains unreviewed. |
+| Split 200 µL between two wells | Current pinned recheck passed | Task fidelity still needs review; Bravo draft remains unreviewed. |
+| AMPure cleanup | Current pinned recheck passed with sample-isolated fresh tips | Physical tip replenishment, binding/wash/drying handoffs, and contamination need review. |
+| E. coli heat shock | Current pinned recheck passed after a Qwen line repair put the 37 °C transition before SOC additions | Paper fidelity and external-module stages still require review. |
 | Golden Gate assembly | Older saved report passed mechanical gates | Its embedded local rubric audit **failed** required PCR setup and ordered DpnI/cleanup handoffs. Current adapter rejects observable audit failures; the saved report predates that gate. |
 | Colony PCR | A newer Qwen draft passed current local lint, simulation, pinned run log, and event-safety gates | Primer-stock concentration was not specified, the 4 µL primer-pair choice needs scientific review, and tip replenishment requires an explicit operator handoff before physical use. |
-| RNA extraction | No accepted local simulation | Qwen corrected the P1000 minimum volume and a multichannel location error, but a patched candidate still exhausted tips; 48-sample mapping and elution recovery remain unresolved. |
+| RNA extraction | No accepted local simulation | Fresh drafts exceeded the effective 200 µL filter-tip capacity or exhausted installed tips; 48-sample mapping and elution recovery remain unresolved. |
 
-The saved reports are in /tmp/pybravo-text2wetlab-baseline/,
-/tmp/pybravo-text2wetlab-split-baseline/, /tmp/pybravo-text2wetlab-ampure-repair2/,
-/tmp/pybravo-text2wetlab-ecoli-patch-integrated2/,
+The provenance-checked current recheck reports are in
+/tmp/pybravo-text2wetlab-a1-saved-recheck-full/,
+/tmp/pybravo-text2wetlab-split-recheck-current/,
+/tmp/pybravo-text2wetlab-ampure-recheck-current/, and
+/tmp/pybravo-text2wetlab-ecoli-recheck-current/. Their `generation` field is null: each
+recheck verified the original Qwen trace and protocol digest, then applied the current
+pinned gates without asking the model to regenerate a protocol. Other reports are in
 /tmp/pybravo-text2wetlab-golden-planning/, /tmp/pybravo-text2wetlab-golden-direct5/,
 /tmp/pybravo-text2wetlab-colony-current2/, and
-/tmp/pybravo-text2wetlab-rna-current/. Each report and task trace records its own code and
+/tmp/pybravo-text2wetlab-rna-current2/. Each report and task trace records its own code and
 source hashes, attempts, and gate results. The Golden Gate report contains
 local_rubric_audit.status: failed even though its top-level status is the older
 simulator_passed; the latter must not be counted as current scientific acceptance. A later
@@ -77,6 +81,11 @@ evidence-planning rerun in /tmp/pybravo-text2wetlab-golden-science-gated/ timed 
 local Qwen 300-second limit before saving a plan or reaching simulation. A direct-draft
 science-gated rerun also failed: Qwen repaired tip isolation but overfilled a cited 25 µL
 PCR and did not produce an accepted ordered handoff sequence.
+
+The read-only aggregate audit is
+`/tmp/pybravo-text2wetlab-current-saved-evidence-audit.json`. It confirms the five
+mechanical-evidence tasks above; Golden Gate has failed observable science checks and RNA
+has no accepted local report. It cannot run the official anti-hack gate or rubric judge.
 
 ## How the current local harness stays grounded
 
@@ -134,6 +143,18 @@ checks only selected tasks, records hashes, and leaves official_score null:
   --task a1-a12-100ul --task split-200ul-two-wells \
   --simulator /tmp/pybravo-text2wetlab-ot2-py310/bin/opentrons_simulate \
   --output-dir /tmp/pybravo-text2wetlab-check
+~~~
+
+To recheck an existing Qwen-authored candidate without a new model call, pass the saved
+run directory with `--recheck-from` and use a new output directory. For example:
+
+~~~sh
+.venv/bin/python scripts/evaluate_text2wetlab.py \
+  --task split-200ul-two-wells \
+  --recheck-from /tmp/pybravo-text2wetlab-split-baseline \
+  --dataset-root /tmp/Text2WetLab-eval \
+  --simulator /tmp/pybravo-text2wetlab-ot2-py310/bin/opentrons_simulate \
+  --output-dir /tmp/pybravo-text2wetlab-split-recheck
 ~~~
 
 For a task with a supplied paper, add --evidence-planning to inspect the typed plan and its
