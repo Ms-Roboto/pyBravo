@@ -30,6 +30,7 @@ from generate_text2wetlab_designer import (
 
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
 from pybravo.workflow.drafter.llm import DrafterConfig, draft_workflow
+from pybravo.workflow.drafter.scientific_patterns import audit_scientific_patterns
 from pybravo.workflow.drafter.scientific_repair import (
     repair_scientific_workflow,
     validate_scientific_repair_candidate,
@@ -84,35 +85,104 @@ def _authoring_workflow(saved: dict[str, Any]) -> dict[str, Any]:
     return workflow
 
 
+def _upstream_tip_locations(workflow: dict[str, Any], node_id: int) -> set[str]:
+    """Find the nearest proposed tip pickup on every upstream flow path."""
+    graph = workflow.get("graph") or {}
+    nodes = {node.get("id"): node for node in graph.get("nodes") or []
+             if isinstance(node, dict)}
+    parents: dict[int, set[int]] = {}
+    for link in graph.get("links") or []:
+        if not isinstance(link, (list, tuple)) or len(link) != 6 or link[5] != -1:
+            continue
+        parents.setdefault(link[3], set()).add(link[1])
+    locations: set[str] = set()
+    pending = list(parents.get(node_id, ()))
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        node = nodes.get(current) or {}
+        kind = node.get("type")
+        if kind == "tips/TipsOn":
+            locations.update(_expanded_locations((node.get("properties") or {}).get("location")))
+        elif kind not in {"tips/TipsOff", "flow/Start"}:
+            pending.extend(parents.get(current, ()))
+    return locations
+
+
+def _expanded_locations(value: Any) -> list[str]:
+    """Expand only explicit Bravo slots and literal iter: slot lists."""
+    raw = str(value or "").strip()
+    values = [part.strip() for part in (raw[5:].split(",") if raw.startswith("iter:") else [raw])]
+    return ([str(int(slot)) for slot in values]
+            if values and all(slot.isdigit() and 1 <= int(slot) <= 9 for slot in values)
+            else [])
+
+
 def _catalog_issues(workflow: dict[str, Any], context: dict[str, Any], instruction: str) -> list[dict[str, str]]:
-    known_ids = {str(row["id"]) for row in context.get("labware") or []
-                 if isinstance(row, dict) and row.get("id")}
+    catalog = {str(row["id"]): row for row in context.get("labware") or []
+               if isinstance(row, dict) and row.get("id")}
     issues = []
     for slot, stack in (workflow.get("deck") or {}).items():
         for index, item in enumerate(stack):
             identity = item.get("labware_id") if isinstance(item, dict) else None
-            if identity not in known_ids:
+            catalog_item = catalog.get(str(identity))
+            if catalog_item is None:
                 issues.append({
                     "severity": "error", "code": "UNRESOLVED_LABWARE",
                     "message": f"Labware {identity!r} at Bravo position {slot} is absent from the active catalog.",
                     "path": f"/deck/{slot}/{index}/labware_id",
                 })
+                continue
+            for field in ("kind", "base_class", "wells"):
+                claimed, actual = item.get(field), catalog_item.get(field)
+                if claimed not in (None, "", 0) and actual not in (None, "", 0) and claimed != actual:
+                    issues.append({
+                        "severity": "error", "code": "CATALOG_LABWARE_METADATA_MISMATCH",
+                        "message": f"Labware {identity!r} declares {field}={claimed!r}, but the active catalog records {actual!r}.",
+                        "path": f"/deck/{slot}/{index}/{field}",
+                    })
+            if item.get("tip_definition_id") and catalog_item.get("base_class") != "tip_box":
+                issues.append({
+                    "severity": "error", "code": "TIP_ID_ON_NON_TIPBOX",
+                    "message": f"Labware {identity!r} is not a catalog tip box; remove its proposed tip definition.",
+                    "path": f"/deck/{slot}/{index}/tip_definition_id",
+                })
     issues.extend(_node_issues(workflow))
     issues.extend(_hardware_issues(workflow, context, source_instruction=instruction))
-    issues.extend(_scientific_pattern_issues(workflow, source_instruction=instruction))
-    classes = {str(identifier): row for row in context.get("liquid_classes") or []
-               if isinstance(row, dict)
-               for identifier in (row.get("name"), row.get("liquid_class_id")) if identifier}
-    ready_tips = {str(row.get("tip_definition_id")) for row in context.get("tipbox_choices") or []
-                  if isinstance(row, dict) and row.get("execution_ready") is True}
+    # Head-footprint checks must use catalog well counts, not an omitted or
+    # model-claimed deck-item count. This copy is only for validation.
+    catalog_view = deepcopy(workflow)
+    for stack in (catalog_view.get("deck") or {}).values():
+        for item in stack:
+            actual = catalog.get(str(item.get("labware_id")))
+            if actual is not None and actual.get("wells"):
+                item["wells"] = actual["wells"]
+    issues.extend(_scientific_pattern_issues(catalog_view, source_instruction=instruction))
+    issues.extend(audit_scientific_patterns(
+        catalog_view, source_instruction=instruction, head_type=context.get("head_type"),
+    ))
+    classes: dict[str, list[dict[str, Any]]] = {}
+    for row in context.get("liquid_classes") or []:
+        if isinstance(row, dict):
+            for identifier in (row.get("name"), row.get("liquid_class_id")):
+                if identifier:
+                    matches = classes.setdefault(str(identifier), [])
+                    if row not in matches:
+                        matches.append(row)
+    tip_pairs = {(str(row.get("labware_id")), str(row.get("tip_definition_id"))): row
+                 for row in context.get("tipbox_choices") or []
+                 if isinstance(row, dict) and row.get("labware_id") and row.get("tip_definition_id")}
     deck = workflow.get("deck") or {}
-    moved_to = {
-        str(props.get(key))
-        for node in (workflow.get("graph") or {}).get("nodes") or [] if isinstance(node, dict)
-        for props in [node.get("properties") or {}]
-        if node.get("type", "").startswith("plate/")
-        for key in ("place_location", "destination_location", "target_location", "base_location")
-        if props.get(key) is not None
+    move_targets = {
+        target
+        for move in (workflow.get("graph") or {}).get("nodes") or [] if isinstance(move, dict)
+        for props in [move.get("properties") or {}]
+        if move.get("type", "").startswith("plate/")
+        for key in ("place_location", "destination_location", "base_location")
+        for target in _expanded_locations(props.get(key))
     }
     for index, node in enumerate((workflow.get("graph") or {}).get("nodes") or []):
         if not isinstance(node, dict):
@@ -120,19 +190,81 @@ def _catalog_issues(workflow: dict[str, Any], context: dict[str, Any], instructi
         kind = node.get("type", "")
         props = node.get("properties") or {}
         location = str(props.get("location", ""))
-        if kind == "tips/TipsOn" and location.isdigit() and location not in moved_to:
-            stack = deck.get(location) or []
-            if not any(isinstance(item, dict) and item.get("base_class") == "tip_box" for item in stack):
-                issues.append({
-                    "severity": "error", "code": "TIP_SUPPLY_UNPROVEN",
-                    "message": f"Tips On at position {location} has no catalog tip box in the initial deck or a planned plate-move target.",
-                    "path": f"/graph/nodes/{index}/properties/location",
-                })
+        if kind == "tips/TipsOn":
+            for tip_location in _expanded_locations(location) or [location]:
+                stack = deck.get(tip_location) or []
+                rack = stack[-1] if stack and isinstance(stack[-1], dict) else None
+                rack_id = str(rack.get("labware_id")) if rack else ""
+                if not rack or (catalog.get(rack_id) or {}).get("base_class") != "tip_box":
+                    issues.append({
+                        "severity": "error", "code": "TIP_SUPPLY_UNPROVEN",
+                        "message": f"Tips On at position {tip_location} has no catalog tip box at the top of its proposed starting deck stack. A planned move alone does not prove which tips are present.",
+                        "path": f"/graph/nodes/{index}/properties/location",
+                    })
+                    continue
+                tip_id = str(rack.get("tip_definition_id") or "")
+                pair = tip_pairs.get((rack_id, tip_id))
+                if not tip_id:
+                    issues.append({
+                        "severity": "error", "code": "TIP_DEFINITION_UNSELECTED",
+                        "message": f"Propose an exact catalog tip ID for the tip box at position {tip_location}; the rack may support several independent tips. Physical loading still requires review.",
+                        "path": f"/deck/{tip_location}/{len(stack) - 1}/tip_definition_id",
+                    })
+                elif pair is None:
+                    issues.append({
+                        "severity": "error", "code": "INCOMPATIBLE_TIPBOX_TIP_PAIR",
+                        "message": f"The active head has no catalog pairing for rack {rack_id!r} with tip {tip_id!r}.",
+                        "path": f"/deck/{tip_location}/{len(stack) - 1}/tip_definition_id",
+                    })
+                elif pair.get("execution_ready") is not True:
+                    issues.append({
+                        "severity": "error", "code": "TIP_PAIR_METADATA_INCOMPLETE",
+                        "message": f"Rack {rack_id!r} with tip {tip_id!r} lacks metadata required for hardware execution; it remains a planning option only.",
+                        "path": f"/deck/{tip_location}/{len(stack) - 1}/tip_definition_id",
+                    })
         if kind not in {"liquid/Aspirate", "liquid/Dispense", "liquid/Mix"}:
             continue
-        liquid_class = classes.get(str(props.get("liquid_class")))
-        if liquid_class is None:
+        for liquid_location in _expanded_locations(location) or [location]:
+            liquid_stack = deck.get(liquid_location) or []
+            if not liquid_stack:
+                planned_move = liquid_location in move_targets
+                issues.append({
+                    "severity": "warning" if planned_move else "error",
+                    "code": "LIQUID_LABWARE_MOVE_REVIEW" if planned_move else "LIQUID_LABWARE_UNPROVEN",
+                    "message": (
+                        f"Liquid action at position {liquid_location} depends on a planned plate move; review its order and occupancy."
+                        if planned_move else f"Liquid action at position {liquid_location} has no proposed starting labware or plate-move target."
+                    ),
+                    "path": f"/graph/nodes/{index}/properties/location",
+                })
+            elif isinstance(liquid_stack[-1], dict):
+                top_id = str(liquid_stack[-1].get("labware_id"))
+                if (catalog.get(top_id) or {}).get("base_class") == "tip_box" and liquid_location not in move_targets:
+                    issues.append({
+                        "severity": "error", "code": "LIQUID_TARGET_IS_TIPBOX",
+                        "message": f"Liquid action at position {liquid_location} targets a catalog tip box instead of source or destination labware.",
+                        "path": f"/graph/nodes/{index}/properties/location",
+                    })
+        matching_classes = classes.get(str(props.get("liquid_class"))) or []
+        if not matching_classes:
             continue  # _hardware_issues reports an unavailable class.
+        if len(matching_classes) != 1:
+            issues.append({
+                "severity": "error", "code": "AMBIGUOUS_LIQUID_CLASS",
+                "message": "Several active catalog liquid classes share this label; select an exact liquid_class_id.",
+                "path": f"/graph/nodes/{index}/properties/liquid_class",
+            })
+            continue
+        liquid_class = matching_classes[0]
+        if ((context.get("machine_id") and liquid_class.get("machine_id")
+             and liquid_class["machine_id"] != context["machine_id"])
+                or (context.get("head_type") and liquid_class.get("head_type")
+                    and liquid_class["head_type"] != context["head_type"])):
+            issues.append({
+                "severity": "error", "code": "LIQUID_CLASS_PROFILE_MISMATCH",
+                "message": "The selected liquid class belongs to another machine or head profile.",
+                "path": f"/graph/nodes/{index}/properties/liquid_class",
+            })
         try:
             volume = float(props.get("volume"))
         except (TypeError, ValueError):
@@ -151,12 +283,35 @@ def _catalog_issues(workflow: dict[str, Any], context: dict[str, Any], instructi
                 "path": f"/graph/nodes/{index}/properties/volume",
             })
         tip_id = liquid_class.get("tip_id")
-        if tip_id and str(tip_id) not in ready_tips:
+        if tip_id and not any(
+            row.get("tip_definition_id") == tip_id and row.get("execution_ready") is True
+            for row in tip_pairs.values()
+        ):
             issues.append({
                 "severity": "error", "code": "LIQUID_CLASS_TIP_NOT_READY",
                 "message": f"The selected class requires {tip_id}, but this head has no execution-ready catalog tip-box pairing for it.",
                 "path": f"/graph/nodes/{index}/properties/liquid_class",
             })
+        for tip_location in _upstream_tip_locations(workflow, node.get("id")):
+            stack = deck.get(tip_location) or []
+            rack = stack[-1] if stack and isinstance(stack[-1], dict) else None
+            if rack is None:
+                continue  # TIP_SUPPLY_UNPROVEN is reported at Tips On.
+            selected_tip = str(rack.get("tip_definition_id") or "")
+            if tip_id and selected_tip and selected_tip != str(tip_id):
+                issues.append({
+                    "severity": "error", "code": "LIQUID_CLASS_TIP_MISMATCH",
+                    "message": f"The class requires {tip_id!r}, but the upstream rack at position {tip_location} proposes {selected_tip!r}.",
+                    "path": f"/graph/nodes/{index}/properties/liquid_class",
+                })
+            pair = tip_pairs.get((str(rack.get("labware_id")), selected_tip))
+            pair_capacity = pair.get("tip_capacity_ul") if pair else None
+            if isinstance(pair_capacity, (int, float)) and volume > pair_capacity + 1e-6:
+                issues.append({
+                    "severity": "error", "code": "TIP_VOLUME_OUT_OF_RANGE",
+                    "message": f"{volume:g} µL exceeds the {pair_capacity:g} µL tip proposed at position {tip_location}.",
+                    "path": f"/graph/nodes/{index}/properties/volume",
+                })
     # OT-2 slots have no automatic Bravo equivalent. This is a required
     # scientist review, but cannot be resolved by graph authoring alone.
     for issue in issues:
@@ -189,6 +344,9 @@ def _catalog_brief(context: dict[str, Any]) -> str:
         "are confirmed loaded and no liquid method is declared qualified):\n"
         + json.dumps(choices, ensure_ascii=False, separators=(",", ":"))
         + "\nChoose only catalog IDs and volume-compatible head/tip/class pairings. "
+        "For each proposed tip box on the deck, set tip_definition_id to the "
+        "exact matching independent tip ID. This proposes a consumable; it "
+        "does not confirm the physical rack contents or fresh-tip inventory. "
         "If a task cannot be supported on this active profile, preserve its "
         "scientific intent with an explicit manual handoff and review issue; "
         "do not manufacture instrument settings or hardware readiness."

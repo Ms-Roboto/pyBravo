@@ -100,6 +100,14 @@ class DraftedDeckItem(BaseModel):
         description="Catalog `base_class` — microplate / tip_box / etc.",
     )
     wells: int = Field(default=0, ge=0)
+    tip_definition_id: str = Field(
+        default="",
+        description=(
+            "For a proposed tip box, the exact independent catalog tip ID "
+            "intended for this rack. This is a planning choice, not evidence "
+            "that the physical rack is loaded or its tips are fresh."
+        ),
+    )
     is_lidded: bool = False
     is_sealed: bool = False
 

@@ -61,7 +61,11 @@ def _source(task, name, dataset_root):
 
 CONTEXT = {
     "head_type": "HT_96_D_200",
-    "labware": [{"id": "rack-1", "name": "Compatible tip box", "base_class": "tip_box"}],
+    "labware": [
+        {"id": "rack-1", "name": "Compatible tip box", "base_class": "tip_box"},
+        {"id": "source-plate", "name": "Source plate", "base_class": "microplate", "wells": 96},
+        {"id": "dest-plate", "name": "Destination plate", "base_class": "microplate", "wells": 96},
+    ],
     "liquid_classes": [{"name": "Aqueous", "tip_id": "st_10ul", "tip_capacity_ul": 10}],
     "tipbox_choices": [{"labware_id": "rack-1", "tip_definition_id": "st_10ul",
                         "execution_ready": True}],
@@ -88,8 +92,13 @@ async def test_passing_qwen_repair_creates_new_unreviewed_draft_with_source_line
     monkeypatch.setattr(script, "_source_bytes", _source)
     complete = DraftedWorkflow.model_validate({
         "name": "Repaired by local model",
-        "deck": {"3": [{"labware_id": "rack-1", "name": "Compatible tip box",
-                         "base_class": "tip_box", "wells": 96}]},
+        "deck": {
+            "1": [{"labware_id": "source-plate", "base_class": "microplate", "wells": 96}],
+            "2": [{"labware_id": "dest-plate", "base_class": "microplate", "wells": 96}],
+            "3": [{"labware_id": "rack-1", "name": "Compatible tip box",
+                   "base_class": "tip_box", "tip_definition_id": "st_10ul",
+                   "wells": 96}],
+        },
         "graph": {
             "nodes": [
                 {"id": 1, "type": "flow/Start"},
@@ -135,6 +144,7 @@ async def test_passing_qwen_repair_creates_new_unreviewed_draft_with_source_line
     assert "protocol_generated_draft" not in posted[0][0]
     assert posted[0][1]["source_sha256"] == _saved()["protocol_generated_provenance"]["source_sha256"]
     assert posted[0][1]["generation_trace_sha256"] == record["generation_trace_sha256"]
+    assert posted[0][0]["deck"]["3"][0]["tip_definition_id"] == "st_10ul"
     assert (tmp_path / TASK / "repair_candidate.json").is_file()
     assert record["candidate_error_count"] == 0
 
@@ -207,6 +217,129 @@ def test_catalog_gate_rejects_oversize_stroke_and_unready_tip_pairing():
     codes = {issue["code"] for issue in script._catalog_issues(workflow, context, "Transfer 20 uL.")}
     assert "LIQUID_CLASS_VOLUME_OUT_OF_RANGE" in codes
     assert "LIQUID_CLASS_TIP_NOT_READY" in codes
+
+
+def test_catalog_gate_uses_canonical_labware_type_not_model_tipbox_claim():
+    workflow = _graph("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                      "liquid/Dispense", "tips/TipsOff", "flow/End")
+    workflow["deck"] = {"3": [{"labware_id": "plate-1", "base_class": "tip_box",
+                               "tip_definition_id": "st_10ul"}]}
+    context = {**CONTEXT, "labware": [
+        {"id": "plate-1", "base_class": "microplate", "wells": 96},
+    ], "tipbox_choices": [{"labware_id": "plate-1", "tip_definition_id": "st_10ul",
+                           "execution_ready": True}]}
+    codes = {item["code"] for item in script._catalog_issues(workflow, context, INSTRUCTION.decode())}
+    assert {"CATALOG_LABWARE_METADATA_MISMATCH", "TIP_ID_ON_NON_TIPBOX",
+            "TIP_SUPPLY_UNPROVEN"} <= codes
+
+
+def test_catalog_gate_requires_exact_rack_tip_class_pair():
+    workflow = _graph("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                      "liquid/Dispense", "tips/TipsOff", "flow/End")
+    workflow["deck"] = {"3": [{"labware_id": "rack-1", "base_class": "tip_box",
+                               "tip_definition_id": "st_30ul"}]}
+    context = {**CONTEXT, "tipbox_choices": [
+        {"labware_id": "rack-1", "tip_definition_id": "st_10ul",
+         "tip_capacity_ul": 10, "execution_ready": True},
+        {"labware_id": "rack-1", "tip_definition_id": "st_30ul",
+         "tip_capacity_ul": 30, "execution_ready": True},
+    ]}
+    issues = script._catalog_issues(workflow, context, INSTRUCTION.decode())
+    assert "LIQUID_CLASS_TIP_MISMATCH" in {item["code"] for item in issues}
+    assert "LIQUID_CLASS_TIP_NOT_READY" not in {item["code"] for item in issues}
+
+
+def test_catalog_gate_does_not_assume_multi_tip_rack_contains_a_particular_tip():
+    workflow = _graph("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                      "liquid/Dispense", "tips/TipsOff", "flow/End")
+    workflow["deck"] = {"3": [{"labware_id": "rack-1", "base_class": "tip_box"}]}
+    codes = {item["code"] for item in script._catalog_issues(
+        workflow, CONTEXT, INSTRUCTION.decode())}
+    assert "TIP_DEFINITION_UNSELECTED" in codes
+
+
+def test_catalog_gate_rejects_class_from_another_head_even_if_context_lists_it():
+    workflow = _graph("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                      "liquid/Dispense", "tips/TipsOff", "flow/End")
+    workflow["deck"] = {"3": [{"labware_id": "rack-1", "base_class": "tip_box",
+                               "tip_definition_id": "st_10ul"}]}
+    context = {**CONTEXT, "machine_id": "bravo-1", "liquid_classes": [
+        {"name": "Aqueous", "machine_id": "bravo-2", "head_type": "HT_384_D_70",
+         "tip_id": "st_10ul", "tip_capacity_ul": 10},
+    ]}
+    codes = {item["code"] for item in script._catalog_issues(
+        workflow, context, INSTRUCTION.decode())}
+    assert "LIQUID_CLASS_PROFILE_MISMATCH" in codes
+
+
+def test_catalog_gate_treats_incomplete_tip_metadata_as_planning_only():
+    workflow = _graph("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                      "liquid/Dispense", "tips/TipsOff", "flow/End")
+    workflow["deck"] = {"3": [{"labware_id": "rack-1", "base_class": "tip_box",
+                               "tip_definition_id": "st_10ul"}]}
+    context = {**CONTEXT, "tipbox_choices": [
+        {"labware_id": "rack-1", "tip_definition_id": "st_10ul",
+         "tip_capacity_ul": 10, "execution_ready": False},
+    ]}
+    codes = {item["code"] for item in script._catalog_issues(
+        workflow, context, INSTRUCTION.decode())}
+    assert "TIP_PAIR_METADATA_INCOMPLETE" in codes
+
+
+def test_planned_move_does_not_prove_a_tip_supply_at_pickup_position():
+    workflow = _graph("flow/Start", "plate/PickPlace", "tips/TipsOn",
+                      "liquid/Aspirate", "liquid/Dispense", "tips/TipsOff", "flow/End")
+    workflow["graph"]["nodes"][1]["properties"] = {"pick_location": 4, "place_location": 3}
+    workflow["deck"] = {"4": [{"labware_id": "rack-1", "base_class": "tip_box",
+                               "tip_definition_id": "st_10ul"}]}
+    codes = {item["code"] for item in script._catalog_issues(
+        workflow, CONTEXT, INSTRUCTION.decode())}
+    assert "TIP_SUPPLY_UNPROVEN" in codes
+
+
+def test_liquid_actions_need_source_and_destination_labware():
+    workflow = _graph("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                      "liquid/Dispense", "tips/TipsOff", "flow/End")
+    workflow["deck"] = {"3": [{"labware_id": "rack-1", "base_class": "tip_box",
+                               "tip_definition_id": "st_10ul"}]}
+    issues = script._catalog_issues(workflow, CONTEXT, INSTRUCTION.decode())
+    missing_slots = {item["path"] for item in issues if item["code"] == "LIQUID_LABWARE_UNPROVEN"}
+    assert missing_slots == {
+        "/graph/nodes/2/properties/location", "/graph/nodes/3/properties/location",
+    }
+
+
+def test_head_footprint_uses_catalog_well_count_when_model_omits_it():
+    workflow = _graph("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                      "liquid/Dispense", "tips/TipsOff", "flow/End")
+    workflow["deck"] = {
+        "1": [{"labware_id": "source-plate", "base_class": "microplate", "wells": 0}],
+        "2": [{"labware_id": "dest-plate", "base_class": "microplate", "wells": 0}],
+        "3": [{"labware_id": "rack-1", "base_class": "tip_box",
+               "tip_definition_id": "st_10ul"}],
+    }
+    workflow["graph"]["nodes"][1]["properties"]["head_mode"] = {"subset_type": "all_barrels"}
+    context = {**CONTEXT, "head_type": "HT_384_D_70"}
+    issues = script._catalog_issues(workflow, context, INSTRUCTION.decode())
+    assert sum(item["code"] == "HEAD_EXCEEDS_LABWARE" for item in issues) == 2
+    assert workflow["deck"]["1"][0]["wells"] == 0  # validation did not rewrite the proposal
+
+
+def test_literal_iter_locations_check_every_rack_without_guessing_unknown_slots():
+    workflow = _graph("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                      "liquid/Dispense", "tips/TipsOff", "flow/End")
+    workflow["graph"]["nodes"][1]["properties"]["location"] = "iter:3,4"
+    workflow["deck"] = {
+        "1": [{"labware_id": "source-plate", "base_class": "microplate"}],
+        "2": [{"labware_id": "dest-plate", "base_class": "microplate"}],
+        "3": [{"labware_id": "rack-1", "base_class": "tip_box", "tip_definition_id": "st_10ul"}],
+        "4": [{"labware_id": "rack-1", "base_class": "tip_box", "tip_definition_id": "st_10ul"}],
+    }
+    assert script._expanded_locations("iter:3,4") == ["3", "4"]
+    assert script._expanded_locations("iter:3,unknown") == []
+    codes = {item["code"] for item in script._catalog_issues(workflow, CONTEXT, INSTRUCTION.decode())}
+    assert "TIP_SUPPLY_UNPROVEN" not in codes
+    assert "LIQUID_CLASS_TIP_MISMATCH" not in codes
 
 
 def test_pinned_source_digest_failure_prevents_repair(monkeypatch):
