@@ -51,6 +51,8 @@ async def test_grounded_plan_is_recorded_and_accepted(tmp_path):
     assert "empty at the start" in system_prompt
     assert "exactly the stage name" in system_prompt
     assert "physically executable single aspirate" in system_prompt
+    assert "pitch-compatible full column" in system_prompt
+    assert "before the first dispense" in system_prompt
     assert json.loads((tmp_path / "planning_attempt_1.json").read_text()) == _plan()
 
 
