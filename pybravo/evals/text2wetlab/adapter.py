@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -439,7 +440,50 @@ def _validate_literal_pipette_volumes(run: ast.FunctionDef) -> None:
         raise ProtocolValidationError("Literal pipette volumes outside working range:\n" + summary)
 
 
-def validate_ot2_source(code: str) -> None:
+def _validate_literal_labware_wells(run: ast.FunctionDef,
+                                    geometry: dict[str, Any] | None) -> None:
+    """Reject literal well names absent from an installed small-rack definition."""
+    if not geometry:
+        return
+    assigned: Counter[str] = Counter()
+    loaded: dict[str, str] = {}
+    for node in ast.walk(run):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                assigned[target.id] += 1
+        if (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "load_labware" and node.value.args
+                and isinstance(node.value.args[0], ast.Constant)
+                and isinstance(node.value.args[0].value, str)):
+            loaded[node.targets[0].id] = node.value.args[0].value
+    for node in ast.walk(run):
+        if (not isinstance(node, ast.Subscript) or not isinstance(node.value, ast.Name)
+                or assigned[node.value.id] != 1 or node.value.id not in loaded
+                or not isinstance(node.slice, ast.Constant)
+                or not isinstance(node.slice.value, str)):
+            continue
+        name = node.slice.value.upper()
+        if not re.fullmatch(r"[A-Z]{1,2}[1-9]\d?", name):
+            continue
+        load_name = loaded[node.value.id]
+        definition = geometry.get(load_name) or {}
+        valid = definition.get("valid_wells")
+        if isinstance(valid, list) and valid and name not in valid:
+            first = definition.get("first_column") or []
+            last = definition.get("last_column") or []
+            raise ProtocolValidationError(
+                f"Line {node.lineno}: {node.value.id}['{name}'] is not a well in "
+                f"{load_name}. This catalog definition has {definition.get('well_count')} wells; "
+                f"first column {first}, last column {last}. Choose only a listed "
+                "well; do not invent an empty tube position."
+            )
+
+
+def validate_ot2_source(code: str, *, geometry: dict[str, Any] | None = None) -> None:
     """Check the protocol entry point and exclude obvious non-protocol code.
 
     This is a structural check; Opentrons simulation is the API/runtime gate.
@@ -537,6 +581,7 @@ def validate_ot2_source(code: str) -> None:
         raise ProtocolValidationError("run() must take exactly one protocol context argument.")
     if run.args.defaults or run.args.kw_defaults:
         raise ProtocolValidationError("run() must not have default arguments.")
+    _validate_literal_labware_wells(run, geometry)
     _validate_literal_pipette_volumes(run)
     context_name = (run.args.posonlyargs + run.args.args)[0].arg
     run_nodes = set(ast.walk(run))
@@ -1269,7 +1314,7 @@ async def generate_ot2_protocol(
             else:
                 code = _clean_code(raw_code)
                 try:
-                    validate_ot2_source(code)
+                    validate_ot2_source(code, geometry=geometry)
                 except ProtocolValidationError as exc:
                     failure = str(exc)
                 else:

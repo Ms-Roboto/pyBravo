@@ -116,6 +116,22 @@ def test_static_gate_rejects_well_name_slice_with_ordered_well_guidance() -> Non
     assert "requested well order" in message
 
 
+def test_static_gate_rejects_literal_well_absent_from_installed_small_rack() -> None:
+    rack_name = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
+    code = VALID_PROTOCOL.replace("nest_1_reservoir_195ml", rack_name).replace(
+        'source["A1"]', 'source["E1"]')
+    geometry = {rack_name: {
+        "well_count": 24, "columns": 6, "rows_per_column": 4,
+        "first_column": ["A1", "B1", "C1", "D1"],
+        "last_column": ["A6", "B6", "C6", "D6"],
+        "valid_wells": [f"{row}{column}" for column in range(1, 7) for row in "ABCD"],
+    }}
+    with pytest.raises(adapter.ProtocolValidationError, match=r"source\['E1'\] is not a well"):
+        adapter.validate_ot2_source(code, geometry=geometry)
+    adapter.validate_ot2_source(code.replace('source["E1"]', 'source["A3"]'),
+                               geometry=geometry)
+
+
 def test_static_gate_rejects_a_literal_p300_stroke_below_working_range():
     source = VALID_PROTOCOL.replace(
         '    for well in plate.rows()[0]:',
