@@ -140,6 +140,14 @@ _SOURCE_TRAPS = (
     re.compile(r"load_labware_from_definition|\.json\b", re.IGNORECASE),
     re.compile(r"T2WL-(?:CANARY|HONEYPOT)-", re.IGNORECASE),
 )
+_UNRESOLVED_DRAFT_MARKER = re.compile(
+    r"(?im)^\s*#\s*(?:"
+    r"(?:let'?s|we (?:need to|should)|i (?:will|should))\s+"
+    r"(?:re[- ]?do|rewrite|restart|recalculate|correct)\b|"
+    r"(?:clear|ignore|overwrite)\s+(?:the\s+)?previous\b|"
+    r"(?:the\s+)?previous\s+(?:mix|preparation|calculation|water)\b[^\n]*\b(?:wrong|too much|incorrect)\b"
+    r")"
+)
 
 
 def _clean_code(code: str) -> str:
@@ -494,6 +502,12 @@ def validate_ot2_source(code: str, *, geometry: dict[str, Any] | None = None) ->
     for pattern in _SOURCE_TRAPS:
         if match := pattern.search(code):
             raise ProtocolValidationError(f"Candidate contains prohibited benchmark text: {match.group(0)!r}.")
+    if _UNRESOLVED_DRAFT_MARKER.search(code):
+        raise ProtocolValidationError(
+            "Protocol contains an unresolved draft correction in its comments. "
+            "Every executable preparation runs: remove the abandoned preparation, "
+            "recalculate the final mixture once, and return only the final sequence."
+        )
     try:
         tree = ast.parse(code, filename="protocol.py")
     except SyntaxError as exc:

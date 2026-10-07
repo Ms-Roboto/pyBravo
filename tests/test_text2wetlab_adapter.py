@@ -87,6 +87,17 @@ def test_static_gate_accepts_normal_ot2_protocol():
     adapter.validate_ot2_source(VALID_PROTOCOL)
 
 
+def test_static_gate_rejects_unresolved_executable_draft_correction() -> None:
+    source = VALID_PROTOCOL.replace(
+        "    for well in plate.rows()[0]:",
+        "    # Let's re-do the master mix preparation in the same vessel.\n"
+        "    for well in plate.rows()[0]:",
+    )
+    with pytest.raises(adapter.ProtocolValidationError,
+                       match="unresolved draft correction"):
+        adapter.validate_ot2_source(source)
+
+
 def test_static_gate_reports_multiple_literal_stroke_ranges_in_one_repair() -> None:
     source = VALID_PROTOCOL.replace(
         "    for well in plate.rows()[0]:",
