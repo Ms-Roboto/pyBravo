@@ -103,6 +103,10 @@ def test_schema_has_only_plan_data_and_no_protocol_code_field():
         "deck_sources", "reactions", "tip_budgets", "stages",
     }
     assert PLAN_SCHEMA["additionalProperties"] is False
+    source_schema = PLAN_SCHEMA["properties"]["deck_sources"]["items"]
+    addition_schema = PLAN_SCHEMA["properties"]["reactions"]["items"]["properties"]["additions"]["items"]
+    assert "produced_by_stage" in source_schema["required"]
+    assert "stage_name" in addition_schema["required"]
 
 
 def test_parser_accepts_whitespace_normalized_verbatim_evidence():
@@ -161,6 +165,126 @@ def test_reaction_audit_catches_missing_diluent_and_unlisted_deck_source():
     ), (Evidence("paper", "reaction"),))
     plan = OT2Plan(plan.deck_sources, (complete,), (), ())
     assert "missing_deck_source" in _codes(audit_plan(plan))
+
+
+def test_robot_reagents_need_named_pipetting_stages_and_tip_demand():
+    reaction = PlannedReaction("PCR", 10, None, (
+        PlannedAddition(Addition("Q5 master mix", 5), "mix", ()),
+        PlannedAddition(Addition("primer pair", 1), "primer", ()),
+    ), ())
+    sources = (DeckSource("mix", "Q5 master mix", "mix_reservoir", ()),
+               DeckSource("primer", "primer pair", "primer_plate", ()))
+    stages = (
+        Stage("Dispense Q5 master mix", "manual", None, None, None, None, None,
+              None, None, None, ()),
+        Stage("Add primer pair", "pipette", None, None, None, None, None,
+              None, None, None, ()),
+    )
+    issues = audit_plan(OT2Plan(sources, (reaction,), (), stages))
+    assert "robot_addition_stage_missing" in _codes(issues)
+    assert "missing_stage_tip_demand" in _codes(issues)
+
+
+def test_empty_initial_vessel_cannot_be_claimed_as_supplied_reagent():
+    instruction = "tubes_1_5ml_1 well D1: empty at the start (PCR master mix for 8 reactions)."
+    payload = {
+        "deck_sources": [{
+            "id": "master_mix", "component": "PCR master mix",
+            "labware": "tubes_1_5ml_1",
+            "evidence": [{"source": "instruction", "quote": instruction}],
+        }],
+        "reactions": [], "tip_budgets": [], "stages": [],
+    }
+    with pytest.raises(PlanParseError, match="initially empty vessel"):
+        parse_plan(payload, instruction=instruction)
+
+
+def test_generated_intermediate_requires_an_earlier_named_producer_and_consumer():
+    instruction = """Use p20_single_gen2 with opentrons_96_tiprack_20ul.
+## What is in the labware at the start
+- mix_tube well A1: empty at the start (master mix preparation).
+Prepare master mix in mix_tube well A1, then add 10 µL master mix to each PCR well.
+"""
+    quote = "mix_tube well A1: empty at the start (master mix preparation)"
+    payload = _empty_payload()
+    payload["deck_sources"] = [{
+        "id": "mix", "component": "master mix", "labware": "mix_tube",
+        "produced_by_stage": "Prepare master mix", "evidence": _quote(quote),
+    }]
+    payload["reactions"] = [{
+        "name": "PCR well", "final_volume_ul": 10, "diluent_name": None,
+        "evidence": _quote("add 10 µL master mix to each PCR well"),
+        "additions": [{
+            "component": "master mix", "source_id": "mix", "volume_ul": 10,
+            "stock_strength_x": None, "target_strength_x": None,
+            "is_diluent": False, "delivery": "robot",
+            "stage_name": "Dispense master mix",
+            "evidence": _quote("add 10 µL master mix to each PCR well"),
+        }],
+    }]
+    payload["stages"] = [
+        _stage("Prepare master mix", "pipette", "Prepare master mix in mix_tube well A1"),
+        _stage("Dispense master mix", "pipette", "add 10 µL master mix to each PCR well"),
+    ]
+    payload["tip_budgets"] = [{
+        "pipette": "p20_single_gen2", "channels": 1,
+        "tiprack_load_name": "opentrons_96_tiprack_20ul",
+        "rack_count": 1, "tips_per_rack": 96, "planned_resets": 0,
+        "refill_allowed": False,
+        "evidence": _quote("Use p20_single_gen2 with opentrons_96_tiprack_20ul"),
+        "demands": [{
+            "stage": stage, "visits": 1, "fresh_tips_per_visit": 1,
+            "shared_pickups": 0, "stroke_volumes_ul": [10],
+            "evidence": _quote("add 10 µL master mix to each PCR well"),
+        } for stage in ("Prepare master mix", "Dispense master mix")],
+    }]
+    plan = parse_plan(payload, instruction=instruction)
+    assert audit_plan(plan) == ()
+    rendered = json.loads(plan_to_prompt(plan))
+    assert rendered["deck_sources"][0]["produced_by_stage"] == "Prepare master mix"
+    assert rendered["reactions"][0]["additions"][0]["stage_name"] == "Dispense master mix"
+
+    payload["stages"].reverse()
+    assert "intermediate_used_before_production" in _codes(
+        audit_plan(parse_plan(payload, instruction=instruction)))
+    payload["stages"].reverse()
+    payload["reactions"][0]["additions"][0]["stage_name"] = None
+    assert "intermediate_use_stage_missing" in _codes(
+        audit_plan(parse_plan(payload, instruction=instruction)))
+    payload["reactions"][0]["additions"][0]["stage_name"] = "Dispense master mix"
+    payload["deck_sources"][0]["produced_by_stage"] = "Missing producer"
+    assert "unknown_producer_stage" in _codes(
+        audit_plan(parse_plan(payload, instruction=instruction)))
+
+
+def test_off_deck_manual_handoff_can_produce_an_intermediate():
+    source = DeckSource("cleaned", "cleaned fragment", "plate", (), "Column cleanup handoff")
+    stages = (
+        Stage("Column cleanup handoff", "manual", None, None, None, None, None,
+              None, None, None, (Evidence("instruction", "off-deck column cleanup"),)),
+        Stage("Use cleaned fragment", "pipette", None, None, None, None, None,
+              None, None, None, ()),
+    )
+    reaction = PlannedReaction("assembly", 2, None, (
+        PlannedAddition(Addition("cleaned fragment", 2), "cleaned", (), "Use cleaned fragment"),
+    ), ())
+    budget = TipBudget("p20_single_gen2", 1, 1, 96, 0, False, (
+        TipDemand("Use cleaned fragment", 1, 1, 0, (), (2,)),
+    ), ())
+    assert audit_plan(OT2Plan((source,), (reaction,), (budget,), stages)) == ()
+
+
+def test_plural_template_category_must_still_match_inventory_content():
+    instruction = """## What is in the labware at the start
+- template_plate wells A1:B1: linearized plasmid templates, 20 µL each.
+"""
+    payload = _empty_payload()
+    payload["deck_sources"] = [_source("templates", "Templates", "template_plate",
+                                       "template_plate wells A1:B1: linearized plasmid templates")]
+    assert parse_plan(payload, instruction=instruction).deck_sources[0].component == "Templates"
+    payload["deck_sources"][0]["component"] = "unlisted enzyme"
+    with pytest.raises(PlanParseError, match="claimed component"):
+        parse_plan(payload, instruction=instruction)
 
 
 def test_reaction_audit_catches_wrong_two_x_fraction_even_when_total_balances():

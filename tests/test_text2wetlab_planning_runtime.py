@@ -7,7 +7,12 @@ import json
 
 import pytest
 
-from pybravo.evals.text2wetlab.planning_runtime import run_grounded_plan
+from pybravo.evals.text2wetlab.planning import PlanIssue, PlanParseError
+from pybravo.evals.text2wetlab.planning_runtime import (
+    _audit_feedback,
+    _parse_feedback,
+    run_grounded_plan,
+)
 from pybravo.workflow.protocols.llm import StructuredResponse
 
 INSTRUCTION = "Move the reaction plate to a thermocycler by hand."
@@ -42,6 +47,10 @@ async def test_grounded_plan_is_recorded_and_accepted(tmp_path):
     assert result.plan is not None
     assert result.attempts[0]["status"] == "accepted"
     assert requests[0][2]["schema_name"] == "ot2_evidence_plan"
+    system_prompt = requests[0][0][0]["content"]
+    assert "empty at the start" in system_prompt
+    assert "exactly the stage name" in system_prompt
+    assert "physically executable single aspirate" in system_prompt
     assert json.loads((tmp_path / "planning_attempt_1.json").read_text()) == _plan()
 
 
@@ -78,3 +87,46 @@ async def test_failed_plan_falls_back_without_becoming_protocol_fact(tmp_path):
     assert result.plan is None
     assert result.attempts[0]["status"] == "audit_failed"
     assert result.attempts[0]["issues"][0]["code"] == "empty_stage_plan"
+
+
+@pytest.mark.asyncio
+async def test_audit_repair_names_failing_check_and_keeps_source_authoritative(tmp_path):
+    first = copy.deepcopy(_plan())
+    first["stages"][0]["kind"] = "pipette"
+    replies = [first, _plan()]
+    messages_seen = []
+
+    async def completion(messages, schema, **kwargs):
+        messages_seen.append(copy.deepcopy(messages))
+        return StructuredResponse(replies.pop(0), {"model": "qwen"})
+
+    result = await run_grounded_plan(
+        instruction=INSTRUCTION, scientific_source=None, geometry=None,
+        directory=tmp_path, completion=completion, config=None,
+    )
+    assert result.plan is not None
+    assert [row["status"] for row in result.attempts] == ["audit_failed", "accepted"]
+    repair = messages_seen[1][-1]["content"]
+    assert "missing_tip_budget" in repair
+    assert "Return a corrected complete JSON plan with grounded quotes" in repair
+
+
+def test_repair_feedback_is_bounded_and_includes_generic_corrections():
+    issues = [PlanIssue("unknown_tip_stage", f"tip_budgets[{index}]", "No matching stage")
+              for index in range(28)]
+    feedback = _audit_feedback(issues)
+    assert "unknown_tip_stage at tip_budgets[0]" in feedback
+    assert "… and 4 more check(s)" in feedback
+    assert "exactly match an existing pipette stage name" in feedback
+    assert feedback.count("Make every tip-demand stage string") == 1
+
+
+def test_parse_feedback_distinguishes_empty_vessel_from_claimed_inventory():
+    empty = _parse_feedback(PlanParseError(
+        "deck_sources[0] cites an initially empty vessel as a starting reagent source"
+    ))
+    assert "produced_by_stage" in empty
+    mismatch = _parse_feedback(PlanParseError(
+        "deck_sources[0] inventory quote does not name its claimed component 'enzyme'"
+    ))
+    assert "actual substance or category" in mismatch

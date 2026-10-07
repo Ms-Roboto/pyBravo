@@ -35,6 +35,7 @@ class DeckSource:
     component: str
     labware: str
     evidence: tuple[Evidence, ...]
+    produced_by_stage: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class PlannedAddition:
     addition: Addition
     source_id: str | None
     evidence: tuple[Evidence, ...]
+    stage_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +149,7 @@ PLAN_SCHEMA: dict[str, Any] = _object({
     "deck_sources": _array(_object({
         "id": {"type": "string"}, "component": {"type": "string"},
         "labware": {"type": "string"}, "evidence": _EVIDENCE_LIST,
+        "produced_by_stage": _nullable("string"),
     })),
     "reactions": _array(_object({
         "name": {"type": "string"}, "final_volume_ul": {"type": "number"},
@@ -156,7 +159,7 @@ PLAN_SCHEMA: dict[str, Any] = _object({
             "volume_ul": _nullable("number"), "stock_strength_x": _nullable("number"),
             "target_strength_x": _nullable("number"), "is_diluent": {"type": "boolean"},
             "delivery": {"type": "string", "enum": ["robot", "manual"]},
-            "evidence": _EVIDENCE_LIST,
+            "evidence": _EVIDENCE_LIST, "stage_name": _nullable("string"),
         })),
     })),
     "tip_budgets": _array(_object({
@@ -191,7 +194,7 @@ PLAN_SCHEMA: dict[str, Any] = _object({
     })),
 })
 
-PLAN_SYSTEM_PROMPT = """Extract a typed OT-2 experimental plan, not Python code. Return exactly the JSON schema. Use only the benchmark instruction and supplied paper text as evidence; never use a public reference protocol, solution, or hidden test. Every claim-bearing row needs a short source quote. Copy its words in order; omit Markdown backticks if needed. If joining two nonadjacent excerpts, separate them with `...` and keep each excerpt exact. Do not paraphrase a quote. List deck_sources only when the instruction's starting inventory/deck says the component is physically available, not merely because a paper recipe mentions it. Do not invent a reagent, source labware, stock concentration, temperature, or refill permission. Use null when a value is unknown and an empty array when a category does not apply. Include every distinct reaction and ordered stage needed by the task, preserving stated times as duration_s. A reaction lists all components per final vessel, including diluent, primer, template, and stock concentration when stated. For each pipette, use its exact task model and tip-rack load name, then divide tip demand into stages: visits is the number of distinct targets/columns handled; fresh_tips_per_visit is the number of new tips needed at each visit; shared_pickups counts source-only tips that safely cover multiple empty destinations; stroke_volumes_ul lists every distinct per-aspiration/dispense volume in that stage, not the total over all targets. A multichannel pickup consumes one tip per channel. planned_resets is how many full rack reload cycles the plan needs; allow refills only when the instruction authorizes them and cite that authorization. For module stages, record state-setting actions in their actual order and state requirements on subsequent pipetting stages. Keep assumptions explicit in names or evidence; do not silently complete missing task facts."""
+PLAN_SYSTEM_PROMPT = """Extract a typed OT-2 experimental plan, not Python code. Return exactly the JSON schema. Use only the benchmark instruction and supplied paper text as evidence; never use a public reference protocol, solution, or hidden test. Every claim-bearing row needs a short source quote. Copy its words in order; omit Markdown backticks if needed. If joining two nonadjacent excerpts, separate them with `...` and keep each excerpt exact. Do not paraphrase a quote. List deck_sources only for physically present vessels identified by the instruction's starting inventory/deck, not merely because a paper recipe mentions them. For a source already containing the claimed component, set produced_by_stage to null. For an initially empty vessel that will hold a generated intermediate, set produced_by_stage to the exact name of the earlier pipette or explicit manual handoff stage that creates its contents; never claim it is a starting reagent. Every robot-delivered addition sets stage_name to the exact name of its pipette stage; manual additions may use null. Do not invent a reagent, source labware, stock concentration, temperature, or refill permission. Use null when a value is unknown and an empty array when a category does not apply. Include every distinct reaction and ordered stage needed by the task, preserving stated times as duration_s. A reaction lists all components per final vessel, including diluent, primer, template, and stock concentration when stated. For each pipette, use its exact task model and tip-rack load name, then divide tip demand into stages: visits is the number of distinct targets/columns handled; fresh_tips_per_visit is the number of new tips needed at each visit; shared_pickups counts source-only tips that safely cover multiple empty destinations; stroke_volumes_ul lists every distinct per-aspiration/dispense volume in that stage, not the total over all targets. A multichannel pickup consumes one tip per channel. planned_resets is how many full rack reload cycles the plan needs; allow refills only when the instruction authorizes them and cite that authorization. For module stages, record state-setting actions in their actual order and state requirements on subsequent pipetting stages. Keep assumptions explicit in names or evidence; do not silently complete missing task facts."""
 
 
 def _normalized(value: str) -> str:
@@ -245,6 +248,11 @@ def _component_tokens(value: str) -> set[str]:
     tokens = set(re.findall(r"[a-z0-9]+", _normalized(value))) - {
         "a", "and", "at", "each", "for", "in", "of", "the", "well",
     }
+    # Inventory labels often use the singular (template_plate, primer_plate),
+    # while a plate-level source is naturally named by a plural category.
+    # Preserve distinctive stock names: Q5 and Phire still cannot match.
+    tokens |= {token[:-1] for token in tokens if len(token) > 3
+               and token.endswith("s") and not token.endswith("ss")}
     distinctive = tokens - {
         "buffer", "component", "liquid", "master", "mix", "reaction", "reagent",
         "sample", "solution", "stock",
@@ -335,19 +343,35 @@ def parse_plan(
     sources: list[DeckSource] = []
     for index, raw in enumerate(_sequence(root["deck_sources"], "deck_sources")):
         path = f"deck_sources[{index}]"
-        row = _mapping(raw, path, {"id", "component", "labware", "evidence"})
+        # Older stored plans did not distinguish starting sources from generated
+        # intermediates. Keep them parseable, but audit their actual content.
+        if isinstance(raw, dict) and "produced_by_stage" not in raw:
+            raw = {**raw, "produced_by_stage": None}
+        row = _mapping(raw, path, {"id", "component", "labware", "evidence",
+                                   "produced_by_stage"})
         evidence = _evidence(row["evidence"], path + ".evidence", instruction=instruction,
                              scientific_source=scientific_source, inventory_only=True)
         component = _string(row["component"], path + ".component")
         labware = _string(row["labware"], path + ".labware")
+        producer = _string(row["produced_by_stage"], path + ".produced_by_stage", nullable=True)
         assert isinstance(component, str) and isinstance(labware, str)
-        if not any(_component_tokens(component) & _component_tokens(item.quote) for item in evidence):
+        if producer is None and not any(
+            _component_tokens(component) & _component_tokens(item.quote) for item in evidence
+        ):
             raise PlanParseError(f"{path} inventory quote does not name its claimed component {component!r}.")
+        if any(re.search(r"\bempty\s+(?:at\s+)?(?:the\s+)?(?:start|beginning)\b|"
+                         r"\binitially\s+empty\b", item.quote, re.IGNORECASE)
+               for item in evidence) and producer is None:
+            raise PlanParseError(
+                f"{path} cites an initially empty vessel as a starting reagent source; "
+                "set produced_by_stage to its ordered preparation stage instead."
+            )
         if _normalized(labware) not in _normalized(instruction):
             raise PlanParseError(f"{path} labware {labware!r} is absent from the task instruction.")
         sources.append(DeckSource(
             id=_string(row["id"], path + ".id"),
             component=component, labware=labware, evidence=evidence,
+            produced_by_stage=producer,
         ))
     reactions: list[PlannedReaction] = []
     for index, raw in enumerate(_sequence(root["reactions"], "reactions")):
@@ -356,9 +380,11 @@ def parse_plan(
         additions: list[PlannedAddition] = []
         for addition_index, raw_addition in enumerate(_sequence(row["additions"], path + ".additions")):
             add_path = f"{path}.additions[{addition_index}]"
+            if isinstance(raw_addition, dict) and "stage_name" not in raw_addition:
+                raw_addition = {**raw_addition, "stage_name": None}
             item = _mapping(raw_addition, add_path, {
                 "component", "source_id", "volume_ul", "stock_strength_x", "target_strength_x",
-                "is_diluent", "delivery", "evidence",
+                "is_diluent", "delivery", "evidence", "stage_name",
             })
             additions.append(PlannedAddition(
                 Addition(
@@ -374,6 +400,7 @@ def parse_plan(
                 source_id=_string(item["source_id"], add_path + ".source_id", nullable=True),
                 evidence=_evidence(item["evidence"], add_path + ".evidence", instruction=instruction,
                                    scientific_source=scientific_source),
+                stage_name=_string(item["stage_name"], add_path + ".stage_name", nullable=True),
             ))
         reactions.append(PlannedReaction(
             name=_string(row["name"], path + ".name"),
@@ -476,17 +503,29 @@ def audit_plan(
         issues.append(PlanIssue("missing_tip_budget", "tip_budgets",
                                 "The plan includes pipetting but no pipette tip budget."))
     seen_stage_names: set[str] = set()
+    stage_indices: dict[str, int] = {}
     for index, stage in enumerate(plan.stages):
         if stage.name in seen_stage_names:
             issues.append(PlanIssue("duplicate_stage_name", f"stages[{index}]",
                                     f"Stage name {stage.name!r} is repeated."))
         seen_stage_names.add(stage.name)
+        stage_indices.setdefault(stage.name, index)
     source_ids: dict[str, DeckSource] = {}
     for index, source in enumerate(plan.deck_sources):
         if source.id in source_ids:
             issues.append(PlanIssue("duplicate_source_id", f"deck_sources[{index}]",
                                     f"Deck source {source.id} is declared twice."))
         source_ids[source.id] = source
+        if source.produced_by_stage is not None:
+            producer_index = stage_indices.get(source.produced_by_stage)
+            if producer_index is None:
+                issues.append(PlanIssue("unknown_producer_stage", f"deck_sources[{index}]",
+                                        f"Generated source {source.id} has no stage named "
+                                        f"{source.produced_by_stage!r}."))
+            elif plan.stages[producer_index].kind not in {"pipette", "manual"}:
+                issues.append(PlanIssue("invalid_producer_stage", f"deck_sources[{index}]",
+                                        f"Generated source {source.id} must be made by an earlier "
+                                        "pipette stage or explicit manual handoff."))
     for index, reaction in enumerate(plan.reactions):
         path = f"reactions[{index}]"
         if not reaction.additions:
@@ -498,6 +537,7 @@ def audit_plan(
             issues.append(PlanIssue(finding.code, path, finding.message))
         for add_index, item in enumerate(reaction.additions):
             add_path = f"{path}.additions[{add_index}]"
+            selected_source = source_ids.get(item.source_id) if item.source_id is not None else None
             if item.addition.delivery == "robot" and item.source_id not in source_ids:
                 issues.append(PlanIssue("missing_deck_source", add_path,
                                         f"{item.addition.component} has no cited on-deck source."))
@@ -516,8 +556,56 @@ def audit_plan(
                     issues.append(PlanIssue("source_component_mismatch", add_path,
                                             f"{item.addition.component} is assigned to source {source.id}, "
                                             f"which contains {source.component}."))
+            if item.addition.delivery == "robot":
+                if item.stage_name is not None:
+                    named_index = stage_indices.get(item.stage_name)
+                    matching_stages = ([plan.stages[named_index]]
+                                       if named_index is not None else [])
+                    if named_index is None:
+                        issues.append(PlanIssue("unknown_addition_stage", add_path,
+                                                f"No stage named {item.stage_name!r} carries "
+                                                f"{item.addition.component}."))
+                else:
+                    component_words = set(re.findall(r"[a-z0-9]+", _normalized(item.addition.component)))
+                    component_words -= {"a", "and", "of", "the", "solution", "stock", "reagent"}
+                    matching_stages = [stage for stage in plan.stages
+                                       if component_words & set(re.findall(
+                                           r"[a-z0-9]+", _normalized(stage.name)))
+                                       or (item.source_id is not None
+                                           and item.source_id.casefold() in stage.name.casefold())]
+                if not any(stage.kind == "pipette" for stage in matching_stages):
+                    issues.append(PlanIssue(
+                        "robot_addition_stage_missing", add_path,
+                        f"Robot-delivered {item.addition.component} has no named pipetting stage; "
+                        "do not let a manual comment stand in for an executable addition.",
+                    ))
+                if selected_source is not None and selected_source.produced_by_stage is not None:
+                    if item.stage_name is None:
+                        issues.append(PlanIssue(
+                            "intermediate_use_stage_missing", add_path,
+                            f"Use of generated source {selected_source.id} needs an exact "
+                            "pipetting stage name so its order can be checked.",
+                        ))
+                    else:
+                        producer_index = stage_indices.get(selected_source.produced_by_stage)
+                        consumer_index = stage_indices.get(item.stage_name)
+                        if (producer_index is not None and consumer_index is not None
+                                and consumer_index <= producer_index):
+                            issues.append(PlanIssue(
+                                "intermediate_used_before_production", add_path,
+                                f"{selected_source.id} is produced at "
+                                f"{selected_source.produced_by_stage!r} but used at "
+                                f"{item.stage_name!r} before it exists.",
+                            ))
     budget_names: set[str] = set()
     stage_names = {stage.name for stage in plan.stages}
+    demanded_stage_names = {demand.stage for budget in plan.tip_budgets for demand in budget.demands}
+    for index, stage in enumerate(plan.stages):
+        if stage.kind == "pipette" and stage.name not in demanded_stage_names:
+            issues.append(PlanIssue(
+                "missing_stage_tip_demand", f"stages[{index}]",
+                f"Pipetting stage {stage.name!r} has no explicit tip-demand row.",
+            ))
     for index, budget in enumerate(plan.tip_budgets):
         path = f"tip_budgets[{index}]"
         if budget.pipette in budget_names:
@@ -647,7 +735,8 @@ def audit_plan(
 def plan_to_prompt(plan: OT2Plan) -> str:
     """Render concise, model-authored data for a later local code-generation call."""
     payload = {
-        "deck_sources": [{"id": item.id, "component": item.component, "labware": item.labware}
+        "deck_sources": [{"id": item.id, "component": item.component, "labware": item.labware,
+                          "produced_by_stage": item.produced_by_stage}
                          for item in plan.deck_sources],
         "reactions": [{
             "name": item.name, "final_volume_ul": item.final_volume_ul,
@@ -656,7 +745,8 @@ def plan_to_prompt(plan: OT2Plan) -> str:
                            "volume_ul": added.addition.volume_ul, "source_id": added.source_id,
                            "stock_strength_x": added.addition.stock_strength_x,
                            "target_strength_x": added.addition.target_strength_x,
-                           "delivery": added.addition.delivery}
+                           "delivery": added.addition.delivery,
+                           "stage_name": added.stage_name}
                           for added in item.additions],
         } for item in plan.reactions],
         "tip_budgets": [{"pipette": item.pipette, "channels": item.channels,

@@ -23,6 +23,68 @@ from pybravo.evals.text2wetlab.planning import (
 )
 from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse
 
+_PLANNING_CHECKLIST = """Before returning the plan, check these distinctions against the task and paper:
+- A vessel described as empty at the start is a destination or later intermediate, not an initially available deck reagent. Give a generated source produced_by_stage equal to its earlier pipette or explicit manual handoff stage; never use its starting inventory quote as evidence that it already contains liquid. Its robot additions need stage_name equal to a later pipette stage.
+- Name each starting source component from the actual inventory contents, rather than from the vessel label alone. For a plate of several named primers or templates, a plural category is acceptable only when the cited inventory quote identifies that category and its contents.
+- A reaction record describes one physical final vessel unless its name explicitly says it is a batch preparation. Do not count the same liquid both as an existing product and as its component additions. Sum all additions and check each stated stock-to-final concentration. Keep separate fragment or sample identities when their volumes or destinations differ.
+- Every robot-delivered addition needs stage_name equal to a named pipette stage. Every pipette stage needs a tip-demand row whose stage string is exactly the stage name, including case and spaces. A manual stage describes an actual operator action, not a substitute for on-deck pipetting.
+- A reaction's total or a batch's total is not one pipette stroke. In each tip-demand row, stroke_volumes_ul contains physically executable single aspirate or dispense amounts within that named pipette's working range and tip capacity. Split larger transfers or choose the provided suitable pipette. Count tips for every stage and account for repeated samples, mixing, and cross-sample changes. Plan a rack reset only when the task authorizes fresh-rack replenishment and demand actually exceeds loaded capacity.
+- Record temperature, lid, and magnet state changes before the pipetting that depends on them; distinguish a timed incubation from a mere setpoint change. Preserve the source's stated order and duration.
+If the source lacks a scientific setting, do not fabricate a value just to complete the schema; keep it unknown or make the required manual handoff explicit."""
+
+_REPAIR_HINTS: dict[str, str] = {
+    "empty_initial_source": "Treat initially empty labware as a generated intermediate, available only after its preparation stage.",
+    "unknown_producer_stage": "Set produced_by_stage to the exact name of an existing earlier pipette or explicit manual handoff stage.",
+    "invalid_producer_stage": "Only a pipette or explicit manual handoff stage can produce an intermediate liquid.",
+    "intermediate_use_stage_missing": "Set stage_name on the intermediate's robot addition to its exact later pipette stage.",
+    "intermediate_used_before_production": "Move the producer stage before the pipette stage consuming its intermediate.",
+    "unknown_addition_stage": "Set each robot addition's stage_name to an exact existing pipette-stage name.",
+    "missing_deck_source": "Use robot delivery only for a supplied on-deck source or an intermediate already prepared in an earlier stage; otherwise mark and stage an actual manual addition.",
+    "final_volume_mismatch": "Recalculate one final vessel or one explicitly named batch, counting each component once.",
+    "stock_dilution_mismatch": "Use stock concentration × added volume = target concentration × final reaction volume.",
+    "realized_strength_mismatch": "Check both the target dilution and the sum of all proposed additions.",
+    "robot_addition_stage_missing": "Give each robot-delivered component an executable pipette stage; a manual comment is not a pipetting stage.",
+    "missing_stage_tip_demand": "Add a tip-demand row for each pipette stage, using the stage name verbatim.",
+    "unknown_tip_stage": "Make every tip-demand stage string exactly match an existing pipette stage name.",
+    "insufficient_tips": "Count pickups across all stages; plan fresh-rack reloads only if explicitly authorized by the task.",
+    "pipette_range_mismatch": "Use a provided pipette and tip rack that support each single stroke; split a large total into valid strokes.",
+    "module_state_mismatch": "Place the required state-setting stage before the dependent pipetting stage.",
+}
+
+
+def _audit_feedback(errors: list[Any]) -> str:
+    """Give a bounded, actionable correction request without authoring a protocol."""
+    visible = errors[:24]
+    findings = "\n".join(
+        f"- {issue.code} at {issue.path}: {issue.message}" for issue in visible
+    )
+    if len(errors) > len(visible):
+        findings += f"\n- … and {len(errors) - len(visible)} more check(s)."
+    hints = list(dict.fromkeys(
+        _REPAIR_HINTS[issue.code] for issue in errors if issue.code in _REPAIR_HINTS
+    ))
+    guidance = "\nCorrection rules:\n" + "\n".join(f"- {hint}" for hint in hints) if hints else ""
+    return "Your plan failed these deterministic checks:\n" + findings + guidance
+
+
+def _parse_feedback(error: PlanParseError) -> str:
+    message = str(error)
+    response = "Your plan was not grounded in the supplied source: " + message
+    if "initially empty vessel" in message:
+        response += (
+            "\nThe cited vessel is physically present but contains no starting reagent. "
+            "If an earlier ordered pipette or explicit manual handoff stage produces its "
+            "contents, set produced_by_stage to that exact stage name. Otherwise omit "
+            "it as a liquid source."
+        )
+    elif "inventory quote does not name its claimed component" in message:
+        response += (
+            "\nName this source by the actual substance or category identified in its "
+            "on-deck inventory quote. For a plate with multiple primers or templates, "
+            "cite the matching starting-inventory lines; do not invent a stock."
+        )
+    return response
+
 
 @dataclass(frozen=True)
 class PlanningResult:
@@ -53,7 +115,7 @@ async def run_grounded_plan(
             "reagents or liquid volumes):\n" + json.dumps(geometry, sort_keys=True)
         )
     messages = [
-        {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+        {"role": "system", "content": PLAN_SYSTEM_PROMPT + "\n\n" + _PLANNING_CHECKLIST},
         {"role": "user", "content": user_text},
     ]
     records: list[dict[str, Any]] = []
@@ -79,7 +141,7 @@ async def run_grounded_plan(
         except PlanParseError as exc:
             record["status"] = "ungrounded"
             record["error"] = str(exc)
-            feedback = "Your plan was not grounded in the supplied source: " + str(exc)
+            feedback = _parse_feedback(exc)
         else:
             issues = audit_plan(plan, geometry=geometry)
             record["issues"] = [issue.__dict__ for issue in issues]
@@ -89,9 +151,7 @@ async def run_grounded_plan(
                 records.append(record)
                 return PlanningResult(plan, tuple(records))
             record["status"] = "audit_failed"
-            feedback = "Your plan failed these deterministic checks:\n" + "\n".join(
-                f"- {issue.path}: {issue.message}" for issue in errors[:20]
-            )
+            feedback = _audit_feedback(errors)
         records.append(record)
         if number < max_attempts:
             messages.append({"role": "assistant", "content": serialized})
