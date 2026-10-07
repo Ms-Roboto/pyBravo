@@ -711,12 +711,13 @@ const JOINT_AXIS_MAP = {
     // under the main Z carriage, so the viewer has to synthesize the hidden Z
     // contribution explicitly: the gripper should follow Z and then apply its
     // own relative Zg travel on top of that. DARWIN's nested/resting Zg is
-    // about -20 mm, so that offset renders as zero extra Zg travel. The head
-    // and gripper share the gantry: both need the teach-tip Z datum correction
-    // or the docked gripper hangs one teach-tip length below its cutout.
+    // about -20 mm. The visual datum is 5 mm lower so the parked gripper fits
+    // the cutout rather than clipping its upper edge. This affects rendering
+    // only; the controller's dock position stays -20 mm. The head and gripper
+    // share the gantry and both need the teach-tip Z datum correction.
     'zaxis-gripper':  {
         bravoAxis: 'Zg',
-        homeOffset: -20,
+        homeOffset: -25,
         scale: 1,
         coupledAxis: 'Z',
         coupledScale: 1,

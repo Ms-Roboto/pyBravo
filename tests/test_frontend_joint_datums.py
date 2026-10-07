@@ -82,4 +82,4 @@ def test_the_measured_datums_are_the_ones_in_force():
         assert m["zaxis-gripper"].get("useTeachTipLength") is True, (
             f"{name}: the docked gripper must follow the head's Z datum"
         )
-        assert m["zaxis-gripper"]["homeOffset"] == pytest.approx(-20), name
+        assert m["zaxis-gripper"]["homeOffset"] == pytest.approx(-25), name

@@ -65,7 +65,8 @@ const JOINT_AXIS_MAP = {
     'zaxis':          { bravoAxis: 'Z',  homeOffset: 0,      scale: -1, useTeachTipLength: true },
     'zaxis-gripper':  {
         bravoAxis: 'Zg',
-        homeOffset: -20,
+        // Render the -20 mm dock pose 5 mm lower to fit the head cutout.
+        homeOffset: -25,
         scale: 1,
         coupledAxis: 'Z',
         coupledScale: 1,
