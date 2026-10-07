@@ -25,8 +25,10 @@ different concentration. If a listed diluent and a suitable vessel are
 available, a newly prepared dilution may solve this: add an explicit earlier
 preparation stage, keep each stock and diluent preparation stroke inside a
 loaded pipette's working range, and preserve the required stock-equivalent
-dose in the final reaction. Cite the source stock concentration and calculate
-the dilution factor; do not merely round the aliquot up. Otherwise keep the
+dose in the final reaction. Calculate the dilution factor from the prepared
+stock and diluent volumes. Cite the stock concentration when it is supplied;
+when it is not, preserve the stock-equivalent volume without inventing a
+concentration. Do not merely round the aliquot up. Otherwise keep the
 unsupported transfer unresolved, or assign it to a clearly named manual
 operator-handoff stage with its actual component and volume when the task
 permits manual work. Before code generation, account
