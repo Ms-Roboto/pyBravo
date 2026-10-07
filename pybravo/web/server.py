@@ -2991,16 +2991,15 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
             protocol_api.record_execution(release_run, event)
         await ws_manager.broadcast(event)
 
-    executor = WorkflowExecutor(
+    executor_factory = WorkflowExecutor.for_simulation if mode == "simulate" else WorkflowExecutor
+    executor = executor_factory(
         target_bravo,
         graph_data,
         deck_config=deck_config,
         on_event=broadcast_event,
         runtime_state=runtime_snapshot,
-        preview_animation=(mode != "execute"),
-        physical_simulation=(mode == "simulate"),
+        preview_animation=False,
         library_src=data.get("library", "") or "",
-        **({"strict_validation": True} if mode == "simulate" else {}),
         **({"reviewed_protocol": True} if release_run else {}),
     )
     _active_workflow_executor = executor

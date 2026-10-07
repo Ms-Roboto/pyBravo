@@ -966,7 +966,7 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
                 <div class="progress-bar-fill" id="progress-fill"></div>
             </div>
             <details id="physical-report" hidden style="margin-top:8px;font-size:11px;">
-                <summary>Physical collision checks</summary>
+                <summary id="physical-report-summary">SuperDex collision checks</summary>
                 <div id="physical-report-body" style="white-space:pre-wrap;margin-top:6px;"></div>
             </details>
             <!-- Barcode / plate event trail populated by workflow:barcode_read
@@ -6942,6 +6942,7 @@ async function runWorkflow({ walkthrough = false } = {}) {
     clearActiveNodeHighlight();
     timelineReset();
     document.getElementById('physical-report').hidden = true;
+    document.getElementById('physical-report').open = false;
     document.getElementById('physical-report-body').textContent = '';
     progress.textContent = 'Saving workflow...';
 
@@ -6995,6 +6996,7 @@ async function runWorkflow({ walkthrough = false } = {}) {
             highlightInvalidNodes(body.invalid_nodes);
             const lines = body.invalid_nodes.map(n => ` • ${n.node_title}: ${n.field}='${n.value}' — ${n.reason}`).join('\n');
             progress.textContent = `${body.message}`;
+            renderSimulationBlockers(body.message, body.invalid_nodes);
             console.error('Workflow validation failed:\n' + lines);
             if (isGeneratedProtocolDraftTab()) {
                 progress.textContent = `Simulation blocked: ${body.invalid_nodes.length} catalog or mechanical problems. ${body.invalid_nodes[0]?.reason || ''}`;
@@ -7005,6 +7007,8 @@ async function runWorkflow({ walkthrough = false } = {}) {
         } else {
             const msg = (typeof body === 'string' ? body : body?.message) || runRes.statusText;
             progress.textContent = `Failed: ${msg}`;
+            if (body?.physical_simulation) renderPhysicalSimulationReport(body.physical_simulation, 'workflow:error');
+            else renderSimulationBlockers(msg);
             console.error('Workflow start failed:', detail);
         }
         document.getElementById('progress-fill').style.width = '0%';
@@ -7375,23 +7379,76 @@ function resetAnimationTransients(opts = {}) {
     }
 }
 
+// Render the same native-motion evidence for hand-built, imported, generated,
+// and reviewed workflows. A successful task run alone is not collision evidence.
+function hasCurrentPhysicalSimulationEvidence(report) {
+    if (!report || typeof report !== 'object' || Array.isArray(report)) return false;
+    const counts = [report.moves_checked, report.samples_checked, report.contact_queries];
+    if (!counts.every(count => Number.isInteger(count) && count >= 0)) return false;
+    if (report.moves_checked > 0 && report.samples_checked === 0) return false;
+    return report.contract_version === 'pybravo.superdex-rehearsal.v1'
+        && report.engine === 'SuperDex'
+        && typeof report.engine_version === 'string' && Boolean(report.engine_version.trim())
+        && report.status === 'checked' && !report.last_error;
+}
+function physicalSimulationSummary(report, phase = '') {
+    if (!report) return 'Collision checks unavailable';
+    if (report.last_error || report.status === 'failed') return 'SuperDex stopped this rehearsal';
+    if (report.status !== 'checked') return `SuperDex: ${report.status || 'not checked'}`;
+    if (!hasCurrentPhysicalSimulationEvidence(report)) return 'Collision evidence is outdated · run simulation again';
+    const checked = Number(report.moves_checked) > 0 && Number(report.samples_checked) > 0;
+    if (!checked) return phase === 'workflow:start' ? 'SuperDex ready · awaiting native motion' : 'No native motion was collision checked';
+    return phase === 'workflow:complete' ? 'SuperDex · modeled collision checks passed' : 'SuperDex · checking native motion';
+}
+function renderPhysicalSimulationReport(report, phase = '') {
+    const panel = document.getElementById('physical-report');
+    const error = report.last_error;
+    const node = error?.node_id != null ? designerState.graph?.getNodeById(error.node_id) : null;
+    const pose = Object.entries(error?.pose || {}).filter(([, value]) => Number.isFinite(value));
+    document.getElementById('physical-report-summary').textContent = physicalSimulationSummary(report, phase);
+    document.getElementById('physical-report-body').textContent = [
+        `${report.engine || 'Collision engine'}${report.engine_version ? ' ' + report.engine_version : ''} · ${Number(report.moves_checked) || 0} motion commands · ${Number(report.samples_checked) || 0} sampled poses`,
+        report.scope ? `Coverage: ${report.scope}; head: ${report.head_geometry || 'unspecified'}` : 'Physical scene was not checked.',
+        ...(error ? [
+            `Stopped at: ${node?.title || error.node_type || 'workflow setup'}${error.node_id != null ? ' (node ' + error.node_id + ')' : ''}`,
+            error.message || 'Physical rehearsal failed.',
+            ...(error.bodies?.length ? ['Contact: ' + error.bodies.join(' ↔ ')] : []),
+            ...(pose.length ? ['Rejected pose (mm): ' + pose.map(([axis, value]) => `${axis} ${value.toFixed(2)}`).join(' · ')] : []),
+        ] : [physicalSimulationSummary(report, phase)]),
+        ...(report.limitations || []),
+        'These checks do not qualify a liquid method or approve hardware use.',
+    ].join('\n');
+    panel.hidden = false;
+    if (error || !hasCurrentPhysicalSimulationEvidence(report) || !['checked', 'checking'].includes(report.status)) panel.open = true;
+}
+function renderSimulationBlockers(message, invalidNodes = []) {
+    const panel = document.getElementById('physical-report');
+    document.getElementById('physical-report-summary').textContent = 'Simulation blocked before motion';
+    document.getElementById('physical-report-body').textContent = [message,
+        ...invalidNodes.map(node => `${node.node_title || node.node_id || 'Setup'}: ${node.reason || node.message || 'Needs correction'}`),
+        'Correct the highlighted task or its deck/catalog settings, then simulate again.',
+    ].join('\n');
+    panel.hidden = false;
+    panel.open = true;
+}
+function workflowCompletionMessage(data, {hardware = false} = {}) {
+    if (data.simulation_kind === 'visual_walkthrough') return `${data.status === 'aborted' ? 'Visual walkthrough stopped' : 'Visual walkthrough complete'} · tasks were not executed; collision checks were not run`;
+    if (data.status === 'aborted') return hardware ? 'Hardware execution stopped' : 'Simulation stopped · checks incomplete';
+    if (hardware && !data.physical_simulation) return 'Hardware execution complete';
+    const report = data.physical_simulation;
+    if (!report) return 'Task rehearsal complete · no collision report; run simulation again';
+    if (report.last_error || report.status === 'failed') return 'Simulation failed · see SuperDex details';
+    if (report.status !== 'checked') return 'Simulation incomplete · collision checks did not finish';
+    if (!hasCurrentPhysicalSimulationEvidence(report)) return 'Task rehearsal complete · collision evidence is outdated; run simulation again';
+    if (!(Number(report.moves_checked) > 0 && Number(report.samples_checked) > 0)) return 'Task rehearsal complete · no native motion to collision check';
+    return 'Simulation complete · modeled collision checks passed · use scrubber to review';
+}
+
 // ── WebSocket Workflow Events ───────────────────────────────────────
 function handleWorkflowEvent(data) {
     const progress = document.getElementById('playback-progress');
     const fill = document.getElementById('progress-fill');
-    if (data.physical_simulation) {
-        const report = data.physical_simulation;
-        const panel = document.getElementById('physical-report');
-        panel.hidden = false;
-        document.getElementById('physical-report-body').textContent = [
-            `${report.engine} · ${report.status} · ${report.moves_checked || 0} motion commands · ${report.samples_checked || 0} sampled poses`,
-            report.scope ? `Coverage: ${report.scope}; head: ${report.head_geometry}` : 'Physical scene was not checked.',
-            report.last_error?.message || (report.status === 'failed' ? 'Physical rehearsal failed.' : 'No collision reported in the checked geometry.'),
-            ...(report.limitations || []),
-            'This does not qualify a wet-lab method or authorize hardware execution.',
-        ].join('\n');
-        if (report.last_error) panel.open = true;
-    }
+    if (data.physical_simulation) renderPhysicalSimulationReport(data.physical_simulation, data.type);
 
     switch (data.type) {
         case 'workflow:start':
@@ -7523,9 +7580,10 @@ function handleWorkflowEvent(data) {
             progress.textContent = `Branch: ${data.condition} \u2192 ${data.result}`;
             break;
         case 'workflow:complete':
-            progress.textContent = data.simulation_kind === 'visual_walkthrough' ? `${data.status === 'aborted' ? 'Visual walkthrough stopped' : 'Visual walkthrough complete'} · tasks were not executed; strict simulation is still required` : isGeneratedProtocolDraftTab() ? 'Software rehearsal complete \u2014 review before hardware use' : 'Simulation complete \u2014 use scrubber to review';
-            if (data.physical_simulation) progress.textContent = data.status === 'aborted' ? 'Physical rehearsal stopped' : 'Native task rehearsal complete · modeled collision checks passed; review before hardware use';
-            fill.style.width = '100%';
+            progress.textContent = workflowCompletionMessage(data, {
+                hardware: executionMode === 'execute' && !isCompiledProtocolPreviewTab(),
+            });
+            fill.style.width = data.status === 'aborted' || data.physical_simulation?.status === 'failed' ? '0%' : '100%';
             timelineStopRecording();
             // Display final vars snapshot if backend included one.
             if (data.vars) {
@@ -7650,7 +7708,11 @@ function handleWorkflowEvent(data) {
             if (data.physical_simulation?.last_error?.node_id) {
                 highlightNode(data.physical_simulation.last_error.node_id, '#ff4444');
                 const failed = designerState.graph.getNodeById(data.physical_simulation.last_error.node_id);
-                if (failed) { designerState.graphCanvas.selectNode(failed); renderPropertiesPanel(failed); }
+                if (failed) {
+                    designerState.graphCanvas?.selectNode(failed);
+                    renderPropertiesPanel(failed);
+                    frameProtocolPreviewGraph(designerState.graphCanvas, [failed]);
+                }
             }
             timelineStopRecording();
             hideUserPromptModal();
@@ -8155,7 +8217,8 @@ function updateProtocolDraftControls() {
     document.body.classList.toggle('protocol-compiled-preview', compiledPreview);
     if (compiledPreview) requestAnimationFrame(() => designerState.robotScene?.resize());
     document.querySelector('#viewport-header span').textContent = compiledPreview ? 'Bravo 3D replay' : '3D Simulation';
-    document.getElementById('btn-simulate').title = compiledPreview ? 'Replay this revision’s saved strict simulation without starting a new run' : generated ? 'Rehearse this draft in software; stops on task errors and does not approve hardware use' : 'Simulate';
+    document.getElementById('btn-simulate').textContent = compiledPreview ? 'Replay simulation' : 'Simulate';
+    document.getElementById('btn-simulate').title = compiledPreview ? 'Replay this revision’s saved strict simulation without starting a new run' : 'Run native Bravo tasks in SuperDex; stops on motion, collision, or task errors';
     document.getElementById('btn-execute').title = generated ? 'Hardware execution requires review and approval' : 'Execute';
     document.getElementById('btn-walkthrough').hidden = !generated;
     document.getElementById('protocol-draft-banner').hidden = !(draft || generated);
@@ -8191,7 +8254,7 @@ function updateProtocolDraftControls() {
         const target = tab.protocolMetadata?.protocol_simulation_target;
         const targetNote = target ? ` Proposed simulation target: ${target.head_type} / ${target.tip_definition_id}; the active instrument is unchanged.` : '';
         const checks = tab.protocolMetadata?.protocol_draft_validation_stale ? `${issues.length ? issues.length + ' prior review checks · ' : ''}checks need to run again` : `${issues.length} review checks`;
-        summary.textContent = `${operations} editable Bravo tasks and manual handoffs · ${checks}. Simulate rehearses this draft in software and stops on task errors. Walk through draft previews task order and deck visits while settings are unresolved; it does not execute or validate tasks.${targetNote} Hardware execution remains unavailable.`;
+        summary.textContent = `${operations} editable Bravo tasks and manual handoffs · ${checks}. Simulate runs native Bravo tasks with SuperDex collision checks and stops on task errors. Walk through draft previews task order and deck visits while settings are unresolved; it does not execute or validate tasks.${targetNote} Hardware execution remains unavailable.`;
         summary.title = issues.map(issue => issue.message).join('\n');
     } else if (draft) {
         document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;

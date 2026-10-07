@@ -23,6 +23,7 @@ from pybravo.protocol.commands import CommandID
 from pybravo.protocol.errors import BravoError, ErrorType
 from pybravo.types import Axis, HeadType
 from pybravo.web import server
+from pybravo.workflow.executor import WorkflowExecutor
 
 
 class _FakeMongoCollection:
@@ -152,9 +153,12 @@ async def test_simulate_designer_workflow_passes_runtime_snapshot_into_executor(
     captured: dict[str, object] = {}
     scheduled = []
 
-    class _FakeExecutor:
-        def __init__(self, bravo_obj, graph_data, deck_config=None, on_event=None, runtime_state=None, preview_animation=True, library_src=""):
+    class _FakeExecutor(WorkflowExecutor):
+        def __init__(self, bravo_obj, graph_data, deck_config=None, on_event=None, runtime_state=None,
+                     preview_animation=True, library_src="", **options):
             captured["runtime_state"] = runtime_state
+            captured["options"] = options
+            captured["preview_animation"] = preview_animation
 
         async def execute(self):
             return None
@@ -174,7 +178,9 @@ async def test_simulate_designer_workflow_passes_runtime_snapshot_into_executor(
 
         response = await server.simulate_designer_workflow("wf-1")
 
-        assert response == {"status": "started", "workflow_id": "wf-1", "mode": "simulate"}
+        assert response == {"status": "started", "workflow_id": "wf-1", "mode": "simulate", "physical_engine": "SuperDex"}
+        assert captured["options"] == {"strict_validation": True, "physical_simulation": True}
+        assert captured["preview_animation"] is False
         runtime_state = captured["runtime_state"]
         assert runtime_state["head_mode"]["subset_type"] == "column"
         assert runtime_state["tip_selection"]["location"] == 2
@@ -1717,5 +1723,4 @@ async def test_liquid_classes_tip_filter_follows_head_state(monkeypatch):
     finally:
         server._bravo = previous_bravo
         bravo.disconnect()
-
 

@@ -417,6 +417,25 @@ def _build_task_params(node_type: str, properties: dict[str, Any]) -> dict[str, 
 class WorkflowExecutor:
     """Walks a serialized Litegraph graph and dispatches each node as a Bravo task."""
 
+    @classmethod
+    def for_simulation(cls, bravo: Any, graph_data: dict[str, Any], **options) -> WorkflowExecutor:
+        """Run native tasks with mandatory collision checks on a software Bravo.
+
+        All protocol simulation entry points use this factory. An animation
+        walkthrough is a separate presentation path and never a passed run.
+        Callers supply an isolated simulation Bravo, preserving its hardware
+        profile calibration; execute() refuses any physical controller.
+        """
+        for field in ("physical_simulation", "strict_validation"):
+            if field in options and options[field] is not True:
+                raise ValueError(f"Protocol simulation cannot disable {field}")
+        return cls(bravo, graph_data, **{
+            **options,
+            "physical_simulation": True,
+            "strict_validation": True,
+            "preview_animation": False,
+        })
+
     def __init__(
         self,
         bravo: Any,
@@ -444,7 +463,7 @@ class WorkflowExecutor:
         self._physics_scene = None
         # Show the actual native primitive motion stream when it is checked.
         self._preview_animation = preview_animation and not physical_simulation
-        self._strict_validation = strict_validation
+        self._strict_validation = strict_validation or physical_simulation
         self._reviewed_protocol = reviewed_protocol
         self._nodes = {n["id"]: n for n in graph_data.get("nodes", [])}
         self._links = {}
@@ -858,13 +877,13 @@ class WorkflowExecutor:
         labware = self.bravo._deck.get_stack(loc).top
         if labware is None:
             return
-        base_class = str(getattr(labware, "labware_type", "") or "").lower()
         metadata = labware.metadata or {}
         if top_item.get("tip_definition_id"):
             metadata["tip_definition_id"] = top_item["tip_definition_id"]
             labware.metadata = metadata
-        kind = str(metadata.get("kind") or metadata.get("base_class") or "").lower()
-        if "tip_box" not in (base_class, kind):
+        # Catalog racks commonly have kind=sbs_plate and base_class=tip_box.
+        # The general SBS shape must not hide their independent tip-box role.
+        if "tip_box" not in (self.bravo._labware_base_class(labware), self.bravo._labware_kind(labware)):
             return
         try:
             self.bravo._initialize_tipbox_occupancy(
@@ -876,6 +895,7 @@ class WorkflowExecutor:
                 if any(r < 0 or c < 0 or r >= rows or c >= cols for r, c in cells):
                     raise ValueError("Available tips contain a cell outside the rack")
                 self.bravo._tipbox_occupancy[loc] = cells
+                self.bravo._remember_tipbox_inventory(loc, labware)
         except Exception as exc:
             if self._strict_validation or self._reviewed_protocol:
                 raise
@@ -1082,12 +1102,9 @@ class WorkflowExecutor:
                 return
 
         # Hook into the state machine engine's on_step_complete callback so we
-        # can broadcast the real hardware positions after each step. Only
-        # installed in execute mode — in simulate/preview mode, the
-        # _animate_task_motion path (run from _walk BEFORE each task) is the
-        # authoritative position stream, and layering a second stream from
-        # the state-machine engine's on_step callback on top produces the
-        # "moves repeating 2x" artifact in the 3D viewport.
+        # can broadcast native controller positions after each step, including
+        # checked simulation. Only the legacy animation path suppresses this
+        # stream, to avoid displaying the same move twice in the 3D viewport.
         engine = self.bravo._engine
         prior_step_handler = getattr(engine, "_on_step_complete", None)
         prior_error_handler = getattr(engine, "_on_error", None)
@@ -1095,9 +1112,8 @@ class WorkflowExecutor:
         def _on_step(task_name: str, step_name: str) -> None:
             """Synchronous callback from the state-machine engine — runs in
             a worker thread.  Schedule position broadcast on the event loop."""
-            # In preview/simulation mode the _animate_task_motion path is the
-            # authoritative position stream; skip emission here to avoid the
-            # "every move animates twice" artifact in the 3D viewport.
+            # An animation walkthrough has its own position stream; physical
+            # simulation always uses the native steps and checked reports here.
             if self._preview_animation:
                 return
             try:
@@ -1135,6 +1151,7 @@ class WorkflowExecutor:
                             "type": "workflow:node_step",
                             "node_id": self._current_node_id,
                             "step_name": step_name,
+                            **self._physical_report_fields(),
                         }),
                         self._step_event_loop,
                     ))
@@ -1220,6 +1237,17 @@ class WorkflowExecutor:
                     except Exception as exc:
                         workflow_error = workflow_error or exc
                         self._physical_report_fields(exc)
+
+        if self._physical_simulation and not self._aborted and workflow_error is None:
+            from pybravo.physics.contracts import is_checked_physical_report
+
+            report = self._physical_report_fields().get("physical_simulation")
+            if not is_checked_physical_report(report):
+                workflow_error = RuntimeError(
+                    "Simulation ended without a completed SuperDex collision report; "
+                    "the protocol has not passed physical rehearsal."
+                )
+                self._physical_report_fields(workflow_error)
 
         if workflow_error is not None:
             self._set_workflow_light("error")

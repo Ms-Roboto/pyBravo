@@ -25,11 +25,12 @@ from pybravo.deck.geometry import well_center_offset_from_teachpoint_mm, well_ge
 from pybravo.head_mode import active_head_wells, head_geometry_for_type
 from pybravo.types import Axis
 
+from .assets import ROBOT_URDF_PATH, robot_assets_sha256
 from .carrying import active_grasp_location, carried_plate_poses
 from .errors import PhysicalSimulationError
 from .superdex_backend import SuperDexCollisionBackend
 
-_URDF = Path(__file__).resolve().parents[1] / "model/pybravo_urdf/robot.urdf"
+_URDF = ROBOT_URDF_PATH
 _TOOL_LINKS = {"384_head_384_head", "fingerleft_fingerleft", "fingerright_fingerright", "gripperzaxis_gripperzaxis"}
 
 
@@ -41,14 +42,23 @@ def _origin(element):
     return matrix
 
 
-@lru_cache(maxsize=8)
 def _tool_geometry(teach_length_mm: float):
+    assets_digest = robot_assets_sha256(_URDF)
+    geometry = _load_tool_geometry(teach_length_mm, str(_URDF), assets_digest)
+    if assets_digest != robot_assets_sha256(_URDF):
+        raise PhysicalSimulationError("Robot collision assets changed while loading the scene; rebuild the scene")
+    return geometry
+
+
+@lru_cache(maxsize=8)
+def _load_tool_geometry(teach_length_mm: float, urdf_path: str, assets_digest: str):
     """Read collision assets and establish a tool A1/barrel datum in mm.
 
     Joint datums match the documented digital twin; they never change commands.
     STL meshes are reflected into machine +X/+Y/Z-up and winding is reversed.
     """
-    root = ET.parse(_URDF).getroot()
+    urdf = Path(urdf_path)
+    root = ET.parse(urdf).getroot()
     joints = list(root.findall("joint"))
     values = {
         "xaxis": -182.64 / 1000,
@@ -85,7 +95,7 @@ def _tool_geometry(teach_length_mm: float):
             continue
         collision = link.find("collision")
         filename = collision.find("geometry/mesh").get("filename")
-        path = _URDF.parent / "assets" / Path(filename).name
+        path = urdf.parent / "assets" / Path(filename).name
         mesh = trimesh.load(path, force="mesh")
         if not mesh.is_watertight or not mesh.is_winding_consistent:
             raise PhysicalSimulationError(f"Collision mesh {name} is not closed and consistently wound")
@@ -150,6 +160,7 @@ class BravoCollisionScene:
             accessories = bravo.profile.accessories
             if any(device.enabled for device in accessories.devices) or accessories.barcode_reader.enabled:
                 raise PhysicalSimulationError("Enabled accessories need collision geometry before physical rehearsal")
+            assets_digest = robot_assets_sha256(_URDF)
             geometry = _tool_geometry(self.teach_length)
             self.mesh_head = bravo.profile.head.head_type.name in {"HT_384_D_70", "HT_384_D_70_S2"}
             for link, (vertices, faces, axes) in geometry.items():
@@ -178,12 +189,10 @@ class BravoCollisionScene:
                 self.robot_bounds["robot/" + link] = (lower * 1000, upper * 1000)
                 self.tool_axes["robot/" + link] = axes
             self._add_deck()
-            digest = hashlib.sha256(_URDF.read_bytes())
-            for path in sorted((_URDF.parent / "assets").glob("*.stl")):
-                digest.update(path.name.encode())
-                digest.update(path.read_bytes())
+            if assets_digest != robot_assets_sha256(_URDF):
+                raise PhysicalSimulationError("Robot collision assets changed while loading the scene; rebuild the scene")
             self.provenance = {
-                "robot_assets_sha256": digest.hexdigest(),
+                "robot_assets_sha256": assets_digest,
                 "profile_sha256": hashlib.sha256(
                     json.dumps(bravo.profile._to_dict(), sort_keys=True).encode()
                 ).hexdigest(),
@@ -319,6 +328,8 @@ class BravoCollisionScene:
         raise PhysicalSimulationError(message, details=self.last_error)
 
     def check_motion(self, start, end):
+        if robot_assets_sha256(_URDF) != self.provenance["robot_assets_sha256"]:
+            self._fail("Robot collision assets changed during physical rehearsal; rebuild the scene")
         if not all(math.isfinite(float(v)) for v in (*start.values(), *end.values())):
             self._fail("Nonfinite motion cannot be physically simulated")
         for axis in (Axis.X, Axis.Y, Axis.Z, Axis.Zg, Axis.G):

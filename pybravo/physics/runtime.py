@@ -12,6 +12,8 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable
 
+from .contracts import PHYSICAL_SIMULATION_CONTRACT
+
 
 def _create_scene(bravo: Any):
     # Import optional native dependencies on the owner, inside the failure
@@ -65,6 +67,7 @@ class CollisionRehearsal:
         self._failure: dict[str, Any] | None = None
         self._context: dict[str, Any] = {}
         self._report: dict[str, Any] = {
+            "contract_version": PHYSICAL_SIMULATION_CONTRACT,
             "engine": "SuperDex",
             "engine_version": "1.0.0",
             "scope": "tool_meshes_and_catalog_deck",
@@ -105,6 +108,7 @@ class CollisionRehearsal:
             return
         snapshot = copy.deepcopy(self._scene.report())
         with self._lock:
+            snapshot["contract_version"] = PHYSICAL_SIMULATION_CONTRACT
             snapshot["qualification_granted"] = False
             if self._failure is not None:
                 snapshot.update(status="failed", last_error=copy.deepcopy(self._failure))

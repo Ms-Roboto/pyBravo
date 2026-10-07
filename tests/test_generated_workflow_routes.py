@@ -15,6 +15,7 @@ from pybravo.controllers.simulation import SimulationController
 from pybravo.profile.profile import BravoProfile
 from pybravo.types import Axis, HeadType
 from pybravo.web import server
+from pybravo.workflow.executor import WorkflowExecutor
 from pybravo.workflow.storage import WorkflowStorage
 
 
@@ -285,7 +286,7 @@ async def test_virtual_target_uses_its_catalog_and_leaves_installed_384_head_unc
     monkeypatch.setattr(server, "_workflow_start_lock", asyncio.Lock())
     executors, tasks = [], []
 
-    class FakeExecutor:
+    class FakeExecutor(WorkflowExecutor):
         def __init__(self, bravo, graph, **kwargs):
             self.bravo = bravo
             self.kwargs = kwargs

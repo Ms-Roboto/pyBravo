@@ -53,7 +53,7 @@ async def test_startup_running_and_aborting_all_exclude_second_workflow(monkeypa
     monkeypatch.setattr(server, "_validate_workflow_liquid_classes", lambda graph, robot: [])
     monkeypatch.setattr(api, "check_execution_release", lambda *args: None)
 
-    class FakeExecutor:
+    class FakeExecutor(WorkflowExecutor):
         def __init__(self, *args, **kwargs):
             self.aborted = False
             executors.append(self)
@@ -111,7 +111,7 @@ async def test_completion_does_not_clear_another_owners_executor(monkeypatch):
     monkeypatch.setattr(server, "_get_workflow_storage", lambda: SimpleNamespace(
         get_workflow=lambda identity: {"graph": {"nodes": []}, "deck": {}}))
 
-    class FakeExecutor:
+    class FakeExecutor(WorkflowExecutor):
         def __init__(self, *args, **kwargs):
             pass
 

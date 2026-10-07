@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from pybravo.bravo import Bravo
 from pybravo.controllers.simulation import SimulationController
+from pybravo.physics.contracts import is_checked_physical_report
 from pybravo.web import server
 from pybravo.workflow.protocols import api
 from pybravo.workflow.protocols import setup_recommendations as setup_recommendations_module
@@ -85,6 +86,8 @@ async def test_strict_protocol_simulation_disables_travel_delay_but_completes_ta
     assert calls == [False]
     assert saved["simulation"]["status"] == "passed"
     assert saved["simulation"]["events"][-1]["type"] == "workflow:complete"
+    assert is_checked_physical_report(saved["simulation"]["physical_simulation"])
+    assert saved["simulation"]["physical_simulation"]["moves_checked"] == 0
 
 
 @pytest.mark.asyncio

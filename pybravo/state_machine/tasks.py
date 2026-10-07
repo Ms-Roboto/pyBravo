@@ -2732,6 +2732,7 @@ class ScanStackHeightTask(StateMachineTask):
         self._baseline_sum: float | None = None
         self._start_zg: float | None = None
         self._end_zg: float | None = None
+        self._simulated_trigger_zg: float | None = None
         self._operator_prompt: dict[str, Any] | None = None
         # Per-step status surfaced on /ws/state so the URDF viewport has
         # motion waypoints to tween between during the scan. `_live_status`
@@ -2962,7 +2963,34 @@ class ScanStackHeightTask(StateMachineTask):
         # short by the offset and biased the inferred count differently for
         # each labware.
         self._baseline_sum = self._pad_plane_sum()
-        self._start_zg = max(_GRIPPER_RECESS_DEPTH, baseline_zg - float(self._profile.safety.approach_height or 10.0))
+        if self._ctrl.__class__.__name__ == "SimulationController":
+            # A virtual stack is already known. Begin above its top rather
+            # than approaching the empty-pad grasp plane through that stack.
+            # This models clearance and a trigger waypoint, not an optical
+            # sensor response or calibrated sensor accuracy.
+            stack_height = float(self._deck.get_stack(self._location).get_total_height())
+            if not math.isfinite(stack_height) or stack_height <= 0:
+                raise RuntimeError("Virtual stack scan requires a positive, recorded stack height")
+            baseline_z, baseline_zg = self._solve_pick_or_place(
+                stack_height + _SCAN_SENSOR_STANDOFF_MM, 0.0
+            )
+            self._simulated_trigger_zg = (
+                self._baseline_sum - baseline_z - stack_height - _SCAN_SENSOR_STANDOFF_MM
+            )
+            zg_min, zg_max = self._axis_range(Axis.Zg)
+            approach = float(self._profile.safety.approach_height or 10.0)
+            if not math.isfinite(approach) or approach <= 0:
+                raise RuntimeError("Virtual stack scan requires a positive approach clearance")
+            self._start_zg = self._simulated_trigger_zg - approach
+            if not (
+                zg_min <= self._start_zg < self._simulated_trigger_zg <= zg_max
+            ):
+                raise RuntimeError(
+                    "Virtual stack scan cannot reach its trigger plane with approach clearance "
+                    "inside the recorded Zg travel range"
+                )
+        else:
+            self._start_zg = max(_GRIPPER_RECESS_DEPTH, baseline_zg - float(self._profile.safety.approach_height or 10.0))
         self._end_zg = min(self._axis_range(Axis.Zg)[1], baseline_zg + 120.0)
         self._log_step(
             "move_to_scan_start",
@@ -2979,12 +3007,9 @@ class ScanStackHeightTask(StateMachineTask):
         )
 
     async def _scan_with_plate_sensor(self) -> None:
-        # Simulation short-circuit: no real plate sensor, so rely on the
-        # virtual deck as ground truth. The physical scan path would see
-        # zero height (nothing in the air to trigger the sensor) and fall
-        # into manual_count_required, defeating the whole point of running
-        # a simulation. Synthesize a scan result from the current stack
-        # depth instead.
+        # The virtual deck determines count; a real native axis command still
+        # rehearses the descent to the modeled top surface. Do not bypass the
+        # controller motion guard or claim that a sensor/force model was tested.
         if self._ctrl.__class__.__name__ == "SimulationController":
             stack = self._deck.get_stack(self._location)
             live_count = len(stack)
@@ -2997,7 +3022,26 @@ class ScanStackHeightTask(StateMachineTask):
             # Reconstruct measured_height the same way the physical path would
             # have for this count, so downstream consumers see consistent units.
             theoretical_height = _stacking_support_height_for_count(live_count, stack_height)
-            estimated_total_height = _stack_total_height_for_count(live_count, plate_height, stack_height)
+            estimated_total_height = float(stack.get_total_height())
+            trigger_z = float(self._ctrl.get_position(Axis.Z))
+            expected_trigger = (
+                float(self._baseline_sum or 0.0) - trigger_z
+                - estimated_total_height - _SCAN_SENSOR_STANDOFF_MM
+            )
+            if self._simulated_trigger_zg is None or not math.isclose(
+                expected_trigger, self._simulated_trigger_zg, abs_tol=1e-6
+            ):
+                raise RuntimeError("Virtual stack scan geometry changed after its approach was planned")
+            self._log_step(
+                "scan_with_plate_sensor",
+                targets={"Zg": self._simulated_trigger_zg},
+                message="Rehearsing the virtual stack trigger plane; sensor response is not modeled",
+            )
+            await asyncio.to_thread(
+                self._ctrl.move,
+                [_axis_move(self._ctrl, Axis.Zg, self._simulated_trigger_zg)],
+                True,
+            )
             self._result = {
                 "status": "completed",
                 "location": self._location,
@@ -3018,9 +3062,12 @@ class ScanStackHeightTask(StateMachineTask):
                 "baseline_sum_mm": self._baseline_sum,
                 "scan_start_zg_mm": self._start_zg,
                 "scan_end_zg_mm": self._end_zg,
-                "trigger_z_mm": None,
-                "trigger_zg_mm": None,
+                "trigger_z_mm": trigger_z,
+                "trigger_zg_mm": float(self._ctrl.get_position(Axis.Zg)),
                 "simulated": True,
+                "scan_mode": "virtual_deck_geometry",
+                "sensor_response_modeled": False,
+                "force_behavior_modeled": False,
                 "message": (
                     f"[simulation] Deck state reports {live_count} plate(s) at "
                     f"location {self._location}; stacking thickness "

@@ -14,6 +14,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pybravo.bravo import Bravo
+from pybravo.physics.assets import robot_assets_sha256
+from pybravo.physics.contracts import is_checked_physical_report
 from pybravo.workflow.protocols.context import machine_context
 from pybravo.workflow.protocols.ingest import (
     MAX_PDF_BYTES,
@@ -38,6 +40,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Protocol assistant"])
 _store = ProtocolStore()
 _simulations: dict[str, asyncio.Task] = {}
+
+
+def _physical_rerun_reason(report: Any) -> str | None:
+    if not is_checked_physical_report(report):
+        return "Run strict simulation again to include the current SuperDex collision checks."
+    try:
+        current_assets = robot_assets_sha256()
+    except (OSError, RuntimeError):
+        return "Robot collision geometry is unavailable. Restore the assets and run strict simulation again."
+    provenance = report.get("provenance")
+    if not isinstance(provenance, dict) or provenance.get("robot_assets_sha256") != current_assets:
+        return "Robot collision geometry changed since this result. Run strict simulation again."
+    return None
 
 
 def _server():
@@ -616,6 +631,11 @@ async def get_protocol(identity: str):
         record = _store.annotate(identity, {"simulation": {**sim, "status": "failed",
             "error": "Validation was interrupted by a server restart. Run strict simulation again."},
             "approval": None}, revision=record["revision"])
+    elif sim.get("status") == "passed":
+        reason = _physical_rerun_reason(sim.get("physical_simulation"))
+        if reason:
+            record = _store.annotate(identity, {"simulation": {**sim, "status": "rerun_required", "error": reason}},
+                revision=record["revision"])
     return record
 
 
@@ -729,23 +749,33 @@ async def _simulate(identity: str, record: dict, capabilities: dict, workflow: d
         # an otherwise valid plate-transfer workflow.
         simulation.connect()
         simulation.controller.set_move_timing_enabled(False)
-        executor = WorkflowExecutor(simulation, workflow["graph"], deck_config=workflow["deck"],
-                                    preview_animation=False, strict_validation=True, physical_simulation=True, on_event=event)
+        executor = WorkflowExecutor.for_simulation(
+            simulation, workflow["graph"], deck_config=workflow["deck"], on_event=event,
+        )
         await asyncio.wait_for(executor.execute(), timeout=180)
         failures = [e for e in events if e.get("type") in
                     {"workflow:error", "workflow:task_warning", "workflow:task_aborted"}]
-        completed = any(e.get("type") == "workflow:complete" and e.get("status") == "ok" for e in events)
-        if failures or not completed:
+        completion = next((e for e in reversed(events) if e.get("type") == "workflow:complete"), None)
+        if failures or not completion or completion.get("status") != "ok":
             raise ValueError(failures[0].get("error", "Strict simulation did not complete") if failures
                              else "Strict simulation did not complete")
+        physical_report = completion.get("physical_simulation")
+        if not is_checked_physical_report(physical_report):
+            raise ValueError("Strict simulation did not produce a completed SuperDex collision report. Run simulation again.")
         result = {"status": "passed", "run_id": run_id, "events": events, "finished_at": now(),
-                  "physical_simulation": next((e['physical_simulation'] for e in reversed(events) if 'physical_simulation' in e), None)}
+                  "physical_simulation": physical_report}
     except Exception as exc:
         if executor:
             executor.abort()
+        # Cancellation/timeouts can occur before a terminal event is emitted.
+        # The executor retains the final scene report after draining its worker.
+        physical_report = executor._physical_report_fields(exc).get("physical_simulation") if executor else None
+        if physical_report is None:
+            physical_report = next((e.get("physical_simulation") for e in reversed(events)
+                                    if e.get("type") in {"workflow:error", "workflow:complete"}), None)
         result = {"status": "failed", "run_id": run_id, "events": events, "error": str(exc) or type(exc).__name__,
                   "finished_at": now(),
-                  "physical_simulation": next((e['physical_simulation'] for e in reversed(events) if 'physical_simulation' in e), None)}
+                  "physical_simulation": physical_report}
     finally:
         if simulation is not None:
             simulation.disconnect()
@@ -782,6 +812,13 @@ def _require_passed(record: dict, capabilities: dict) -> tuple[str, dict]:
     simulation = record.get("simulation") or {}
     if simulation.get("status") != "passed" or simulation.get("record_hash") != fingerprint:
         raise HTTPException(409, "This version and machine configuration need a successful strict simulation.")
+    if not is_checked_physical_report(simulation.get("physical_simulation")):
+        raise HTTPException(409, "Run strict simulation again to include the current SuperDex collision checks.")
+    expected_assets = capabilities.get("physical_simulation_geometry", {}).get("robot_assets_sha256")
+    provenance = simulation["physical_simulation"].get("provenance")
+    recorded_assets = provenance.get("robot_assets_sha256") if isinstance(provenance, dict) else None
+    if not expected_assets or recorded_assets != expected_assets:
+        raise HTTPException(409, "Robot collision geometry changed or could not be verified. Run strict simulation again.")
     report = _validate(record, capabilities)
     if not _valid(report):
         raise HTTPException(409, "Protocol has unresolved validation issues.")

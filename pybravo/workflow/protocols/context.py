@@ -4,6 +4,8 @@ from dataclasses import asdict
 
 from pybravo import liquid_classes
 from pybravo.deck.labware import normalize_labware_definitions
+from pybravo.physics.assets import robot_assets_sha256
+from pybravo.physics.contracts import PHYSICAL_SIMULATION_CONTRACT
 from pybravo.tip_offsets import get_tip_offset_table
 from pybravo.tips import get_tip_definitions_for_head
 from pybravo.workflow.protocols.store import digest
@@ -43,6 +45,21 @@ def machine_context(bravo) -> dict:
         "or select the correct configured head before choosing tips."
     )
     context["profile_hash"] = digest(profile)
+    # Include geometry identity without importing SuperDex. A saved pass must
+    # be repeated after CAD changes, even when deck/profile values are identical.
+    try:
+        context["physical_simulation_geometry"] = {
+            "contract_version": PHYSICAL_SIMULATION_CONTRACT,
+            "robot_assets_sha256": robot_assets_sha256(),
+        }
+    except (OSError, RuntimeError) as error:
+        # Planning remains available without CAD files; physical simulation
+        # still fails explicitly when it tries to construct the missing scene.
+        context["physical_simulation_geometry"] = {
+            "contract_version": PHYSICAL_SIMULATION_CONTRACT,
+            "robot_assets_sha256": None,
+            "error": str(error),
+        }
     # An approved protocol pins the method library as well as the physical
     # catalogs. Editing an authored method or its referenced liquid class must
     # invalidate the previous strict simulation and approval.

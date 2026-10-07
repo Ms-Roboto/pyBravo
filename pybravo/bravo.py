@@ -1188,7 +1188,11 @@ class Bravo:
             return {"status": "aborted", "location": location, "message": "Scan stack height aborted by operator."}
         result = task.result_payload()
         if result.get("status") == "completed":
-            self._rebuild_stack_from_template(location, template_labware, int(result.get("inferred_count") or 0))
+            # A virtual scan derives its count from this exact modeled deck.
+            # Rebuilding it would erase plate identity/metadata and invalidate
+            # the collision scene before the next protocol task.
+            if result.get("scan_mode") != "virtual_deck_geometry":
+                self._rebuild_stack_from_template(location, template_labware, int(result.get("inferred_count") or 0))
             self._emit("stack_scanned", **result)
         return result
 

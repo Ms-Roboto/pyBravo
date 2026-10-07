@@ -91,8 +91,11 @@ class _Scene:
         # scene errors must also fail the runtime's report, not look successful.
         return {
             "engine": "SuperDex",
+            "engine_version": "test-probe",
             "status": "checked",
             "moves_checked": self.moves_checked,
+            "samples_checked": self.moves_checked * 2,
+            "contact_queries": self.moves_checked * 2,
             "qualification_granted": False,
             "last_error": None,
             "context": copy.deepcopy(self.context),

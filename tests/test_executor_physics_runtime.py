@@ -42,9 +42,49 @@ def _executor(monkeypatch, probe, *, scene_factory=None, bravo=None, graph=None,
         bravo.connect()
     bravo.controller.set_move_timing_enabled(False)
     events = []
-    executor = WorkflowExecutor(bravo, graph or _graph(), deck_config=deck, on_event=events.append,
-                                strict_validation=True, physical_simulation=True)
+    executor = WorkflowExecutor.for_simulation(bravo, graph or _graph(), deck_config=deck, on_event=events.append)
     return bravo, executor, events
+
+
+@pytest.mark.parametrize("field", ["strict_validation", "physical_simulation"])
+def test_simulation_factory_rejects_disabling_required_checks(field):
+    with pytest.raises(ValueError, match=f"cannot disable {field}"):
+        WorkflowExecutor.for_simulation(object(), _graph(), **{field: False})
+
+
+async def test_physical_mode_always_rejects_unknown_tasks_even_without_strict_flag(monkeypatch):
+    probe = _Probe()
+    graph = _graph()
+    graph["nodes"][1].update(type="unsupported/InventedMotion", properties={})
+    bravo, _, events = _executor(monkeypatch, probe, graph=graph)
+    executor = WorkflowExecutor(bravo, graph, on_event=events.append, physical_simulation=True)
+    try:
+        await executor.execute()
+        assert events[-1]["type"] == "workflow:error"
+        assert events[-1]["physical_simulation"]["status"] == "failed"
+        assert not any(event["type"] == "workflow:complete" for event in events)
+        assert probe.closed
+    finally:
+        bravo.disconnect()
+
+
+async def test_completed_native_tasks_cannot_pass_without_valid_physical_report(monkeypatch):
+    class IncompleteScene(_Scene):
+        def report(self):
+            return {**super().report(), "status": "not_checked"}
+
+    probe = _Probe()
+    bravo, executor, events = _executor(monkeypatch, probe, scene_factory=lambda robot: IncompleteScene(robot, probe))
+    try:
+        await executor.execute()
+        assert events[-1]["type"] == "workflow:error"
+        assert "without a completed SuperDex collision report" in events[-1]["error"]
+        assert events[-1]["physical_simulation"]["status"] == "failed"
+        assert not any(event["type"] == "workflow:complete" for event in events)
+        assert bravo.controller._motion_guard is None
+        assert probe.closed
+    finally:
+        bravo.disconnect()
 
 
 async def test_native_primitive_motion_uses_owner_and_completion_reads_closed_cache(monkeypatch):
@@ -59,6 +99,8 @@ async def test_native_primitive_motion_uses_owner_and_completion_reads_closed_ca
         assert events[-1]["physical_simulation"]["qualification_granted"] is False
         assert any(event["type"] == "workflow:positions" for event in events)
         assert any(event["type"] == "workflow:node_step" for event in events)
+        step_reports = [event["physical_simulation"] for event in events if event["type"] == "workflow:node_step"]
+        assert any(report["moves_checked"] > 0 for report in step_reports)
         assert probe.closed
         assert {ident for _, ident in probe.calls} == {probe.owner.ident}
         assert probe.calls[-1][0] == "close"
