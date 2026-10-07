@@ -1,6 +1,6 @@
 # Text2WetLab evaluation boundary
 
-Status checked on 2026-10-06 against
+Status checked on 2026-10-07 against
 [Text2WetLab](https://huggingface.co/datasets/EvanOLeary/Text2WetLab) revision
 d7c8a9b93428997447eeaf2ee9e27ac3ce026872 and the saved local reports below. The seven public
 Harbor tasks require **Opentrons OT-2 Python API v2** protocols on task-specific fixed
@@ -46,11 +46,13 @@ need to agree. Draft review issues are grouped diagnostics, not a release decisi
 ## Local evidence snapshot
 
 These are outcomes from **separate saved runs**, not one simultaneous seven-task evaluation
-with the current code. Five distinct tasks reached the independent static/lint, Opentrons
-simulation, run-log, and event-safety gates at least once. The newer scientific-coverage
-gate makes Golden Gate a known failure despite its older report's simulator_passed status.
-The other four passing candidates still have needs_review scientific or manual-stage checks;
-none has an official score.
+with the current code. Six distinct tasks reached the independent static/lint, Opentrons
+simulation, run-log, and event-safety gates at least once, including a newer colony PCR
+candidate. Only the colony run has a complete saved report under the current pinned-evidence
+audit; four older candidates are being rechecked against that audit. The newer
+scientific-coverage gate makes Golden Gate a known failure despite its older report's
+simulator_passed status. All local passes still have needs_review scientific or manual-stage
+checks; none has an official score.
 
 | Task | Saved local mechanical evidence | Outstanding scientific or generation issue |
 | --- | --- | --- |
@@ -59,20 +61,22 @@ none has an official score.
 | AMPure cleanup | Local gates passed after a revised candidate isolated samples with fresh tips | Physical tip replenishment and non-pipetting stages require review. |
 | E. coli heat shock | Local gates passed after a Qwen line repair put the 37 °C transition before SOC additions | Scientific and external-module fidelity still require review. |
 | Golden Gate assembly | Older saved report passed mechanical gates | Its embedded local rubric audit **failed** required PCR setup and ordered DpnI/cleanup handoffs. Current adapter rejects observable audit failures; the saved report predates that gate. |
-| Colony PCR | No accepted local simulation | Earlier candidate exhausted tips; an accepted early evidence plan omitted robot addition and tip-demand stages, which the planner now checks. |
-| RNA extraction | No accepted local simulation | Candidate exhausted its P1000 rack and used invalid multichannel locations; 48-sample mapping and elution recovery remain unresolved. |
+| Colony PCR | A newer Qwen draft passed current local lint, simulation, pinned run log, and event-safety gates | Primer-stock concentration was not specified, the 4 µL primer-pair choice needs scientific review, and tip replenishment requires an explicit operator handoff before physical use. |
+| RNA extraction | No accepted local simulation | Qwen corrected the P1000 minimum volume and a multichannel location error, but a patched candidate still exhausted tips; 48-sample mapping and elution recovery remain unresolved. |
 
 The saved reports are in /tmp/pybravo-text2wetlab-baseline/,
 /tmp/pybravo-text2wetlab-split-baseline/, /tmp/pybravo-text2wetlab-ampure-repair2/,
 /tmp/pybravo-text2wetlab-ecoli-patch-integrated2/,
-/tmp/pybravo-text2wetlab-golden-planning/, /tmp/pybravo-text2wetlab-colony-planning/, and
-/tmp/pybravo-text2wetlab-rna-repair2/. Each report and task trace records its own code and
+/tmp/pybravo-text2wetlab-golden-planning/, /tmp/pybravo-text2wetlab-golden-direct5/,
+/tmp/pybravo-text2wetlab-colony-current2/, and
+/tmp/pybravo-text2wetlab-rna-current/. Each report and task trace records its own code and
 source hashes, attempts, and gate results. The Golden Gate report contains
 local_rubric_audit.status: failed even though its top-level status is the older
 simulator_passed; the latter must not be counted as current scientific acceptance. A later
 evidence-planning rerun in /tmp/pybravo-text2wetlab-golden-science-gated/ timed out at the
 local Qwen 300-second limit before saving a plan or reaching simulation. A direct-draft
-science-gated rerun is in progress; no result is claimed here.
+science-gated rerun also failed: Qwen repaired tip isolation but overfilled a cited 25 µL
+PCR and did not produce an accepted ordered handoff sequence.
 
 ## How the current local harness stays grounded
 

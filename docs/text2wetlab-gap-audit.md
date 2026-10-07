@@ -13,7 +13,7 @@ No protocol answer is written here.
 | AMPure cleanup | Core transfer volumes and 96-well mapping supported; manual stages and stock backflow need review. | Represent manual magnet/drying handoffs and per-tip liquid contact. |
 | E. coli heat shock | Measurable transfer/module sequence supported; paper fidelity needs review. | Compare all executed stages and comments to the cited method. |
 | Golden Gate | One local category supported, two failed, two need review. | Enforce reaction stoichiometry and an ordered, parameterized handoff timeline. |
-| Colony PCR | No accepted simulator run. | Preflight exact fresh-tip pickup positions, reagent inventory, and final-volume balance. |
+| Colony PCR | A newer Qwen candidate passes the local simulator and pinned run log, but still needs scientific review. | Resolve the unspecified primer stock concentration and require a real operator handoff before each permitted tip-rack refill. |
 | RNA extraction | No accepted simulator run. | Plan by pipette/tip capacity, eight-channel column geometry, and sample isolation before code. |
 
 The saved Golden Gate protocol at
@@ -30,14 +30,19 @@ program note but does not verify mixture composition or the chronology of all ma
 handoffs. A newer direct Qwen candidate prepared the same master mix twice in the
 same initially empty rack well; a reminder to emit only final code did not prevent it.
 
-The saved colony PCR candidate correctly states that its P20 stages need 193 pickups
-from one 96-tip rack, but it resets only after the 96-primer loop. One earlier master-mix
-tip means the 97th pickup fails **inside** that loop. It also treats 3.5 µL of absent
+An earlier colony PCR candidate correctly stated that its P20 stages need 193 pickups
+from one 96-tip rack, but reset only after the 96-primer loop. One earlier master-mix
+tip meant the 97th pickup failed **inside** that loop. It also treated 3.5 µL of absent
 water as a manual addition, leaving the robot with only 7 µL in a nominal 10 µL
-reaction. The fixed inventory does not list water or a premixed 1× source. The paper's
-9 µL master mix plus 1 µL colony template is a method description; the task's fixed
-2× Q5 stock and per-well primer-pair sources require a feasible, explicitly justified
-adaptation, never an undocumented substitution or a false claim in comments.
+reaction. The fixed inventory does not list water or a premixed 1× source. A newer Qwen
+candidate instead simulates 5 µL of 2× Q5 mix, 4 µL of the matching primer-pair solution,
+and 1 µL of colony template per well, with rack resets before tip exhaustion. Its own
+comments acknowledge that primer concentration is unknown, so 4 µL cannot yet be judged
+chemically suitable. It reports a refill by comment and calls reset_tipracks(), but does
+not pause for the operator to load fresh tips. Simulation success does not resolve either
+gap. The paper's 9 µL master mix plus 1 µL colony template is a method description; the
+task's fixed stocks require a feasible, explicitly justified adaptation, never an
+undocumented substitution or a false claim in comments.
 
 The RNA candidate consumes its 96 P1000 tips on 48 bead and 48 isopropanol additions,
 so it fails before the first sample pickup. It later passes lists of eight wells to
