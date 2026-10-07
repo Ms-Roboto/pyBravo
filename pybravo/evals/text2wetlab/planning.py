@@ -36,6 +36,7 @@ class DeckSource:
     labware: str
     evidence: tuple[Evidence, ...]
     produced_by_stage: str | None = None
+    well: str | None = None
 
 
 @dataclass(frozen=True)
@@ -152,6 +153,7 @@ PLAN_SCHEMA: dict[str, Any] = _object({
         "id": {"type": "string"}, "component": {"type": "string"},
         "labware": {"type": "string"}, "evidence": _EVIDENCE_LIST,
         "produced_by_stage": _nullable("string"),
+        "well": _nullable("string"),
     })),
     "reactions": _array(_object({
         "name": {"type": "string"}, "final_volume_ul": {"type": "number"},
@@ -198,7 +200,7 @@ PLAN_SCHEMA: dict[str, Any] = _object({
     })),
 })
 
-PLAN_SYSTEM_PROMPT = """Extract a typed OT-2 experimental plan, not Python code. Return exactly the JSON schema. Use only the benchmark instruction and supplied paper text as evidence; never use a public reference protocol, solution, or hidden test. Every claim-bearing row needs a short source quote. Copy its words in order; omit Markdown backticks if needed. If joining two nonadjacent excerpts, separate them with `...` and keep each excerpt exact. Do not paraphrase a quote. List deck_sources only for physically present vessels identified by the instruction's starting inventory/deck, not merely because a paper recipe mentions them. For a source already containing the claimed component, set produced_by_stage to null. For an initially empty vessel that will hold a generated intermediate, set produced_by_stage to the exact name of the earlier pipette or explicit manual handoff stage that creates its contents; never claim it is a starting reagent. A batch reaction prepared in that vessel sets output_source_id to its deck-source ID; describe that physical batch once, with all additions in one reaction record. A final reaction that is not an intermediate uses null. Every robot-delivered addition sets stage_name to the exact name of its pipette stage; every manual liquid addition sets stage_name to the exact name of an ordered manual handoff stage. A parameterized manual stage preserves its stated time and temperature and links after_stage to the preceding stage when one exists. Do not invent a reagent, source labware, stock concentration, temperature, or refill permission. Use null when a value is unknown and an empty array when a category does not apply. Include every distinct reaction and ordered stage needed by the task, preserving stated times as duration_s. A reaction lists all components per final vessel, including diluent, primer, template, and stock concentration when stated. For each pipette, use its exact task model and tip-rack load name, then divide tip demand into stages: visits is the number of distinct targets/columns handled; fresh_tips_per_visit is the number of new tips needed at each visit; shared_pickups counts source-only tips that safely cover multiple empty destinations; stroke_volumes_ul lists every distinct per-aspiration/dispense volume in that stage, not the total over all targets. A multichannel pickup consumes one tip per channel. planned_resets is how many full rack reload cycles the plan needs; allow refills only when the instruction authorizes them and cite that authorization. For module stages, record state-setting actions in their actual order and state requirements on subsequent pipetting stages. Keep assumptions explicit in names or evidence; do not silently complete missing task facts."""
+PLAN_SYSTEM_PROMPT = """Extract a typed OT-2 experimental plan, not Python code. Return exactly the JSON schema. Use only the benchmark instruction and supplied paper text as evidence; never use a public reference protocol, solution, or hidden test. Every claim-bearing row needs a short source quote. Copy its words in order; omit Markdown backticks if needed. If joining two nonadjacent excerpts, separate them with `...` and keep each excerpt exact. Do not paraphrase a quote. List deck_sources only for physically present vessels identified by the instruction's starting inventory/deck, not merely because a paper recipe mentions them. For a source already containing the claimed component, set produced_by_stage to null. For an initially empty vessel that will hold a generated intermediate, set produced_by_stage to the exact name of the earlier pipette or explicit manual handoff stage that creates its contents; never claim it is a starting reagent. When the inventory names the exact well holding a generated intermediate, put that well name in its deck-source well field; otherwise use null. Use the deck-source ID as the corresponding labware label in generated code so simulator actions can be matched exactly. A batch reaction prepared in that vessel sets output_source_id to its deck-source ID; describe that physical batch once, with all additions in one reaction record. A final reaction that is not an intermediate uses null. Every robot-delivered addition sets stage_name to the exact name of its pipette stage; every manual liquid addition sets stage_name to the exact name of an ordered manual handoff stage. A parameterized manual stage preserves its stated time and temperature and links after_stage to the preceding stage when one exists. Do not invent a reagent, source labware, stock concentration, temperature, or refill permission. Use null when a value is unknown and an empty array when a category does not apply. Include every distinct reaction and ordered stage needed by the task, preserving stated times as duration_s. A reaction lists all components per final vessel, including diluent, primer, template, and stock concentration when stated. For each pipette, use its exact task model and tip-rack load name, then divide tip demand into stages: visits is the number of distinct targets/columns handled; fresh_tips_per_visit is the number of new tips needed at each visit; shared_pickups counts source-only tips that safely cover multiple empty destinations; stroke_volumes_ul lists every distinct per-aspiration/dispense volume in that stage, not the total over all targets. A multichannel pickup consumes one tip per channel. planned_resets is how many full rack reload cycles the plan needs; allow refills only when the instruction authorizes them and cite that authorization. For module stages, record state-setting actions in their actual order and state requirements on subsequent pipetting stages. Keep assumptions explicit in names or evidence; do not silently complete missing task facts."""
 
 
 def _normalized(value: str) -> str:
@@ -351,13 +353,16 @@ def parse_plan(
         # intermediates. Keep them parseable, but audit their actual content.
         if isinstance(raw, dict) and "produced_by_stage" not in raw:
             raw = {**raw, "produced_by_stage": None}
+        if isinstance(raw, dict) and "well" not in raw:
+            raw = {**raw, "well": None}
         row = _mapping(raw, path, {"id", "component", "labware", "evidence",
-                                   "produced_by_stage"})
+                                   "produced_by_stage", "well"})
         evidence = _evidence(row["evidence"], path + ".evidence", instruction=instruction,
                              scientific_source=scientific_source, inventory_only=True)
         component = _string(row["component"], path + ".component")
         labware = _string(row["labware"], path + ".labware")
         producer = _string(row["produced_by_stage"], path + ".produced_by_stage", nullable=True)
+        well = _string(row["well"], path + ".well", nullable=True)
         assert isinstance(component, str) and isinstance(labware, str)
         if producer is None and not any(
             _component_tokens(component) & _component_tokens(item.quote) for item in evidence
@@ -372,10 +377,15 @@ def parse_plan(
             )
         if _normalized(labware) not in _normalized(instruction):
             raise PlanParseError(f"{path} labware {labware!r} is absent from the task instruction.")
+        if well is not None and not any(re.search(
+            rf"(?<![A-Za-z0-9]){re.escape(well)}(?![A-Za-z0-9])", item.quote,
+            re.IGNORECASE,
+        ) for item in evidence):
+            raise PlanParseError(f"{path}.well {well!r} is absent from its inventory evidence.")
         sources.append(DeckSource(
             id=_string(row["id"], path + ".id"),
             component=component, labware=labware, evidence=evidence,
-            produced_by_stage=producer,
+            produced_by_stage=producer, well=well,
         ))
     reactions: list[PlannedReaction] = []
     for index, raw in enumerate(_sequence(root["reactions"], "reactions")):
@@ -539,6 +549,13 @@ def audit_plan(
             issues.append(PlanIssue("duplicate_source_id", f"deck_sources[{index}]",
                                     f"Deck source {source.id} is declared twice."))
         source_ids[source.id] = source
+        if source.well is not None and geometry is not None and source.labware in geometry:
+            valid_wells = geometry[source.labware].get("valid_wells")
+            if isinstance(valid_wells, (list, tuple)) and source.well not in valid_wells:
+                issues.append(PlanIssue(
+                    "source_well_not_in_labware", f"deck_sources[{index}].well",
+                    f"{source.well} is not a catalog well in {source.labware}.",
+                ))
         if source.produced_by_stage is not None:
             producer_index = stage_indices.get(source.produced_by_stage)
             if producer_index is None:
@@ -776,7 +793,7 @@ def plan_to_prompt(plan: OT2Plan) -> str:
     """Render concise, model-authored data for a later local code-generation call."""
     payload = {
         "deck_sources": [{"id": item.id, "component": item.component, "labware": item.labware,
-                          "produced_by_stage": item.produced_by_stage}
+                          "produced_by_stage": item.produced_by_stage, "well": item.well}
                          for item in plan.deck_sources],
         "reactions": [{
             "name": item.name, "final_volume_ul": item.final_volume_ul,

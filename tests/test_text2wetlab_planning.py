@@ -110,6 +110,7 @@ def test_schema_has_only_plan_data_and_no_protocol_code_field():
     assert "stage_name" in addition_schema["required"]
     assert "output_source_id" in PLAN_SCHEMA["properties"]["reactions"]["items"]["required"]
     assert "after_stage" in PLAN_SCHEMA["properties"]["stages"]["items"]["required"]
+    assert "well" in PLAN_SCHEMA["properties"]["deck_sources"]["items"]["required"]
 
 
 def test_generated_intermediate_has_one_preparation_and_ordered_manual_stage():
@@ -245,7 +246,8 @@ Prepare master mix in mix_tube well A1, then add 10 µL master mix to each PCR w
     payload = _empty_payload()
     payload["deck_sources"] = [{
         "id": "mix", "component": "master mix", "labware": "mix_tube",
-        "produced_by_stage": "Prepare master mix", "evidence": _quote(quote),
+        "produced_by_stage": "Prepare master mix", "well": "A1",
+        "evidence": _quote(quote),
     }]
     payload["reactions"] = [{
         "name": "PCR well", "final_volume_ul": 10, "diluent_name": None,
@@ -278,11 +280,19 @@ Prepare master mix in mix_tube well A1, then add 10 µL master mix to each PCR w
     }]
     plan = parse_plan(payload, instruction=instruction)
     assert audit_plan(plan) == ()
+    assert "source_well_not_in_labware" in _codes(audit_plan(
+        plan, geometry={"mix_tube": {"valid_wells": ["B1"]}},
+    ))
     rendered = json.loads(plan_to_prompt(plan))
     assert rendered["deck_sources"][0]["produced_by_stage"] == "Prepare master mix"
+    assert rendered["deck_sources"][0]["well"] == "A1"
     assert rendered["reactions"][0]["additions"][0]["stage_name"] == "Dispense master mix"
     assert rendered["reactions"][0]["output_source_id"] is None
     assert rendered["stages"][1]["after_stage"] == "Prepare master mix"
+    payload["deck_sources"][0]["well"] = "B1"
+    with pytest.raises(PlanParseError, match="absent from its inventory evidence"):
+        parse_plan(payload, instruction=instruction)
+    payload["deck_sources"][0]["well"] = "A1"
 
     payload["stages"].reverse()
     assert "intermediate_used_before_production" in _codes(

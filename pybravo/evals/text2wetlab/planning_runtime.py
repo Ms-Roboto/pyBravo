@@ -70,6 +70,7 @@ _REPAIR_HINTS: dict[str, str] = {
     "cited_manual_temperature_mismatch": "Put the cited temperature in temperature_c for that manual phase.",
     "manual_stage_order_unlinked": "Set after_stage to the preceding workflow stage for a timed or temperature-controlled manual phase.",
     "stage_predecessor_not_earlier": "Move the predecessor before this stage, or correct the named dependency.",
+    "source_well_not_in_labware": "Use only a source well named in the task inventory and present in its catalog labware.",
 }
 
 
@@ -103,6 +104,11 @@ def _parse_feedback(error: PlanParseError) -> str:
             "\nName this source by the actual substance or category identified in its "
             "on-deck inventory quote. For a plate with multiple primers or templates, "
             "cite the matching starting-inventory lines; do not invent a stock."
+        )
+    elif "absent from its inventory evidence" in message:
+        response += (
+            "\nGive the exact well name quoted for that vessel in the task's starting "
+            "inventory, or use null when no well is supplied."
         )
     return response
 

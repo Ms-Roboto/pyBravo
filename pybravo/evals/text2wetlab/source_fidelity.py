@@ -352,6 +352,33 @@ def _label(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", name.casefold())
 
 
+def exact_prepared_output_locations(
+    plan: OT2Plan, labware: Mapping[str, str],
+) -> dict[str, tuple[str, str]]:
+    """Resolve only model-named output wells with one exact simulator label.
+
+    The plan supplies the output source ID, its inventory-cited well, and its
+    catalog labware load name. A missing or ambiguous logger identity produces
+    no mapping; this function never guesses a slot or well from protocol code.
+    """
+    sources = {source.id: source for source in plan.deck_sources}
+    mapped: dict[str, tuple[str, str]] = {}
+    for reaction in plan.reactions:
+        source_id = reaction.output_source_id
+        source = sources.get(source_id or "")
+        if (source_id is None or source is None or source.produced_by_stage is None
+                or source.well is None):
+            continue
+        matches = [label for label, load_name in labware.items()
+                   if (load_name == source.labware and
+                       re.sub(r"\s+on\s+(?:slot\s+)?\d+\s*$", "", label,
+                              flags=re.IGNORECASE).strip().casefold()
+                       == source.id.strip().casefold())]
+        if len(matches) == 1:
+            mapped[source_id] = (matches[0], source.well)
+    return mapped
+
+
 def audit_direct_source_delivery(
     plan: OT2Plan,
     events: Sequence[Mapping[str, Any]],

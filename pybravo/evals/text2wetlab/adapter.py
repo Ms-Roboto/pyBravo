@@ -43,6 +43,8 @@ from pybravo.evals.text2wetlab.source_context import (
 from pybravo.evals.text2wetlab.source_fidelity import (
     SOURCE_FIDELITY_GUIDANCE,
     audit_direct_source_delivery,
+    audit_intermediate_preparation_events,
+    exact_prepared_output_locations,
 )
 from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse, structured_json
 
@@ -355,13 +357,19 @@ def _plan_execution_audit(plan: OT2Plan | None, event_log: EventLog) -> tuple[li
     """Reject observable deviations from an accepted, cited local-model plan."""
     if plan is None:
         return [], None
-    issues = audit_direct_source_delivery(plan, event_log.events, labware=event_log.labware)
+    output_locations = exact_prepared_output_locations(plan, event_log.labware)
+    issues = (
+        audit_direct_source_delivery(plan, event_log.events, labware=event_log.labware)
+        + audit_intermediate_preparation_events(
+            plan, event_log.events, output_locations=output_locations,
+        )
+    )
     findings = [issue.__dict__ for issue in issues]
     if not issues:
         return findings, None
     visible = "\n".join(f"- {issue.message}" for issue in issues[:8])
     if len(issues) > 8:
-        visible += f"\n- … and {len(issues) - 8} more direct-source discrepancy/ies."
+        visible += f"\n- … and {len(issues) - 8} more source-fidelity discrepancy/ies."
     return findings, (
         "The simulated liquid actions differ from your own cited, audited plan. "
         "Keep the task and paper authoritative; regenerate the plan if a change "

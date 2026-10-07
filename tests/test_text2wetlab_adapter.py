@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -35,6 +36,18 @@ def run(protocol: protocol_api.ProtocolContext):
     reaction = protocol.load_labware("corning_96_wellplate_360ul_flat", 2, label="reaction_plate")
     pipette = protocol.load_instrument("p20_single_gen2", "left", tip_racks=[tips])
     pipette.transfer(1, primer["A1"], reaction["A1"], new_tip="always")
+'''
+
+BATCH_PROTOCOL = '''from opentrons import protocol_api
+metadata = {"apiLevel": "2.15"}
+
+def run(protocol: protocol_api.ProtocolContext):
+    tips = protocol.load_labware("opentrons_96_tiprack_20ul", 11)
+    stock = protocol.load_labware("corning_96_wellplate_360ul_flat", 1, label="stock")
+    batch = protocol.load_labware("corning_96_wellplate_360ul_flat", 4, label="batch")
+    pipette = protocol.load_instrument("p20_single_gen2", "left", tip_racks=[tips])
+    pipette.transfer(10, stock["A1"], batch["D1"], new_tip="always")
+    pipette.transfer(10, stock["A1"], batch["D1"], new_tip="always")
 '''
 
 
@@ -442,6 +455,70 @@ async def test_simulated_direct_source_dose_must_match_accepted_local_plan(tmp_p
     assert trace["status"] == "failed"
     assert trace["attempts"][0]["source_fidelity"][0]["code"] == "delivered_volume_differs_from_plan"
     assert not (tmp_path / "protocol.py").exists()
+
+
+@pytest.mark.asyncio
+async def test_accepted_plan_rejects_second_preparation_in_exact_output_well(tmp_path, monkeypatch):
+    load_name = "corning_96_wellplate_360ul_flat"
+    plan = OT2Plan(
+        (DeckSource("stock", "stock reagent", load_name, ()),
+         DeckSource("batch", "prepared mixture", load_name, (),
+                    produced_by_stage="Prepare batch", well="D1")),
+        (PlannedReaction("Prepare batch", 10, None, (
+            PlannedAddition(Addition("stock reagent", 10), "stock", ()),
+        ), (), output_source_id="batch"),), (), (),
+    )
+
+    async def fake_plan(**kwargs):
+        return PlanningResult(plan, ())
+
+    async def completion(messages, schema, **kwargs):
+        return StructuredResponse({"code": BATCH_PROTOCOL}, {"model": "local-qwen"})
+
+    events = []
+    for _ in range(2):
+        events.extend([
+            {"kind": "pick", "instrument": "P20 Single", "channels": 1},
+            {"kind": "aspirate", "instrument": "P20 Single", "channels": 1,
+             "volume": 10, "well": "A1", "labware": "stock on 1"},
+            {"kind": "dispense", "instrument": "P20 Single", "channels": 1,
+             "volume": 10, "well": "D1", "labware": "batch on 4"},
+            {"kind": "drop", "instrument": "P20 Single", "channels": 1},
+        ])
+    log = adapter.EventLog(events, {"stock on 1": load_name, "batch on 4": load_name})
+    monkeypatch.setattr(adapter, "run_grounded_plan", fake_plan)
+    monkeypatch.setattr(adapter, "labware_geometry_context", lambda *args, **kwargs: {})
+    monkeypatch.setattr(adapter, "simulate_protocol",
+                        lambda *args, **kwargs: adapter.SimulationResult("passed", "ok"))
+    with pytest.raises(adapter.GenerationError, match="simulated liquid actions differ"):
+        await adapter.generate_ot2_protocol(
+            "Prepare a 10 µL batch in D1 from stock.", tmp_path / "with_plan",
+            completion=completion, event_reader=lambda _: log,
+            evidence_planning=True, repair_attempts=0, patch_attempts=0,
+        )
+    trace = json.loads((tmp_path / "with_plan" / "generation_trace.json").read_text())
+    assert trace["attempts"][0]["source_fidelity"][0]["code"] == "intermediate_overfilled"
+
+    # Without an exact Qwen-authored output well, the adapter does not infer one.
+    without_well = OT2Plan((plan.deck_sources[0], replace(plan.deck_sources[1], well=None)),
+                           plan.reactions, (), ())
+
+    async def plan_without_well(**kwargs):
+        return PlanningResult(without_well, ())
+
+    monkeypatch.setattr(adapter, "run_grounded_plan", plan_without_well)
+    result = await adapter.generate_ot2_protocol(
+        "Prepare a 10 µL batch in D1 from stock.", tmp_path / "without_well",
+        completion=completion, event_reader=lambda _: log,
+        evidence_planning=True, repair_attempts=0, patch_attempts=0,
+    )
+    assert result.simulation.status == "passed"
+    direct = await adapter.generate_ot2_protocol(
+        "Prepare a 10 µL batch in D1 from stock.", tmp_path / "direct",
+        completion=completion, event_reader=lambda _: log,
+        evidence_planning=False, repair_attempts=0, patch_attempts=0,
+    )
+    assert direct.simulation.status == "passed"
 
 
 @pytest.mark.asyncio

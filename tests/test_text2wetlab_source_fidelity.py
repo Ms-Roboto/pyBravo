@@ -24,6 +24,7 @@ from pybravo.evals.text2wetlab.source_fidelity import (
     audit_inventory_strength_claims,
     audit_manual_addition_stages,
     audit_parameterized_manual_stages,
+    exact_prepared_output_locations,
 )
 
 
@@ -259,8 +260,10 @@ def test_manual_stage_cited_time_temperature_and_order_are_checked():
 
 def test_simulated_second_preparation_overfills_one_model_linked_intermediate():
     plan = _plan()
+    generated = DeckSource("batch", "prepared mixture", "microtube", (),
+                           produced_by_stage="Prepare mixture", well="D1")
     batch = PlannedReaction("prepared batch", 10, None, (), (), output_source_id="batch")
-    plan = replace(plan, reactions=(batch,))
+    plan = replace(plan, deck_sources=(*plan.deck_sources, generated), reactions=(batch,))
     events = [
         {"kind": "pick", "instrument": "P20"},
         {"kind": "aspirate", "instrument": "P20", "labware": "stock on 2", "well": "A1",
@@ -273,7 +276,12 @@ def test_simulated_second_preparation_overfills_one_model_linked_intermediate():
          "volume": 2},
         {"kind": "drop", "instrument": "P20"},
     ]
-    locations = {"batch": ("batch on 4", "D1")}
+    locations = exact_prepared_output_locations(plan, {"batch on 4": "microtube"})
+    assert locations == {"batch": ("batch on 4", "D1")}
+    assert exact_prepared_output_locations(plan, {"batch on 4": "other_plate"}) == {}
+    assert exact_prepared_output_locations(plan, {
+        "batch on 4": "microtube", "batch on 6": "microtube",
+    }) == {}
     assert audit_intermediate_preparation_events(plan, events, output_locations=locations) == ()
     second = [
         {"kind": "pick", "instrument": "P20"},
