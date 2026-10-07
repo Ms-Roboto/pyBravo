@@ -49,3 +49,25 @@ heat-shock/recovery instruction, a timed hot-block pulse must end before
 serial recovery pipetting begins. Simulation does
 not establish that the protocol satisfies a scientific rubric or is safe to
 run on physical hardware.
+
+## Optional per-well material ledger
+
+`material_ledger.audit_material_flow()` can inspect the trusted logger's
+ordered `events` array without changing the generator or benchmark runner.
+Pass `WellRef` → `InitialWell` entries for known source volumes and confirmed
+empty destinations, plus `WellLimit` entries for catalog capacity or a
+scientist-specified final reaction volume. `StageBoundary` and
+`stage_targets_ul` let a reviewer check a prepared mixture *before* it is
+consumed; this catches a duplicated preparation that a final-volume-only check
+would miss. The result retains source-labelled component amounts, final
+per-well volumes, ordered snapshots, and separate error/warning codes.
+
+Missing starting volumes remain unknown, and missing destinations are not
+silently assumed empty. The logger records only a multichannel anchor well;
+callers must provide a geometry-backed `well_resolver` that returns one
+`WellRef` per physical channel before multichannel flow is counted. Exact
+component amounts for a partial withdrawal from mixed material require an
+explicit mix event; a full withdrawal still conserves its total components.
+This ledger does not establish reagent identity,
+mixing quality, concentrations, or a protocol's scientific correctness. It is
+currently a standalone audit utility; it does not change official scoring.
