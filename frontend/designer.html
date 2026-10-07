@@ -3138,7 +3138,6 @@ function renderPlateSelectionGrid() {
                 : 'Choose a highlighted starting well to preview the addressed wells.';
     if (options.length) {
         status.textContent += ` ${options.length} valid starting ${options.length === 1 ? 'well' : 'wells'}.`;
-        if (result.message) status.textContent += ` ${result.message}`;
     }
     apply.disabled = !draft.selected;
     grid.style.gridTemplateColumns = `20px repeat(${plate.columns}, 14px)`;

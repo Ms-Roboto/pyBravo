@@ -84,7 +84,7 @@ assert.deepEqual(calls[0].body.workflow.deck,designerState.deckConfig);
 assert.equal(cells().length,384);
 assert.equal(legal().length,1);
 assert.match(legal()[0].attrs['aria-label'],/^A1 /);
-assert.match(el('plate-selection-status').textContent,/Native plate geometry/);
+assert.ok(!el('plate-selection-status').textContent.includes('Native plate geometry'));
 assert.equal(el('plate-selection-apply').disabled,true);
 assert.match(el('plate-selection-status').textContent,/Saved anchor B2 is not a valid placement/);
 assert.equal(liquid.properties.anchor,'B2');
