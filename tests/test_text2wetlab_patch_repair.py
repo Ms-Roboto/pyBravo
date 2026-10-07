@@ -9,6 +9,7 @@ from pybravo.evals.text2wetlab.patch_repair import (
     apply_line_patch,
     line_patch_messages,
     numbered_source,
+    preserve_simulator_repair_facts,
 )
 
 
@@ -20,6 +21,8 @@ def test_numbered_source_and_prompt_keep_task_and_candidate_distinct():
     assert "Move 5 µL" in messages[1]["content"]
     assert hashlib.sha256(source.encode()).hexdigest() in messages[2]["content"]
     assert "0002| second()" in messages[2]["content"]
+    assert "keep the existing aspirate" in messages[0]["content"].lower()
+    assert "Do not return used tips or reset" in messages[0]["content"]
 
 
 def test_single_line_replacement_keeps_every_other_line():
@@ -61,3 +64,57 @@ def test_unmodified_protocol_is_not_a_successful_repair():
         apply_line_patch("one()\n", {"edits": [
             {"start_line": 1, "end_line": 1, "replacement": "one()"},
         ]})
+
+
+PROGRAM = '''from opentrons import protocol_api
+metadata = {"apiLevel": "2.15"}
+def run(protocol: protocol_api.ProtocolContext):
+    tips = protocol.load_labware("opentrons_96_tiprack_20ul", 1)
+    plate = protocol.load_labware("corning_96_wellplate_360ul_flat", 2)
+    pipette = protocol.load_instrument("p20_single_gen2", "left", tip_racks=[tips])
+    volume = 5
+    for i in range(2):
+        pipette.pick_up_tip()
+        pipette.aspirate(volume, plate["A1"])
+        pipette.dispense(volume, plate.wells()[i])
+        pipette.mix(2, volume)
+        pipette.drop_tip()
+    protocol.delay(minutes=5)
+'''
+
+
+def test_simulator_repair_can_name_implicit_mix_well_without_changing_liquid_facts():
+    fixed = PROGRAM.replace("pipette.mix(2, volume)", "pipette.mix(2, volume, plate.wells()[i])")
+    assert preserve_simulator_repair_facts(PROGRAM, fixed) is None
+
+
+def test_simulator_repair_may_correct_only_a_computed_well_index():
+    bad = PROGRAM.replace("pipette.dispense(volume, plate.wells()[i])",
+                          "target = plate.wells()[i * 12]\n        pipette.dispense(volume, target)")
+    fixed = bad.replace("plate.wells()[i * 12]", "plate.wells()[i * 8]")
+    assert preserve_simulator_repair_facts(bad, fixed) is None
+
+
+def test_simulator_repair_may_add_fresh_tip_cycle_without_removing_work():
+    fixed = PROGRAM.replace("        pipette.mix(2, volume)",
+                            "        pipette.drop_tip()\n"
+                            "        pipette.pick_up_tip()\n"
+                            "        pipette.mix(2, volume)")
+    assert preserve_simulator_repair_facts(PROGRAM, fixed) is None
+
+
+@pytest.mark.parametrize("source, reason", [
+    (PROGRAM.replace("volume = 5", "volume = 6"), "declared volumes"),
+    (PROGRAM.replace("pipette.dispense(volume", "pipette.dispense(6"), "declared volumes"),
+    (PROGRAM.replace("        pipette.dispense(volume, plate.wells()[i])\n", ""), "liquid actions"),
+    (PROGRAM.replace("range(2)", "range(1)"), "control-flow"),
+    (PROGRAM.replace("plate[\"A1\"]", "plate[\"A2\"]"), "liquid source"),
+    (PROGRAM.replace("protocol.delay(minutes=5)", "protocol.delay(minutes=1)"), "incubation"),
+    (PROGRAM.replace("pipette.drop_tip()", "pipette.return_tip()"), "tip change"),
+    (PROGRAM.replace("protocol.delay(minutes=5)", "protocol.delay(minutes=5)\n    helper(7)"),
+     "numeric setting"),
+    (PROGRAM.replace("load_labware(\"corning_96_wellplate_360ul_flat\", 2)",
+                     "load_labware(\"corning_96_wellplate_360ul_flat\", 3)"), "deck bindings"),
+])
+def test_simulator_repair_rejects_changed_task_facts(source, reason):
+    assert reason in preserve_simulator_repair_facts(PROGRAM, source)

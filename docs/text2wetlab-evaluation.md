@@ -257,6 +257,22 @@ The bounded experiment can be reproduced without writing a protocol by hand:
   --max-attempts 2 --model-timeout 120
 ```
 
+The same bounded line-edit path now also handles a candidate rejected by the
+Opentrons simulator. Each local-Qwen patch is saved next to the rejected
+candidate and must pass the static source gate before it is simulated again.
+Because a simulator-rejected candidate has no trustworthy event trace to
+compare, a source-level guard holds fixed the loaded hardware and deck
+bindings, liquid operation and declared-volume sequence, direct liquid
+location arguments and literal reagent-well bindings, loop structure,
+incubation commands, manual pauses, and tip-contact motion settings. It may
+add fresh-tip cycles but cannot remove existing pickups or drops, introduce a
+tip return, or silently reset a rack. It permits an explicit mix target or a
+correction to a computed well index, then still
+requires the Opentrons simulator and structured event-safety gate. The guard
+does not establish scientific correctness or hardware readiness. The saved-
+candidate experiment accepts an initially failing static gate as well, since
+the current checks are stricter than when some earlier drafts were produced.
+
 The first `golden-gate-assembly` run produced one AST-valid candidate, then
 repeated it twice. Opentrons rejected `p20.mix(5, 15)` because the liquid
 location was omitted inside the assembly-well loop. The candidate also assigned
@@ -279,6 +295,18 @@ task's stated 20 µL working minimum. Thus this experiment supports shorter
 source context, but does not establish a substantial latency improvement or
 a valid protocol. The trace records Methods lines 17–38 and SHA-256 hashes;
 evidence is in `/tmp/pybravo-text2wetlab-golden-gate-compact/report.json`.
+
+A bounded saved-candidate line-patch experiment used that first Golden Gate
+draft with the current, stricter static checks. Three local-Qwen patch calls
+took 6.52, 7.47, and 4.41 seconds. The first correctly supplied the omitted
+PCR master-mix well to `p300.mix`, exposing a later 19 µL P300 aspirate below
+its 20 µL minimum. The second proposed a broad replacement that changed a
+liquid action/volume and was rejected by the task-fact guard. The third added
+another mix target but left the 19 µL stroke. None reached Opentrons
+simulation or structured events; this is a bounded failure, not a benchmark
+pass. The original candidate, all patch JSON files, patched sources, and
+diagnostics are retained in
+`/private/tmp/pybravo-text2wetlab-golden-patch-sim/patch_trace.json`.
 
 The first `opentrons-rna-extraction` run used the pinned custom elution-plate
 definition and had no standalone lint to apply. Its first candidate failed

@@ -27,7 +27,9 @@ from pybravo.evals.text2wetlab.patch_repair import (
     apply_line_patch,
     line_patch_messages,
     preserve_existing_task_actions,
+    preserve_simulator_repair_facts,
 )
+from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
 from pybravo.workflow.protocols.llm import LocalLLMConfig, structured_json
 
 
@@ -41,33 +43,43 @@ async def run_experiment(args: argparse.Namespace) -> dict:
     source = args.source.read_text(encoding="utf-8")
     instruction = args.instruction.read_text(encoding="utf-8")
     paper = args.paper.read_text(encoding="utf-8") if args.paper else None
-    validate_ot2_source(source)
-    base_simulation = simulate_protocol(args.source, simulator_command=args.simulator)
-    if base_simulation.status != "passed":
-        raise ValueError(f"Saved candidate must already pass Opentrons simulation: {base_simulation.detail}")
-    baseline = record_simulation_events(
-        args.source, event_logger_path=args.event_logger,
-        simulator_command=args.simulator,
-    )
-    baseline_validation = validate_event_safety(baseline, instruction=instruction)
+    compact_paper = prepare_scientific_source(paper).text if paper else None
+    labware_dir = getattr(args, "labware_dir", None)
+    (output / "original_candidate.py").write_text(source, encoding="utf-8")
+    baseline = None
+    try:
+        validate_ot2_source(source)
+    except ProtocolValidationError as exc:
+        baseline_stage, baseline_detail = "static", str(exc)
+    else:
+        base_simulation = simulate_protocol(
+            args.source, simulator_command=args.simulator, labware_dir=labware_dir,
+        )
+        if base_simulation.status != "passed":
+            baseline_stage, baseline_detail = "simulator", base_simulation.detail
+        else:
+            baseline = record_simulation_events(
+                args.source, event_logger_path=args.event_logger,
+                simulator_command=args.simulator, labware_dir=labware_dir,
+            )
+            baseline_validation = validate_event_safety(baseline, instruction=instruction)
+            baseline_stage, baseline_detail = "event", baseline_validation.detail
     trace = {
         "status": "running",
         "source_path": str(args.source.resolve()),
         "source_sha256": _digest(source),
         "instruction_sha256": _digest(instruction),
         "paper_sha256": _digest(paper) if paper else None,
-        "baseline_event_validation": {
-            "status": baseline_validation.status,
-            "detail": baseline_validation.detail,
-        },
+        "baseline_failure": {"stage": baseline_stage, "detail": baseline_detail},
+        "scientific_source_excerpt_sha256": _digest(compact_paper) if compact_paper else None,
         "attempts": [],
         "official_score": None,
     }
-    if baseline_validation.status == "passed":
+    if baseline is not None and baseline_validation.status == "passed":
         trace["status"] = "already_passed"
         return trace
     current_source = source
-    diagnostic = baseline_validation.detail
+    diagnostic = baseline_detail
     config = replace(LocalLLMConfig.from_env(), max_tokens=2048,
                      timeout_s=args.model_timeout, retries=0, enable_thinking=False)
     for number in range(1, args.max_attempts + 1):
@@ -77,7 +89,7 @@ async def run_experiment(args: argparse.Namespace) -> dict:
         try:
             response = await structured_json(
                 line_patch_messages(current_source, instruction=instruction,
-                                    diagnostic=diagnostic, scientific_source=paper),
+                                    diagnostic=diagnostic, scientific_source=compact_paper),
                 LINE_EDIT_SCHEMA, config=config, schema_name="ot2_line_repair",
             )
         except Exception as exc:
@@ -95,8 +107,13 @@ async def run_experiment(args: argparse.Namespace) -> dict:
         })
         try:
             patched = apply_line_patch(current_source, patch)
-            validate_ot2_source(patched)
-        except (PatchError, ProtocolValidationError) as exc:
+            task_fact_error = preserve_simulator_repair_facts(source, patched) if baseline is None else None
+            if task_fact_error is not None:
+                attempt["status"] = "task_facts_rejected"
+                attempt["diagnostic"] = task_fact_error
+                diagnostic = task_fact_error
+                continue
+        except (PatchError, SyntaxError) as exc:
             diagnostic = f"Proposed patch is invalid: {exc}"
             attempt["status"] = "static_rejected"
             attempt["diagnostic"] = diagnostic
@@ -105,29 +122,40 @@ async def run_experiment(args: argparse.Namespace) -> dict:
         candidate_path.write_text(patched, encoding="utf-8")
         attempt["candidate_path"] = str(candidate_path)
         attempt["candidate_sha256"] = _digest(patched)
-        simulation = simulate_protocol(candidate_path, simulator_command=args.simulator)
+        try:
+            validate_ot2_source(patched)
+        except ProtocolValidationError as exc:
+            diagnostic = f"Proposed patch is invalid: {exc}"
+            attempt["status"] = "static_rejected"
+            attempt["diagnostic"] = diagnostic
+            current_source = patched
+            continue
+        simulation = simulate_protocol(candidate_path, simulator_command=args.simulator,
+                                       labware_dir=labware_dir)
         attempt["simulation"] = simulation.status
         if simulation.status != "passed":
             diagnostic = simulation.detail
             attempt["status"] = "simulation_rejected"
             attempt["diagnostic"] = diagnostic
+            current_source = patched
             continue
         try:
             event_log = record_simulation_events(
                 candidate_path, event_logger_path=args.event_logger,
-                simulator_command=args.simulator,
+                simulator_command=args.simulator, labware_dir=labware_dir,
             )
         except Exception as exc:
             diagnostic = f"Structured event logger failed: {type(exc).__name__}: {exc}"
             attempt["status"] = "event_logger_rejected"
             attempt["diagnostic"] = diagnostic
             continue
-        invariant_error = preserve_existing_task_actions(baseline, event_log)
-        if invariant_error:
-            diagnostic = invariant_error
-            attempt["status"] = "task_facts_rejected"
-            attempt["diagnostic"] = invariant_error
-            continue
+        if baseline is not None:
+            invariant_error = preserve_existing_task_actions(baseline, event_log)
+            if invariant_error:
+                diagnostic = invariant_error
+                attempt["status"] = "task_facts_rejected"
+                attempt["diagnostic"] = invariant_error
+                continue
         validation = validate_event_safety(event_log, instruction=instruction)
         attempt["event_validation"] = validation.status
         attempt["event_detail"] = validation.detail
@@ -151,6 +179,7 @@ def main() -> int:
     parser.add_argument("--paper", type=Path)
     parser.add_argument("--event-logger", required=True, type=Path)
     parser.add_argument("--simulator", required=True, type=Path)
+    parser.add_argument("--labware-dir", type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--max-attempts", type=int, default=2)
     parser.add_argument("--model-timeout", type=int, default=120)

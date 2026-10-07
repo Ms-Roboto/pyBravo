@@ -560,6 +560,86 @@ async def test_event_failure_accepts_local_line_patch_and_keeps_original(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_simulator_failure_accepts_bounded_line_patch_and_preserves_rejected_candidate(
+    tmp_path, monkeypatch,
+):
+    calls = []
+
+    async def completion(messages, schema, **kwargs):
+        calls.append("draft")
+        return StructuredResponse({"code": VALID_PROTOCOL}, {"model": "local-qwen"})
+
+    async def patch_completion(messages, schema, **kwargs):
+        calls.append("patch")
+        assert "simulator rejected original" in messages[-1]["content"]
+        return StructuredResponse({"edits": [
+            {"start_line": 1, "end_line": 0, "replacement": "# simulator repair from local Qwen"},
+        ]}, {"model": "local-qwen", "elapsed_s": 0.2})
+
+    simulations = []
+
+    def fake_simulate(path, **kwargs):
+        simulations.append(path.name)
+        if "# simulator repair" in path.read_text():
+            return adapter.SimulationResult("passed", "simulator accepted repair")
+        return adapter.SimulationResult("failed", "simulator rejected original")
+
+    monkeypatch.setattr(adapter, "simulate_protocol", fake_simulate)
+    result = await adapter.generate_ot2_protocol(
+        "Transfer 100 uL from a reservoir to twelve wells.", tmp_path,
+        completion=completion, patch_completion=patch_completion,
+        event_reader=lambda _: adapter.EventLog([], {}), repair_attempts=0, patch_attempts=1,
+    )
+    assert calls == ["draft", "patch"]
+    assert simulations == ["candidate_attempt_1.py", "candidate_attempt_1_patch_1.py"]
+    assert result.simulation.status == "passed"
+    assert (tmp_path / "candidate_attempt_1.py").read_text() == VALID_PROTOCOL
+    assert (tmp_path / "candidate_attempt_1_patch_1.py").is_file()
+    assert (tmp_path / "patch_attempt_1_1.json").is_file()
+    assert result.protocol_path.read_text().startswith("# simulator repair from local Qwen\n")
+    trace = json.loads(result.trace_path.read_text())
+    assert trace["event_validation_passed"] is True
+    assert trace["attempts"][0]["patches"][0]["failure_stage"] == "simulator"
+    assert trace["attempts"][0]["patches"][0]["status"] == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_simulator_patch_cannot_silently_change_volume(tmp_path, monkeypatch):
+    async def completion(messages, schema, **kwargs):
+        return StructuredResponse({"code": VALID_PROTOCOL}, {"model": "local-qwen"})
+
+    transfer_line = next(index for index, line in enumerate(VALID_PROTOCOL.splitlines(), 1)
+                         if "pipette.transfer(100" in line)
+
+    async def patch_completion(messages, schema, **kwargs):
+        return StructuredResponse({"edits": [{
+            "start_line": transfer_line,
+            "end_line": transfer_line,
+            "replacement": "        pipette.transfer(200, source['A1'], well, new_tip='always')",
+        }]}, {"model": "local-qwen"})
+
+    simulated = []
+
+    def fake_simulate(path, **kwargs):
+        simulated.append(path.name)
+        return adapter.SimulationResult("failed", "simulator rejected original")
+
+    monkeypatch.setattr(adapter, "simulate_protocol", fake_simulate)
+    with pytest.raises(adapter.GenerationError):
+        await adapter.generate_ot2_protocol(
+            "Transfer 100 uL from a reservoir to twelve wells.", tmp_path,
+            completion=completion, patch_completion=patch_completion,
+            event_reader=lambda _: adapter.EventLog([], {}), repair_attempts=0, patch_attempts=1,
+        )
+    assert simulated == ["candidate_attempt_1.py"]
+    assert (tmp_path / "candidate_attempt_1.py").read_text() == VALID_PROTOCOL
+    assert not (tmp_path / "protocol.py").exists()
+    trace = json.loads((tmp_path / "generation_trace.json").read_text())
+    assert trace["attempts"][0]["patches"][0]["status"] == "task_facts_rejected"
+    assert trace["event_validation_passed"] is False
+
+
+@pytest.mark.asyncio
 async def test_line_patch_cannot_change_existing_liquid_actions(tmp_path, monkeypatch):
     baseline = adapter.EventLog([
         _event("pick"),

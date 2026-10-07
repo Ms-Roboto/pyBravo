@@ -6,6 +6,7 @@ source edits and applies them mechanically before the normal validation gates.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 from collections import Counter
 from typing import TYPE_CHECKING, Any
@@ -70,7 +71,12 @@ def line_patch_messages(
                 "Make the smallest changes that fix the reported failure. Preserve all task-stated "
                 "labware, deck slots, wells, volumes, temperatures, timing, source-to-destination "
                 "mapping, and contamination policy. Do not remove a required operation to silence a "
-                "failure. Do not use benchmark reference output or add simulation-only branches. "
+                "failure. Keep the existing aspirate, dispense, transfer, and mix action count, "
+                "volumes, order, and direct locations. For a pipette working-range failure, "
+                "reassign the same liquid action to a suitable loaded pipette and add fresh-tip "
+                "cycles if needed; do not lower its volume. Do not return used tips or reset "
+                "tip racks to silence a failure. Do not use benchmark reference output or add "
+                "simulation-only branches. "
                 "Do not return a complete protocol or Markdown. The proposed edits will be applied "
                 "mechanically and revalidated; invalid line ranges or broad rewrites are rejected."
             ),
@@ -153,4 +159,135 @@ def preserve_existing_task_actions(baseline: EventLog, candidate: EventLog) -> s
         return "The patch changed existing liquid transfers, volumes, wells, or order."
     if _timed_module_actions(candidate) != _timed_module_actions(baseline):
         return "The patch removed or changed a timed module action."
+    return None
+
+
+_LIQUID_METHODS = {"aspirate", "dispense", "transfer", "distribute", "consolidate", "mix"}
+_RESOURCE_METHODS = {"load_labware", "load_module", "load_instrument", "load_adapter"}
+_PROTECTED_CONTROL = (ast.For, ast.AsyncFor, ast.While, ast.If, ast.IfExp,
+                      ast.Try, ast.Break, ast.Continue, ast.Return)
+_TIMED_METHODS = {"delay", "pause", "set_block_temperature", "set_lid_temperature",
+                  "set_temperature", "engage", "disengage"}
+_TIP_MOTION_METHODS = {"blow_out", "touch_tip", "air_gap"}
+
+
+def _call_method(call: ast.Call) -> str | None:
+    return call.func.attr if isinstance(call.func, ast.Attribute) else None
+
+
+def _volume_argument(call: ast.Call, method: str) -> ast.expr | None:
+    position = 1 if method == "mix" else 0
+    if len(call.args) > position:
+        return call.args[position]
+    keyword_names = ("volume", "volume_ul") if method != "mix" else ("volume", "volume_ul")
+    return next((item.value for item in call.keywords if item.arg in keyword_names), None)
+
+
+def _program_facts(source: str) -> dict[str, object]:
+    tree = ast.parse(source)
+    nodes = list(ast.walk(tree))
+    calls = [node for node in nodes if isinstance(node, ast.Call)]
+    liquids = [(method, _volume_argument(call, method), call) for call in calls
+               if (method := _call_method(call)) in _LIQUID_METHODS]
+    volume_names = {
+        name.id for _, volume, _ in liquids if volume is not None
+        for name in ast.walk(volume) if isinstance(name, ast.Name)
+    }
+    volume_bindings: list[tuple[str, str]] = []
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            volume_bindings.extend((target.id, ast.dump(node.value, include_attributes=False))
+                                   for target in node.targets if isinstance(target, ast.Name)
+                                   and target.id in volume_names)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            if node.target.id in volume_names:
+                volume_bindings.append((node.target.id, ast.dump(node.value, include_attributes=False)))
+    literal_wells: Counter[str] = Counter()
+    reagent_bindings: list[tuple[str, str]] = []
+    index_nodes = {id(child) for node in nodes if isinstance(node, ast.Subscript)
+                   for child in ast.walk(node.slice)}
+    numeric_literals: Counter[tuple[str, int | float]] = Counter(
+        (type(node.value).__name__, node.value) for node in nodes
+        if isinstance(node, ast.Constant) and type(node.value) in {int, float}
+        and id(node) not in index_nodes
+    )
+    for method, volume, call in liquids:
+        locations = [arg for arg in call.args if arg is not volume]
+        locations.extend(keyword.value for keyword in call.keywords
+                         if keyword.value is not volume)
+        for location in locations:
+            literal_wells.update(node.value for node in ast.walk(location)
+                                 if isinstance(node, ast.Constant) and isinstance(node.value, str))
+    for node in nodes:
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Subscript)
+                and isinstance(node.value.slice, ast.Constant)
+                and isinstance(node.value.slice.value, str)):
+            reagent_bindings.extend((target.id, ast.dump(node.value, include_attributes=False))
+                                    for target in node.targets if isinstance(target, ast.Name))
+    return {
+        "resources": [(target.id, ast.dump(node.value, include_attributes=False))
+                      for node in nodes if isinstance(node, ast.Assign)
+                      and isinstance(node.value, ast.Call)
+                      and _call_method(node.value) in _RESOURCE_METHODS
+                      for target in node.targets if isinstance(target, ast.Name)],
+        "liquids": [(method, ast.dump(volume, include_attributes=False) if volume else None,
+                     ast.dump(call.args[0], include_attributes=False)
+                     if method == "mix" and call.args else None)
+                    for method, volume, call in liquids],
+        "locations": [(method, [ast.dump(arg, include_attributes=False)
+                                for arg in call.args if arg is not volume],
+                      [(keyword.arg, ast.dump(keyword.value, include_attributes=False))
+                       for keyword in call.keywords
+                       if keyword.arg in {"source", "dest", "destination", "location", "well",
+                                          "source_well", "dest_well"}])
+                      for method, volume, call in liquids if method != "mix"],
+        "volume_bindings": volume_bindings,
+        "reagent_bindings": reagent_bindings,
+        "literal_wells": literal_wells,
+        "numeric_literals": numeric_literals,
+        "control": [(type(node).__name__, ast.dump(node.iter if isinstance(node, (ast.For, ast.AsyncFor))
+                                                else node.test, include_attributes=False)
+                     if isinstance(node, (ast.For, ast.AsyncFor, ast.While, ast.If, ast.IfExp))
+                     else type(node).__name__)
+                    for node in nodes if isinstance(node, _PROTECTED_CONTROL)],
+        "timed": [ast.dump(call, include_attributes=False) for call in calls
+                  if _call_method(call) in _TIMED_METHODS],
+        "tip_motion": [ast.dump(call, include_attributes=False) for call in calls
+                       if _call_method(call) in _TIP_MOTION_METHODS],
+        "tip_counts": Counter(_call_method(call) for call in calls
+                              if _call_method(call) in {"pick_up_tip", "drop_tip",
+                                                        "return_tip", "reset_tipracks"}),
+    }
+
+
+def preserve_simulator_repair_facts(source: str, candidate: str) -> str | None:
+    """Reject a simulator fix that changes recorded experimental work.
+
+    The original has no usable event log, so this guard compares static facts.
+    It intentionally permits changes to well-index expressions and explicit
+    mix targets while preserving the liquid action/volume sequence. The normal
+    validator, simulator, and event safety gate remain mandatory afterward.
+    """
+    before, after = _program_facts(source), _program_facts(candidate)
+    if before["resources"] != after["resources"]:
+        return "The patch changed loaded hardware, labware, or deck bindings."
+    if before["liquids"] != after["liquids"] or before["volume_bindings"] != after["volume_bindings"]:
+        return "The patch changed liquid actions or their declared volumes."
+    if before["locations"] != after["locations"] or before["reagent_bindings"] != after["reagent_bindings"]:
+        return "The patch changed an existing liquid source, destination, or reagent binding."
+    if before["control"] != after["control"]:
+        return "The patch changed protocol loop or control-flow structure."
+    if before["timed"] != after["timed"]:
+        return "The patch changed an incubation, module command, or manual pause."
+    if before["tip_motion"] != after["tip_motion"]:
+        return "The patch changed a liquid-contact motion setting."
+    earlier_tips, patched_tips = before["tip_counts"], after["tip_counts"]
+    if (any(patched_tips[name] < earlier_tips[name] for name in ("pick_up_tip", "drop_tip"))
+            or any(patched_tips[name] != earlier_tips[name]
+                   for name in ("return_tip", "reset_tipracks"))):
+        return "The patch removed a tip change or added tip return/refill behavior."
+    if before["numeric_literals"] != after["numeric_literals"]:
+        return "The patch changed a non-index numeric setting or task quantity."
+    if before["literal_wells"] - after["literal_wells"]:
+        return "The patch removed an existing liquid-operation well or material reference."
     return None
