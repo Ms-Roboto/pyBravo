@@ -274,6 +274,7 @@ async def test_virtual_target_uses_its_catalog_and_leaves_installed_384_head_unc
     live._controller = live_controller
     monkeypatch.setattr(live, "initialize", AsyncMock())
     inherited = {
+        "positions": {"X": 20.0, "Y": 10.0, "Z": 0.0, "W": 0.0, "G": 0.0, "Zg": -20.0},
         "head_mode": {"subset_type": "all_barrels", "row_count": 16, "column_count": 24},
         "tip_selection": {"location": 2, "row": 0, "col": 0},
         "plate_selection": {"1": {"row": 0, "col": 0}},
@@ -321,7 +322,7 @@ async def test_virtual_target_uses_its_catalog_and_leaves_installed_384_head_unc
             assert virtual.active_tip_id() == "lt_250ul"
             assert virtual.active_tip_capacity_ul() == 250.0
             assert virtual.profile.head.teach_tip_length_mm == 55.2
-            assert executors[0].kwargs["runtime_state"] == {}
+            assert executors[0].kwargs["runtime_state"] == {"positions": inherited["positions"]}
             assert executors[0].kwargs["strict_validation"] is True
             for location in live.teachpoints.locations:
                 old_plane = live.teachpoints.get_teachpoint(location, Axis.Z) + 26.1

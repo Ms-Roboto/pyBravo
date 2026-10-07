@@ -2818,6 +2818,7 @@ def _designer_runtime_snapshot(bravo: Bravo | None) -> dict[str, Any]:
         return {}
     state = bravo.get_state()
     return {
+        "positions": copy.deepcopy(state.get("positions") or {}),
         "head_type": state.get("head_type"),
         "head_mode": state.get("head_mode"),
         "tip_selection": state.get("tip_selection"),
@@ -3079,7 +3080,7 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
                 if simulation_target["head_type"] != previous_head or simulation_target["tip_definition_id"] != previous_tip:
                     # The installed head's attached tips, anchors, subsets,
                     # and capacities cannot describe a different virtual head.
-                    runtime_snapshot = {}
+                    runtime_snapshot = {"positions": runtime_snapshot.get("positions", {})}
             target_bravo = Bravo(profile=simulation_profile, mode="simulation")
         else:
             if proposed_target is not None:

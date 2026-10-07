@@ -7589,16 +7589,18 @@ function timelineReset() {
     timeline.recording = false;
     timeline.scrubbing = false;
     timeline._appliedDeckSignature = null;
+    timeline._lastNodeId = null;
+    timeline._lastStepName = '';
     if (timeline.playbackTimer) { clearInterval(timeline.playbackTimer); timeline.playbackTimer = null; }
     document.getElementById('scrubber-container').style.display = 'none';
 }
 
-function timelineStartRecording() {
+function timelineStartRecording(initialPositions = null) {
     timelineReset();
     timeline.recording = true;
     timeline.startTime = performance.now();
     // Record initial state as frame 0
-    timelineRecord(null, null, 'initial');
+    timelineRecord(initialPositions, null, 'initial');
 }
 
 function snapshotDeckConfig() {
@@ -7893,7 +7895,6 @@ function handleWorkflowEvent(data) {
     switch (data.type) {
         case 'workflow:start':
             document.querySelector('#viewport-header span').textContent = data.simulation_kind === 'visual_walkthrough' ? '3D visual walkthrough' : '3D Simulation';
-            timelineStartRecording();
             // Reset the live blackboard display — a new run starts empty.
             designerState.vars = {};
             renderVarsPanel();
@@ -7908,8 +7909,19 @@ function handleWorkflowEvent(data) {
             resetAnimationTransients();
             // Block /ws/state hardware positions from overwriting animation
             if (designerState.robotScene) {
-                designerState.robotScene.setSimulationMode(true);
+                const scene = designerState.robotScene;
+                scene.setSimulationMode(true);
+                if (data.runtime_state) scene.setHeadTipState(data.runtime_state);
+                if (data.positions) {
+                    scene.setPositions(data.positions);
+                    scene.setMotionTargets(data.positions);
+                    scene.snapRenderPositions(data.positions);
+                }
             }
+            // Frame zero must describe this run, including its real starting
+            // pose and mounted tips, before any native movement is recorded.
+            // Older recordings/walkthroughs can only use the current scene.
+            timelineStartRecording(data.positions || designerState.robotScene?.positions || null);
             break;
         case 'workflow:vars_update':
             // Live blackboard snapshot — replace wholesale (backend sends full dict).

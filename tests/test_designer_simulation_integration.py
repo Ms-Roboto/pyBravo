@@ -67,9 +67,17 @@ def _workflow(*, dock_first: bool):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("dock_first", [True, False], ids=["safe-native-cycle", "undocked-finger-collision"])
+@pytest.mark.parametrize(
+    "dock_first, initial_positions",
+    [
+        (True, None),
+        (False, None),
+        (False, {"X": 25.0, "Y": 10.0, "Z": 0.0, "W": 0.0, "G": 0.0, "Zg": -20.0}),
+    ],
+    ids=["safe-native-cycle", "undocked-finger-collision", "homed-snapshot-native-cycle"],
+)
 async def test_designer_simulate_route_runs_superdex_and_stops_before_collision(
-    tmp_path, monkeypatch, dock_first,
+    tmp_path, monkeypatch, dock_first, initial_positions,
 ):
     storage = WorkflowStorage(tmp_path / "workflows")
     saved = storage.create_workflow(_workflow(dock_first=dock_first))
@@ -82,7 +90,7 @@ async def test_designer_simulate_route_runs_superdex_and_stops_before_collision(
         profile=profile, _profile=profile, _controller=live_controller,
         machine_id=profile.connection.machine_id,
         active_tip_id=lambda: "st_10ul", active_tip_capacity_ul=lambda: 10.0,
-        get_state=Mock(return_value={}), initialize=AsyncMock(),
+        get_state=Mock(return_value={"positions": initial_positions} if initial_positions else {}), initialize=AsyncMock(),
     )
     simulated = []
     events = []
@@ -136,11 +144,18 @@ async def test_designer_simulate_route_runs_superdex_and_stops_before_collision(
         assert server._active_workflow_executor is None
         assert robot.controller._motion_guard is None
         assert any(event["type"] == "workflow:node_step" for event in events)
+        start = next(event for event in events if event["type"] == "workflow:start")
+        assert len(start["runtime_state"]["tipbox_removed_cells"]["2"]) == 8
+        assert len(start["runtime_state"]["tipbox_removed_cells"]["4"]) == 384
+        if initial_positions:
+            assert start["positions"] == initial_positions
+        else:
+            assert start["positions"]["Zg"] == 0  # Unknown starts must not silently dock.
         report = events[-1]["physical_simulation"]
         assert report["engine"] == "SuperDex"
         assert report["samples_checked"] > 0
         assert report["qualification_granted"] is False
-        if dock_first:
+        if dock_first or initial_positions:
             assert events[-1]["type"] == "workflow:complete"
             assert events[-1]["status"] == "ok"
             assert is_checked_physical_report(report)
@@ -149,6 +164,18 @@ async def test_designer_simulate_route_runs_superdex_and_stops_before_collision(
             assert robot._fresh_tip_wells(4) == set()
             assert any(event.get("step_name") == "lower_z_to_tips" for event in events)
             assert any(event.get("step_name") == "eject_tips" for event in events)
+            exchanges = [(index, event) for index, event in enumerate(events) if event["type"] == "workflow:tips_change"]
+            assert len(exchanges) == 2
+            assert [event["tips_on_head"] for _, event in exchanges] == [True, False]
+            assert [event["step_name"] for _, event in exchanges] == ["tip_press_dwell", "eject_tips"]
+            for index, event in exchanges:
+                assert events[index - 1]["type"] == "workflow:positions"
+                assert events[index - 1]["positions"]["Z"] > 0
+                retract = next(e for e in events[index + 1:] if e["type"] == "workflow:positions")
+                assert retract["positions"]["Z"] == robot.profile.safety.z_safe_position
+                assert len(event["tipbox_removed_cells"]["2"]) == 9
+            assert len(exchanges[0][1]["tipbox_removed_cells"]["4"]) == 384
+            assert len(exchanges[1][1]["tipbox_removed_cells"]["4"]) == 383
         else:
             assert events[-1]["type"] == "workflow:error"
             assert report["status"] == "failed"
@@ -163,6 +190,7 @@ async def test_designer_simulate_route_runs_superdex_and_stops_before_collision(
             assert len(robot._fresh_tip_wells(2)) == 376
             assert robot._spent_tip_wells(4) == set()
             assert not robot._tips_on_head
+            assert not any(event["type"] == "workflow:tips_change" for event in events)
             assert not any(event["type"] == "workflow:complete" for event in events)
             assert not any(event["type"] == "workflow:node_start" and event["node_id"] in {4, 5} for event in events)
     finally:

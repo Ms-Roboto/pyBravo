@@ -110,6 +110,175 @@ async def test_native_primitive_motion_uses_owner_and_completion_reads_closed_ca
         bravo.disconnect()
 
 
+async def test_snapshot_pose_seeds_collision_scene_and_atomic_initial_frame(monkeypatch):
+    probe = _Probe()
+    scene_initial_positions = []
+
+    def scene_factory(robot):
+        scene_initial_positions.append(robot.get_all_positions())
+        return _Scene(robot, probe)
+
+    bravo, executor, events = _executor(monkeypatch, probe, scene_factory=scene_factory)
+    snapshot = {"X": 123.0, "Y": 24.0, "Z": 0.0, "W": 0.0, "G": 0.0, "Zg": -20.0}
+    executor._runtime_state = {"positions": snapshot}
+    try:
+        assert bravo.get_position(Axis.Zg) == 0.0
+        await executor.execute()
+        assert events[-1]["type"] == "workflow:complete"
+        assert len(scene_initial_positions) == 1
+        assert scene_initial_positions[0] == snapshot
+        initial = events[0]
+        assert initial["type"] == "workflow:start"
+        assert initial["positions"] == snapshot
+        assert initial["runtime_state"]["tips_on_head"] is False
+        assert events[1] == {"type": "workflow:positions", "positions": snapshot}
+    finally:
+        bravo.disconnect()
+
+
+def _tip_exchange_graph():
+    tasks = [
+        ("flow/Start", {}),
+        ("tips/TipsOn", {"location": 1, "head_mode": {"subset_type": "column", "subset_config": "back_left", "column_count": 1}}),
+        ("tips/TipsOff", {"location": 4}),
+        ("tips/TipsOn", {"location": 1, "head_mode": {"subset_type": "column", "subset_config": "back_left", "column_count": 1}}),
+        ("tips/TipsOff", {"location": 4}),
+        ("flow/End", {}),
+    ]
+    return {
+        "nodes": [
+            {"id": index, "type": kind, "properties": props, "outputs": [{"links": [index]}]}
+            for index, (kind, props) in enumerate(tasks, start=1)
+        ],
+        "links": [[index, index, 0, index + 1, 0, -1] for index in range(1, len(tasks))],
+    }
+
+
+async def test_native_tip_exchange_frames_attach_at_press_and_return_before_retract(monkeypatch):
+    bravo, _ = _make_workflow_executor_bravo()
+    deck = {
+        "1": [{"labware_id": "tipbox-384", "tipbox_fill_state": "full"}],
+        "4": [{"labware_id": "tipbox-384", "tipbox_fill_state": "empty"}],
+    }
+    _, executor, events = _executor(monkeypatch, _Probe(), bravo=bravo, graph=_tip_exchange_graph(), deck=deck)
+    try:
+        await executor.execute()
+        assert events[-1]["type"] == "workflow:complete", events[-1]
+        initial = events[0]["runtime_state"]
+        assert initial["tipbox_removed_cells"]["1"] == []
+        assert len(initial["tipbox_removed_cells"]["4"]) == 384
+        exchanges = [(index, event) for index, event in enumerate(events) if event["type"] == "workflow:tips_change"]
+        assert len(exchanges) == 4
+        for operation, (index, event) in enumerate(exchanges):
+            picked = operation % 2 == 0
+            assert event["tips_on"] is picked
+            assert event["tips_on_head"] is picked
+            assert event["step_name"] == ("tip_press_dwell" if picked else "eject_tips")
+            assert event["node_id"] == operation + 2
+            assert len(event["tipbox_removed_cells"]["1"]) == 16 * (operation // 2 + 1)
+            assert len(event["tipbox_removed_cells"]["4"]) == 384 - 16 * ((operation + 1) // 2)
+            if picked:
+                assert event["tips_on_head_mode"]["column_count"] == 1
+                assert event["tips_on_head_selection"]["row_count"] == 16
+                assert event["attached_tip_length_mm"] > 0
+                assert event["tip_definition_id"] == "st_10ul"
+            else:
+                assert event["tips_on_head_mode"] is None
+                assert event["tips_on_head_selection"] is None
+                assert event["attached_tip_length_mm"] is None
+            # Exchange is exactly at the successful native contact/ejection
+            # frame, before the next native retract moves the head away.
+            assert events[index - 1]["type"] == "workflow:positions"
+            assert events[index - 1]["positions"]["Z"] > 0
+            next_position = next(e for e in events[index + 1:] if e["type"] == "workflow:positions")
+            assert next_position["positions"]["Z"] == bravo.profile.safety.z_safe_position
+        assert len(bravo._occupied_tip_wells(1)) == 384 - 32
+        assert len(bravo._occupied_tip_wells(4)) == 32
+        assert not bravo._tips_on_head
+    finally:
+        bravo.disconnect()
+
+
+async def test_failed_native_tip_press_never_emits_attachment(monkeypatch):
+    from pybravo.state_machine.tasks import TipsOnTask
+
+    bravo, _ = _make_workflow_executor_bravo()
+    _, executor, events = _executor(
+        monkeypatch, _Probe(), bravo=bravo, graph=_tip_exchange_graph(),
+        deck={"1": [{"labware_id": "tipbox-384", "tipbox_fill_state": "full"}]},
+    )
+    monkeypatch.setattr(TipsOnTask, "_lower_z_to_tips", AsyncMock(side_effect=RuntimeError("Press failed")))
+    try:
+        await executor.execute()
+        assert events[-1]["type"] == "workflow:error"
+        assert "Press failed" in events[-1]["error"]
+        assert not any(event["type"] == "workflow:tips_change" for event in events)
+        assert len(bravo._occupied_tip_wells(1)) == 384
+        assert not bravo._tips_on_head
+    finally:
+        bravo.disconnect()
+
+
+async def test_initially_mounted_snapshot_keeps_source_holes_after_return_and_next_pickup(monkeypatch):
+    bravo, _ = _make_workflow_executor_bravo()
+    bravo.controller.set_move_timing_enabled(False)
+    bravo.set_labware(1, "tipbox-384")
+    bravo.set_head_mode("column", "back_left", column_count=1)
+    await bravo.tips_on(1)
+    snapshot = bravo.get_state()
+    graph = _tip_exchange_graph()
+    # Already carrying tips at entry: start with the first return.
+    graph["links"][0][3] = 3
+    _, executor, events = _executor(
+        monkeypatch, _Probe(), bravo=bravo, graph=graph,
+        deck={
+            "1": [{"labware_id": "tipbox-384", "tipbox_fill_state": "full"}],
+            "4": [{"labware_id": "tipbox-384", "tipbox_fill_state": "empty"}],
+        },
+    )
+    executor._runtime_state = snapshot
+    try:
+        await executor.execute()
+        assert events[-1]["type"] == "workflow:complete", events[-1]
+        initial = events[0]["runtime_state"]
+        assert initial["tips_on_head"] is True
+        assert initial["tips_on_head_selection"]["col"] == 23
+        assert set(initial["tipbox_removed_cells"]["1"]) == {f"{row}:23" for row in range(16)}
+        exchanges = [event for event in events if event["type"] == "workflow:tips_change"]
+        assert [event["tips_on_head"] for event in exchanges] == [False, True, False]
+        assert [len(event["tipbox_removed_cells"]["1"]) for event in exchanges] == [16, 32, 32]
+        assert exchanges[1]["tips_on_head_selection"]["col"] == 22
+        assert len(bravo._occupied_tip_wells(1)) == 352
+        assert len(bravo._spent_tip_wells(4)) == 32
+    finally:
+        bravo.disconnect()
+
+
+def test_tip_display_inventory_honors_interleaved_rack_selection():
+    from pybravo.head_mode import TipSelection
+
+    selection = TipSelection(location=1, row=1, col=0, row_count=8, column_count=12, row_stride=2, col_stride=2)
+    assert WorkflowExecutor._selection_keys(selection) == {
+        f"{row}:{col}" for row in range(1, 16, 2) for col in range(0, 24, 2)
+    }
+
+
+@pytest.mark.parametrize("positions", [{"X": 10, "Zg": float("nan")}, {"X": 10, "Zg": -100}])
+async def test_invalid_initial_pose_fails_before_moving_the_simulator(monkeypatch, positions):
+    probe = _Probe()
+    bravo, executor, events = _executor(monkeypatch, probe)
+    executor._runtime_state = {"positions": positions}
+    before = bravo.get_all_positions()
+    try:
+        await executor.execute()
+        assert events[-1]["type"] == "workflow:error"
+        assert not any(event["type"] == "workflow:start" for event in events)
+        assert bravo.get_all_positions() == before
+        assert probe.calls == []
+    finally:
+        bravo.disconnect()
+
+
 async def test_deck_setup_failure_has_failed_physical_report_and_restores_handlers(monkeypatch):
     probe = _Probe()
     bravo, executor, events = _executor(monkeypatch, probe)

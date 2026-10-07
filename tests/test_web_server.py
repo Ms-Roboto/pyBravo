@@ -134,6 +134,10 @@ async def test_change_head_rejects_unknown_head_type():
 @pytest.mark.asyncio
 async def test_simulate_designer_workflow_passes_runtime_snapshot_into_executor(monkeypatch):
     bravo = Bravo(mode="simulation")
+    bravo.connect()
+    bravo.controller.set_move_timing_enabled(False)
+    await bravo.move_axis(Axis.Zg, -20.0)
+    await bravo.move_axis(Axis.X, 195.98)
     bravo.set_head_mode("column", "back_left", column_count=1)
     bravo._tip_selection = TipSelection(location=2, row=0, col=23, row_count=16, column_count=1, mirror_corner="back_left")
     bravo._plate_selection = {5: plate_selection(5, 1, 5)}
@@ -182,6 +186,9 @@ async def test_simulate_designer_workflow_passes_runtime_snapshot_into_executor(
         assert captured["options"] == {"strict_validation": True, "physical_simulation": True}
         assert captured["preview_animation"] is False
         runtime_state = captured["runtime_state"]
+        assert runtime_state["positions"]["Zg"] == -20.0
+        assert runtime_state["positions"]["X"] == 195.98
+        assert runtime_state["positions"] == bravo.get_state()["positions"]
         assert runtime_state["head_mode"]["subset_type"] == "column"
         assert runtime_state["tip_selection"]["location"] == 2
         assert runtime_state["tip_selection"]["col"] == 23
@@ -194,6 +201,7 @@ async def test_simulate_designer_workflow_passes_runtime_snapshot_into_executor(
         assert scheduled, "simulation coroutine was not scheduled"
     finally:
         server._bravo = previous_bravo
+        bravo.disconnect()
         for coro in scheduled:
             coro.close()
 

@@ -555,10 +555,12 @@ class WorkflowExecutor:
         col = int(getattr(selection, "col", 0))
         row_count = max(1, int(getattr(selection, "row_count", 1)))
         column_count = max(1, int(getattr(selection, "column_count", 1)))
+        row_stride = max(1, int(getattr(selection, "row_stride", 1)))
+        col_stride = max(1, int(getattr(selection, "col_stride", 1)))
         return {
-            f"{current_row}:{current_col}"
-            for current_row in range(row, row + row_count)
-            for current_col in range(col, col + column_count)
+            f"{row + r * row_stride}:{col + c * col_stride}"
+            for r in range(row_count)
+            for c in range(column_count)
         }
 
     @staticmethod
@@ -623,6 +625,17 @@ class WorkflowExecutor:
         current.difference_update(self._selection_keys(selection))
         self._tipbox_removed_cells[loc_key] = current
 
+    def _sync_tipbox_removed_cells(self) -> None:
+        """Seed display inventory from the native deck, including empty racks."""
+        self._tipbox_removed_cells = {}
+        for location in range(1, 10):
+            labware = self.bravo._deck.get_stack(location).top
+            if labware is not None and (
+                self.bravo._labware_base_class(labware) == "tip_box"
+                or self.bravo._labware_kind(labware) == "tip_box"
+            ):
+                self._ensure_removed_baseline(str(location))
+
     def _apply_node_head_mode(self, head_mode_payload: Any) -> None:
         """Apply a per-workflow-node head_mode override (if present) to
         sim_bravo. The payload may be a dict with subset_type / subset_config
@@ -645,6 +658,25 @@ class WorkflowExecutor:
     def _apply_runtime_snapshot(self) -> None:
         if not self._runtime_state:
             return
+
+        positions = self._runtime_state.get("positions")
+        if self._physical_simulation and positions:
+            from pybravo.controllers.base import AxisMoveInfo
+            from pybravo.controllers.simulation import SimulationController
+            from pybravo.types import Axis
+
+            controller = self.bravo.controller
+            if not isinstance(controller, SimulationController) or controller._motion_guard is not None:
+                raise RuntimeError("Initial simulation pose requires an isolated, unguarded simulation controller")
+            moves = []
+            for name, value in positions.items():
+                position = float(value)
+                if not math.isfinite(position):
+                    raise ValueError(f"Initial simulation position for {name} must be finite")
+                moves.append(AxisMoveInfo(axis=Axis[name], position=position))
+            # Establish the snapshot's initial conditions before constructing
+            # the scene. This neither homes nor moves the physical instrument.
+            controller.move(moves, wait=False)
 
         head_mode = self._runtime_state.get("head_mode") or {}
         try:
@@ -714,14 +746,47 @@ class WorkflowExecutor:
                     stack = self.bravo._deck.get_stack(int(mounted_location))
                     labware = None if stack is None else stack.top
                     if labware is not None:
-                        self.bravo._tips_on_head_selection = self.bravo._selection_from_clicked_tip(
-                            int(mounted_location),
-                            labware,
-                            self.bravo._tips_on_head_mode,
-                            int(mounted_selection.get("row", 0)),
-                            int(mounted_selection.get("col", 0)),
-                            purpose="pickup",
-                        )
+                        if self._physical_simulation:
+                            from dataclasses import replace
+
+                            from pybravo.head_mode import selected_tip_wells, tipbox_selection
+
+                            # These tips were already picked, so validating
+                            # their origin as a fresh pickup would reject a
+                            # correctly depleted rack. Restore the exact
+                            # footprint only when its source rack still matches.
+                            if labware.name != self.bravo._tip_labware_name:
+                                raise ValueError("Mounted tips' source rack differs from the workflow deck")
+                            selection = replace(
+                                tipbox_selection(
+                                    int(mounted_location), int(mounted_selection.get("row", 0)),
+                                    int(mounted_selection.get("col", 0)), self.bravo._tips_on_head_mode,
+                                ),
+                                row_stride=int(mounted_selection.get("row_stride", 1)),
+                                col_stride=int(mounted_selection.get("col_stride", 1)),
+                            )
+                            rows, cols = self.bravo._tipbox_dimensions(labware)
+                            wells = selected_tip_wells(rows, cols, selection)
+                            if (
+                                len(wells) != selection.row_count * selection.column_count
+                                or selection.row_stride < 1 or selection.col_stride < 1
+                                or not all(0 <= r < rows and 0 <= c < cols for r, c in wells)
+                                or (min(r for r, _ in wells), min(c for _, c in wells)) != (selection.row, selection.col)
+                            ):
+                                raise ValueError("Mounted tip footprint falls outside its source rack")
+                            self.bravo._tips_on_head_selection = selection
+                            self.bravo._ensure_tipbox_occupancy(int(mounted_location), labware)
+                            self.bravo._tipbox_occupancy[int(mounted_location)].difference_update(wells)
+                            self.bravo._remember_tipbox_inventory(int(mounted_location), labware)
+                        else:
+                            self.bravo._tips_on_head_selection = self.bravo._selection_from_clicked_tip(
+                                int(mounted_location),
+                                labware,
+                                self.bravo._tips_on_head_mode,
+                                int(mounted_selection.get("row", 0)),
+                                int(mounted_selection.get("col", 0)),
+                                purpose="pickup",
+                            )
                 except Exception:
                     self.bravo._tips_on_head_selection = None
 
@@ -1149,6 +1214,11 @@ class WorkflowExecutor:
                         }),
                         self._step_event_loop,
                     ))
+                    tip_event = self._native_tip_change_event(engine.current_task, step_name)
+                    if tip_event is not None:
+                        self._step_emissions.append(asyncio.run_coroutine_threadsafe(
+                            self._emit(tip_event), self._step_event_loop,
+                        ))
                     self._step_emissions.append(asyncio.run_coroutine_threadsafe(
                         self._emit({
                             "type": "workflow:node_step",
@@ -1206,7 +1276,15 @@ class WorkflowExecutor:
                 await self._physics_scene.initialize()
                 self.bravo.controller.set_motion_guard(self._physics_scene.check_motion)
             self._set_workflow_light("running")
-            await self._emit({"type": "workflow:start", **self._physical_report_fields()})
+            if not self._preview_animation:
+                self._sync_tipbox_removed_cells()
+            await self._emit({
+                "type": "workflow:start",
+                "positions": self._current_positions(),
+                "runtime_state": self._current_runtime_event_state(),
+                **self._physical_report_fields(),
+            })
+            await self._emit_positions()
             await self._emit(self._current_runtime_event_state())
             await self._emit_vars_update(force=True)
             # Give the WebSocket client a moment to connect and receive events.
@@ -2171,6 +2249,46 @@ class WorkflowExecutor:
             state["tip_definition_id"] = str(tip_definition_id)
         return state
 
+    def _native_tip_change_event(self, task: Any, step_name: str) -> dict[str, Any] | None:
+        """Publish a successful native tip exchange before the head retracts.
+
+        Bravo commits inventory after the whole task. At this step boundary
+        the native press/eject has succeeded, so the viewer must already show
+        that exchange. Only display inventory changes here; native bookkeeping
+        and the collision checker remain owned by the task execution path.
+        """
+        from pybravo.state_machine.tasks import TipsOffTask, TipsOnTask
+        from pybravo.tips import get_tip_capacity_ul
+
+        is_on = isinstance(task, TipsOnTask) and step_name == "tip_press_dwell"
+        is_off = isinstance(task, TipsOffTask) and step_name == "eject_tips"
+        if not (is_on or is_off):
+            return None
+        self._sync_tipbox_removed_cells()
+        location = task._tip_location
+        selection = task._tip_selection
+        if is_on:
+            self._set_removed_tip_cells(location, selection)
+            tip_id = self.bravo._tip_id_for_labware(task._labware)
+            length = task._tip_length
+            capacity = get_tip_capacity_ul(self.bravo.profile.head.head_type, tip_id)
+        else:
+            # A trash receptacle has no selected rack wells to fill.
+            self._restore_tip_cells(location, selection)
+            tip_id = ""
+            length = None
+            capacity = self.bravo.active_tip_capacity_ul()
+        event = self._tip_change_event(
+            tips_on=is_on, location=location, head_mode=task._head_mode,
+            tip_selection=selection, tip_labware_name=task._labware.name,
+            attached_tip_length_mm=length, active_tip_capacity_ul=capacity,
+            tip_definition_id=tip_id,
+        )
+        if is_off:
+            event["attached_tip_length_mm"] = None
+            event["tip_labware_name"] = ""
+        return {**event, "node_id": self._current_node_id, "step_name": step_name}
+
     async def _animate_task_motion(self, node_type: str, properties: dict) -> None:
         """Generate and broadcast a realistic motion sequence for the 3D viewport."""
         logger.info(
@@ -2612,8 +2730,8 @@ class WorkflowExecutor:
             })
             await asyncio.sleep(step_delay)
 
-    async def _emit_positions(self) -> None:
-        """Broadcast current axis positions so the 3D viewport can update."""
+    def _current_positions(self) -> dict[str, float]:
+        """Normalize controller axes for initial state and subsequent frames."""
         try:
             raw = self.bravo.get_all_positions()
             if raw:
@@ -2628,12 +2746,16 @@ class WorkflowExecutor:
                         positions[AXIS_NAMES.get(key, str(key))] = val
                     else:
                         positions[str(key)] = val
-                await self._emit({
-                    "type": "workflow:positions",
-                    "positions": positions,
-                })
+                return positions
         except Exception:
             pass  # Don't let position reads break the workflow
+        return {}
+
+    async def _emit_positions(self) -> None:
+        """Broadcast current axis positions so the 3D viewport can update."""
+        positions = self._current_positions()
+        if positions:
+            await self._emit({"type": "workflow:positions", "positions": positions})
 
     async def _emit(self, event: dict) -> None:
         """Emit a workflow event."""
