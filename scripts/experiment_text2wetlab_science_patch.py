@@ -244,6 +244,11 @@ async def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
         except (PatchError, SyntaxError) as exc:
             attempt["status"] = "patch_rejected"
             attempt["detail"] = str(exc)
+            diagnostic = (
+                f"The previous edit could not be applied: {exc}. Propose different, "
+                "nonoverlapping line edits that change the executable protocol, "
+                "using only the supplied task and paper.\n" + diagnostic
+            )[:4000]
             continue
         candidate_path = attempt_dir / "candidate.py"
         candidate_path.write_text(candidate, encoding="utf-8")

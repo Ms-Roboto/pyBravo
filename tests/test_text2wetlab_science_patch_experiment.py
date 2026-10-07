@@ -127,6 +127,46 @@ async def test_unfailed_baseline_never_calls_model(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_no_op_patch_gives_new_diagnostic_before_next_model_attempt(tmp_path, monkeypatch):
+    source_path = tmp_path / "input.py"
+    source_path.write_text(SOURCE)
+    monkeypatch.setattr(experiment, "_pinned_sources", lambda *args: ("Prepare a 19 uL reaction.", None))
+
+    def fake_check(task, source, path, task_dir, simulator, dataset_root, labware_dir, instruction):
+        task_dir.mkdir(exist_ok=True)
+        event_path = task_dir / "official_events.json"
+        before = path == source_path
+        event_path.write_text(json.dumps(_events(20 if before else 19)))
+        return {"status": "mechanical_gates_passed",
+                "local_rubric_audit": _audit("failed" if before else "needs_review"),
+                "pinned_runlog": {"events_path": str(event_path),
+                                  "labware": {"stock on 1": "stock", "plate on 2": "plate"}}}
+
+    monkeypatch.setattr(experiment, "_check_candidate", fake_check)
+    monkeypatch.setattr("pybravo.evals.text2wetlab.adapter._scientific_audit",
+                        lambda *args: (None, "Recheck the source reaction total."))
+    prompts = []
+
+    async def fake_model(messages, schema, **kwargs):
+        prompts.append(messages[-1]["content"])
+        replacement = (SOURCE.splitlines()[6] if len(prompts) == 1
+                       else '    pipette.transfer(19, stock["A1"], plate["A1"])')
+        return StructuredResponse({"edits": [{"start_line": 7, "end_line": 7,
+                                                "replacement": replacement}]},
+                                  {"model": "qwen", "elapsed_s": 1, "usage": {}})
+
+    monkeypatch.setattr(experiment, "structured_json", fake_model)
+    args = argparse.Namespace(task="golden-gate-assembly", source=source_path,
+                              simulator=tmp_path / "simulator", output_dir=tmp_path / "output",
+                              dataset_root=None, paper_override=None, max_attempts=2,
+                              model_timeout=10, model_max_tokens=1024)
+    trace = await experiment.run_experiment(args)
+    assert trace["attempts"][0]["status"] == "patch_rejected"
+    assert "The previous edit could not be applied" in prompts[1]
+    assert trace["status"] == "improved_candidate_needs_review"
+
+
+@pytest.mark.asyncio
 async def test_repository_output_is_rejected_before_any_write(tmp_path):
     source_path = tmp_path / "input.py"
     source_path.write_text(SOURCE)
