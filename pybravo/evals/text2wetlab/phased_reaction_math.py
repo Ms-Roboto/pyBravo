@@ -29,11 +29,12 @@ class MathComponent(_Strict):
     phase: Literal["premix", "later"]
     volume_ul_per_reaction: float | None = Field(ge=0)
     source_material_ids: list[str] = Field(default_factory=list, max_length=48)
+    source_usage: Literal["single", "each", "one_of"] = "single"
     source_labware: str | None = None
     source_well: str | None = None
     delivery: Literal["robot", "manual"] = "robot"
     basis: Literal["direct", "calculated", "assumption"]
-    assumption_note: str | None = Field(default=None, max_length=300)
+    assumption_note: str | None = Field(default=None, max_length=600)
     stock_strength_x: float | None = Field(default=None, gt=0)
     target_strength_x: float | None = Field(default=None, gt=0)
     is_diluent: bool = False
@@ -77,7 +78,11 @@ def parse_and_audit_math(
     try:
         plan = ReactionMathPlan.model_validate(raw)
     except ValidationError as exc:
-        return None, [_issue("math_schema_rejected", detail=str(exc).splitlines()[0])]
+        return None, [_issue(
+            "math_schema_rejected",
+            path=".".join(str(part) for part in error["loc"]),
+            error_type=error["type"],
+        ) for error in exc.errors()[:8]]
     issues: list[dict[str, Any]] = []
     if plan.stage_id != context.stage_id:
         issues.append(_issue("stage_id_mismatch"))
@@ -118,11 +123,18 @@ def parse_and_audit_math(
         if component.basis == "assumption":
             if not component.assumption_note:
                 issues.append(_issue("assumption_reason_missing", index=index))
-        elif component.assumption_note:
-            issues.append(_issue("unexpected_assumption_note", index=index))
+        if (len(component.source_material_ids) == 1 and
+                component.source_usage != "single"):
+            issues.append(_issue("single_source_usage_mismatch", index=index))
+        if (len(component.source_material_ids) > 1 and
+                component.source_usage == "single"):
+            issues.append(_issue("grouped_source_usage_missing", index=index))
+        if component.is_diluent and component.source_usage != "single":
+            issues.append(_issue("grouped_diluent_unsupported", index=index))
         if component.phase == "premix":
             if (component.delivery != "robot" or
                     len(component.source_material_ids) != 1 or
+                    component.source_usage != "single" or
                     not component.source_labware or not component.source_well):
                 issues.append(_issue("premix_source_missing", index=index))
                 continue
@@ -205,8 +217,13 @@ def parse_and_audit_math(
     if any(item.volume_ul_per_reaction is None for item in plan.components):
         issues.append(_issue("reaction_component_volume_unresolved"))
     else:
-        premix_total = sum(item.volume_ul_per_reaction or 0 for item in premix)
-        later_total = sum(item.volume_ul_per_reaction or 0 for item in later)
+        def effective_volume(item: MathComponent) -> float:
+            multiplicity = (len(item.source_material_ids)
+                            if item.source_usage == "each" else 1)
+            return (item.volume_ul_per_reaction or 0) * multiplicity
+
+        premix_total = sum(effective_volume(item) for item in premix)
+        later_total = sum(effective_volume(item) for item in later)
         if not math.isclose(premix_total, plan.premix_target_ul_per_reaction,
                             abs_tol=0.01):
             issues.append(_issue("premix_component_sum_mismatch",
@@ -222,21 +239,30 @@ def parse_and_audit_math(
     diluents = [item.id for item in plan.components if item.is_diluent]
     if len(diluents) > 1:
         issues.append(_issue("multiple_diluents"))
+    additions: list[Addition] = []
+    available_reaction_components: set[str] = set()
+    for component in plan.components:
+        names = (component.source_material_ids if component.source_usage == "each"
+                 else [component.id])
+        for name in names:
+            addition_id = name if component.source_usage == "each" else component.id
+            additions.append(Addition(
+                addition_id, component.volume_ul_per_reaction,
+                stock_strength_x=component.stock_strength_x,
+                target_strength_x=component.target_strength_x,
+                is_diluent=component.is_diluent,
+                delivery=component.delivery,
+            ))
+            if component.id in available_components:
+                available_reaction_components.add(addition_id)
     reaction = Reaction(
-        plan.stage_id, plan.final_volume_ul,
-        tuple(Addition(
-            component.id, component.volume_ul_per_reaction,
-            stock_strength_x=component.stock_strength_x,
-            target_strength_x=component.target_strength_x,
-            is_diluent=component.is_diluent,
-            delivery=component.delivery,
-        ) for component in plan.components),
+        plan.stage_id, plan.final_volume_ul, tuple(additions),
         diluent_name=diluents[0] if len(diluents) == 1 else None,
     )
     issues.extend(_issue(issue.code, component=issue.component,
                          expected=issue.expected, observed=issue.observed)
                   for issue in audit_reaction(
-                      reaction, available_components=available_components,
+                      reaction, available_components=available_reaction_components,
                   ))
     return plan, issues
 

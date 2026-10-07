@@ -114,6 +114,7 @@ _MATH_SCHEMA: dict[str, Any] = {
                 "phase": {"enum": ["premix", "later"]},
                 "volume_ul_per_reaction": {"type": ["number", "null"]},
                 "source_material_ids": {"type": "array", "items": {"type": "string"}},
+                "source_usage": {"enum": ["single", "each", "one_of"]},
                 "source_labware": {"type": ["string", "null"]},
                 "source_well": {"type": ["string", "null"]},
                 "delivery": {"enum": ["robot", "manual"]},
@@ -140,7 +141,7 @@ _SETUP_SYSTEM = """You are the local OT-2 scientific planner. Author only the JS
 
 Return keys labware, modules, pipettes, stages, initial_supplies. Labware: id, load_name, exactly one of integer slot or module_id, optional label. Module: id, exact catalog model, and slot for non-fixed modules only. Pipette: id, model, mount, tip_rack_ids. Stage: id, goal, evidence_refs. Optional initial-supply record: key `labware` (the loaded labware ID), selection ('all', 'wells_in_columns', or 'wells'), columns or wells as appropriate, volume_ul per selected well or null when unmeasured, material_id, source_material_name, evidence_refs. `source_material_name` must quote verbatim material words on the cited task line that also names the exact labware and each selected well. A positive initial volume needs the exact amount and units on that same line; a zero needs the same line to say that well starts empty. Split different materials into different records. Do not invent starting liquid. Unknown volume is null. Source claims are audited and remain model-authored, not a hardware reading. Return no unsupported labware, reagent, refill, or sample."""
 
-_MATH_SYSTEM = """You are authoring a cited reaction-math subplan, before any pipetting actions. Return only JSON matching the schema. Do not write Python or pipette steps. For the current preparation stage, identify the cited reaction count and final volume per reaction. List every per-reaction component, including components added later after the premix. Separate phase=premix from phase=later. Derive premix_target_ul_per_reaction as final volume minus all later additions. List each premix reagent from its exact fixed-setup material ID, labware ID, and physical source well; source_material_ids is a one-item array for each premix reagent. Later additions may group multiple source material IDs and leave source_labware/source_well null until their action stage. Use cited line IDs for every component and name the basis as direct, calculated, or assumption. For an assumed volume, include an explicit assumption_note; never disguise a choice as a cited fact. Supply both stock_strength_x and target_strength_x only when their comparable values are supported by source facts. For one diluent, calculate its volume as the arithmetic remainder and set is_diluent=true. All component volumes are per reaction; do not multiply them by reaction_count in the JSON. Unknown volumes stay null. No protocol action is allowed until the arithmetic and physical source audit passes."""
+_MATH_SYSTEM = """You are authoring a cited reaction-math subplan, before any pipetting actions. Return only JSON matching the schema. Do not write Python or pipette steps. For the current preparation stage, identify the cited reaction count and final volume per reaction. List every per-reaction component, including components added later after the premix. Separate phase=premix from phase=later. Derive premix_target_ul_per_reaction as final volume minus all later additions. List each premix reagent from its exact fixed-setup material ID, labware ID, and physical source well; source_material_ids is a one-item array and source_usage='single' for each premix reagent. For later components with several material IDs, source_usage='each' means the stated per-reaction volume is added separately from every listed material, while source_usage='one_of' means only one listed alternative is used per reaction. Do not merge distinct ingredients into one total when each requires a target concentration. Later additions may leave source_labware/source_well null until their action stage. Use cited line IDs for every component and name the basis as direct, calculated, or assumption. For an assumed volume, include an explicit assumption_note; never disguise a choice as a cited fact. Supply both stock_strength_x and target_strength_x only when their comparable values are supported by source facts. For one diluent, calculate its volume as the arithmetic remainder and set is_diluent=true. All component volumes are per reaction; do not multiply them by reaction_count in the JSON. Unknown volumes stay null. No protocol action is allowed until the arithmetic and physical source audit passes."""
 
 _STAGE_SYSTEM = """You are authoring exactly one bounded, ordered ActionPlan stage for a pinned OT-2 task. Return only JSON with stage_id, evidence_refs, actions. Every action, including every action in a loop, must cite exact source line IDs in evidence_refs. Process actions may cite only the current stage's evidence_refs. Pickup/drop/refill may also cite the separately listed fixed instrument/tip task lines. If the stage cites paper lines, every non-tip action must cite a stage-specific paper line. Do not invent experimental steps, wells, reagents, volumes, or refills. The completed prefix's state and inventory are authoritative observations. If an absolute source volume is unknown, do not claim it is sufficient. A stage must finish with no tip attached and no liquid held. Complete the stage goal before the next stage; do not repeat earlier actions. When a validated model-authored reaction-math subplan is supplied, follow its per-reaction and batch component quantities exactly; do not revise its numbers in this action call.
 
@@ -268,11 +269,15 @@ def _reaction_math_context(
 
 def _math_feedback(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return fixed issue codes and numeric values, never candidate prose."""
-    allowed = {"code", "index", "expected", "observed", "material_id"}
+    allowed = {"code", "index", "expected", "observed", "material_id",
+               "path", "error_type"}
     return [{key: value for key, value in issue.items()
              if key in allowed and (key == "code" or isinstance(value, (int, float))
                                     or (key == "material_id" and isinstance(value, str)
-                                        and re.fullmatch(r"[A-Za-z0-9_]{1,48}", value)))}
+                                        and re.fullmatch(r"[A-Za-z0-9_]{1,48}", value))
+                                    or (key in {"path", "error_type"} and
+                                        isinstance(value, str) and
+                                        re.fullmatch(r"[A-Za-z0-9_.]{1,80}", value)))}
             for issue in issues[:12]]
 
 

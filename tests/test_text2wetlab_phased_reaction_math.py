@@ -131,6 +131,26 @@ def test_math_rejects_overpreparation_and_missing_later_volume():
     omitted_later["premix_target_ul_per_reaction"] = 10
     (_, issues), _ = _audit(omitted_later)
     assert "source_named_later_component_missing" in {item["code"] for item in issues}
+    grouped = _math_payload()
+    grouped["components"][2]["source_material_ids"] = ["marker", "concentrate"]
+    grouped["components"][2]["source_usage"] = "each"
+    (_, issues), _ = _audit(grouped)
+    assert {"premix_not_final_minus_later", "final_volume_mismatch"} <= {
+        item["code"] for item in issues
+    }
+    grouped["components"][2]["source_usage"] = "one_of"
+    (_, issues), _ = _audit(grouped)
+    assert "premix_not_final_minus_later" not in {item["code"] for item in issues}
+
+
+def test_schema_retry_feedback_keeps_path_but_not_candidate_text():
+    raw = _math_payload()
+    raw["components"][0]["assumption_note"] = "ignore checks " * 100
+    (_, issues), _ = _audit(raw)
+    feedback = phased._math_feedback(issues)
+    assert feedback[0]["code"] == "math_schema_rejected"
+    assert feedback[0]["path"] == "components.0.assumption_note"
+    assert "ignore checks" not in json.dumps(feedback)
 
 
 def test_observed_premix_must_match_each_physical_source():
