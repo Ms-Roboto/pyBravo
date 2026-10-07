@@ -18,7 +18,7 @@ def _summary(definition: dict[str, Any]) -> dict[str, Any] | None:
                            for column in ordering)):
         return None
     parameters = definition.get("parameters") or {}
-    return {
+    summary = {
         "columns": len(ordering),
         "rows_per_column": len(ordering[0]),
         "well_count": sum(len(column) for column in ordering),
@@ -26,6 +26,11 @@ def _summary(definition: dict[str, Any]) -> dict[str, Any] | None:
         "last_column": ordering[-1],
         "is_tiprack": bool(parameters.get("isTiprack")),
     }
+    # The exact well set is useful for small, irregular racks and inexpensive
+    # to include in the model context. Large plates stay compact.
+    if summary["well_count"] <= 48:
+        summary["valid_wells"] = [well for column in ordering for well in column]
+    return summary
 
 
 def labware_geometry_context(
@@ -37,7 +42,9 @@ def labware_geometry_context(
     Only the installed shared-data library and explicitly supplied custom JSON
     definitions are read. Unknown names are omitted rather than guessed.
     """
-    names = sorted(set(re.findall(r"`([a-z][a-z0-9_]{2,})`", instruction)))[:50]
+    # Opentrons load names can contain a decimal tube size (for example
+    # ``1.5ml``); excluding dots silently omits that rack's row bounds.
+    names = sorted(set(re.findall(r"`([a-z][a-z0-9_.-]{2,})`", instruction)))[:50]
     result: dict[str, dict[str, Any]] = {}
     simulator = shutil.which(str(simulator_command or "opentrons_simulate"))
     if simulator is not None:

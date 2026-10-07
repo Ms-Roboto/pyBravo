@@ -52,3 +52,30 @@ def test_custom_labware_overrides_catalog_definition(tmp_path, monkeypatch):
     )
     assert result["thermo_96_wellplate_200ul"]["rows_per_column"] == 8
     assert result["thermo_96_wellplate_200ul"]["well_count"] == 96
+
+
+def test_decimal_tube_size_load_name_keeps_exact_small_rack_wells(tmp_path, monkeypatch):
+    simulator = tmp_path / "opentrons_simulate"
+    simulator.touch()
+    (tmp_path / "python").touch()
+    monkeypatch.setattr(geometry.shutil, "which", lambda _: str(simulator))
+    name = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
+    ordering = [[f"{row}{column}" for row in "ABCD"] for column in range(1, 7)]
+    requested: list[str] = []
+
+    def catalog_lookup(*args, **kwargs):
+        requested.extend(json.loads(kwargs["input"]))
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            name: {"ordering": ordering, "parameters": {"isTiprack": False}},
+        }))
+
+    monkeypatch.setattr(geometry.subprocess, "run", catalog_lookup)
+    result = geometry.labware_geometry_context(
+        f"Load `{name}` as tubes.", simulator_command=simulator,
+    )
+
+    assert name in requested
+    assert result[name]["first_column"] == ["A1", "B1", "C1", "D1"]
+    assert result[name]["last_column"] == ["A6", "B6", "C6", "D6"]
+    assert result[name]["valid_wells"] == [well for column in ordering for well in column]
+    assert "E1" not in result[name]["valid_wells"]
