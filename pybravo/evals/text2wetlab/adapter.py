@@ -46,6 +46,7 @@ from pybravo.evals.text2wetlab.source_fidelity import (
     audit_intermediate_preparation_events,
     exact_prepared_output_locations,
 )
+from pybravo.evals.text2wetlab.timed_claims import audit_timed_comments
 from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse, structured_json
 
 
@@ -375,6 +376,25 @@ def _plan_execution_audit(plan: OT2Plan | None, event_log: EventLog) -> tuple[li
         "Keep the task and paper authoritative; regenerate the plan if a change "
         "is scientifically supported instead of silently changing code volumes.\n"
         + visible
+    )
+
+
+def _timed_comment_execution_audit(
+    code: str, instruction: str, scientific_source: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Ask for a real wait only when cited on-deck timing lacks an action."""
+    issues = audit_timed_comments(code, instruction=instruction,
+                                  scientific_source=scientific_source)
+    findings = [issue.__dict__ for issue in issues]
+    errors = [issue for issue in issues if issue.severity == "error"]
+    if not errors:
+        return findings, None
+    visible = "\n".join(f"- {issue.message}" for issue in errors[:8])
+    return findings, (
+        "A cited on-deck timed stage is only recorded as protocol.comment, "
+        "so the program does not wait or pause there. Preserve the supplied "
+        "procedure and add its supported delay, timed module hold, or explicit "
+        "operator pause at that stage; do not invent a duration.\n" + visible
     )
 
 
@@ -1158,6 +1178,15 @@ async def _repair_failure_with_line_edits(
         patch_record["event_detail"] = event_validation.detail
         patch_record["event_count"] = event_validation.event_count
         if event_validation.status == "passed":
+            timed_findings, timed_failure = _timed_comment_execution_audit(
+                patched_code, instruction, scientific_source,
+            )
+            if timed_findings:
+                patch_record["timed_comment_audit"] = timed_findings
+            if timed_failure is not None:
+                patch_record["status"] = "timed_comment_rejected"
+                patch_record["diagnostic"] = timed_failure
+                return None
             plan_findings, plan_failure = _plan_execution_audit(accepted_plan, patched_events)
             if accepted_plan is not None:
                 patch_record["source_fidelity"] = plan_findings
@@ -1512,6 +1541,14 @@ async def generate_ot2_protocol(
                 prior_code, prior_error = code, patch_science_error or event_validation.detail
                 continue
             if simulation.status == "passed":
+                timed_findings, timed_failure = _timed_comment_execution_audit(
+                    code, instruction, method_text,
+                )
+                if timed_findings:
+                    attempt["timed_comment_audit"] = timed_findings
+                if timed_failure is not None:
+                    prior_code, prior_error = code, timed_failure
+                    continue
                 plan_findings, plan_failure = _plan_execution_audit(accepted_plan, event_log)
                 if accepted_plan is not None:
                     attempt["source_fidelity"] = plan_findings

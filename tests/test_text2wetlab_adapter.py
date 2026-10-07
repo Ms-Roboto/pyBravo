@@ -50,6 +50,17 @@ def run(protocol: protocol_api.ProtocolContext):
     pipette.transfer(10, stock["A1"], batch["D1"], new_tip="always")
 '''
 
+TIMED_COMMENT_PROTOCOL = VALID_PROTOCOL.replace(
+    "    for well in plate.rows()[0]:",
+    "    protocol.comment('Incubate samples for 5 min on deck')\n"
+    "    for well in plate.rows()[0]:",
+)
+TIMED_DELAY_PROTOCOL = TIMED_COMMENT_PROTOCOL.replace(
+    "    protocol.comment('Incubate samples for 5 min on deck')",
+    "    protocol.comment('Incubate samples for 5 min on deck')\n"
+    "    protocol.delay(minutes=5)",
+)
+
 
 def _local_science_audit(status: str, *, evidence: str = "") -> dict:
     return {"items": [{"id": "local_check", "status": status,
@@ -519,6 +530,33 @@ async def test_accepted_plan_rejects_second_preparation_in_exact_output_well(tmp
         evidence_planning=False, repair_attempts=0, patch_attempts=0,
     )
     assert direct.simulation.status == "passed"
+
+
+@pytest.mark.asyncio
+async def test_source_cited_timed_comment_needs_wait_and_repairs_from_feedback(tmp_path, monkeypatch):
+    calls = 0
+
+    async def completion(messages, schema, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            assert "protocol.comment" in messages[-1]["content"]
+            assert "Incubate samples for 5 min on deck" in messages[-1]["content"]
+        code = TIMED_COMMENT_PROTOCOL if calls == 1 else TIMED_DELAY_PROTOCOL
+        return StructuredResponse({"code": code}, {"model": "local-qwen"})
+
+    monkeypatch.setattr(adapter, "labware_geometry_context", lambda *args, **kwargs: {})
+    monkeypatch.setattr(adapter, "simulate_protocol",
+                        lambda *args, **kwargs: adapter.SimulationResult("passed", "ok"))
+    result = await adapter.generate_ot2_protocol(
+        "Incubate samples for 5 min on deck, then transfer them to the plate.", tmp_path,
+        completion=completion, event_reader=lambda _: adapter.EventLog([], {}),
+        repair_attempts=1, patch_attempts=0,
+    )
+    assert calls == 2 and result.simulation.status == "passed"
+    trace = json.loads(result.trace_path.read_text())
+    assert trace["attempts"][0]["timed_comment_audit"][0]["code"] == "timed_comment_without_action"
+    assert trace["attempts"][0]["timed_comment_audit"][0]["severity"] == "error"
 
 
 @pytest.mark.asyncio
