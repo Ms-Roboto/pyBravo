@@ -33,3 +33,21 @@ def test_absent_or_oversize_methods_preserve_full_source():
     context = prepare_scientific_source(oversize, max_chars=40)
     assert context.text == oversize
     assert context.strategy == "full_source_methods_not_compact"
+
+
+def test_task_relevant_results_section_is_retained_verbatim_with_provenance():
+    paper = (
+        "Title\nMaterials and methods\nPCR uses 25 µL.\n"
+        "Results\nGeneral findings.\n"
+        "Results > PCR\nSeven fragments amplified.\n"
+        "Results > Golden Gate assembly\nDigest fragments, then assemble.\n"
+        "Results > Unrelated assay\nIgnore this assay.\nDiscussion\nOther details.\n"
+    )
+    task = "# Golden Gate assembly from PCR fragments\nBuild four plasmids."
+    context = prepare_scientific_source(paper, task_instruction=task)
+    assert context.strategy == "verbatim_methods_plus_relevant_results"
+    assert "PCR uses 25 µL." in context.text
+    assert "Seven fragments amplified." not in context.text
+    assert "Digest fragments, then assemble." in context.text
+    assert "Ignore this assay." not in context.text
+    assert context.line_spans == ((2, 4), (8, 10))

@@ -10,6 +10,7 @@ from pybravo.evals.text2wetlab.patch_repair import (
     line_patch_messages,
     numbered_source,
     preserve_simulator_repair_facts,
+    task_allows_tip_refill,
 )
 
 
@@ -22,7 +23,17 @@ def test_numbered_source_and_prompt_keep_task_and_candidate_distinct():
     assert hashlib.sha256(source.encode()).hexdigest() in messages[2]["content"]
     assert "0002| second()" in messages[2]["content"]
     assert "keep the existing aspirate" in messages[0]["content"].lower()
-    assert "Do not return used tips or reset" in messages[0]["content"]
+    assert "Do not return used tips" in messages[0]["content"]
+    assert "Do not reset tip racks" in messages[0]["content"]
+
+
+def test_tip_refill_requires_explicit_source_permission():
+    instruction = "Tips are unlimited: call pipette.reset_tipracks() when you have used a rack."
+    assert task_allows_tip_refill(instruction)
+    assert not task_allows_tip_refill("Do not call pipette.reset_tipracks().")
+    messages = line_patch_messages("x()", instruction=instruction,
+                                   diagnostic="OutOfTipsError")
+    assert "add reset_tipracks() only after" in messages[0]["content"]
 
 
 def test_single_line_replacement_keeps_every_other_line():
@@ -101,6 +112,21 @@ def test_simulator_repair_may_add_fresh_tip_cycle_without_removing_work():
                             "        pipette.pick_up_tip()\n"
                             "        pipette.mix(2, volume)")
     assert preserve_simulator_repair_facts(PROGRAM, fixed) is None
+
+
+def test_explicitly_authorized_tip_refill_can_add_only_isolated_reset_guard():
+    fixed = PROGRAM.replace("        pipette.pick_up_tip()",
+                            "        if i == 1:\n"
+                            "            pipette.reset_tipracks()\n"
+                            "        pipette.pick_up_tip()")
+    assert preserve_simulator_repair_facts(PROGRAM, fixed) is not None
+    assert preserve_simulator_repair_facts(PROGRAM, fixed,
+                                            allow_tip_refill=True) is None
+    unsafe = fixed.replace("pipette.reset_tipracks()",
+                           "pipette.aspirate(volume, plate['A1'])\n"
+                           "            pipette.reset_tipracks()")
+    assert preserve_simulator_repair_facts(PROGRAM, unsafe,
+                                            allow_tip_refill=True) is not None
 
 
 @pytest.mark.parametrize("source, reason", [

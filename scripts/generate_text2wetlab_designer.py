@@ -22,6 +22,7 @@ from evaluate_text2wetlab import DATASET, ECOLI_PAPER_SHA256, REVISION, TASKS, _
 
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
 from pybravo.workflow.drafter.llm import DrafterConfig, draft_workflow
+from pybravo.workflow.drafter.scientific_patterns import audit_scientific_patterns
 
 MODEL_URL = "http://sparky.local:8000/v1"
 DEFAULT_API = "http://127.0.0.1:8000"
@@ -301,7 +302,7 @@ async def _generate_one(task: str, *, output_dir: Path, api_url: str,
             raise ValueError("The supplied heat-shock paper does not match the pinned source digest.")
     if b"/data/paper.txt" in instruction_bytes and paper is None:
         raise RuntimeError("Task requires a source paper, but the pinned paper is unavailable.")
-    methods = prepare_scientific_source(paper.decode("utf-8")).text if paper else None
+    methods = prepare_scientific_source(paper.decode("utf-8"), task_instruction=instruction).text if paper else None
     model_output_path = task_dir / "local_model_workflow.json"
     if reuse_model_output:
         if not model_output_path.is_file():
@@ -334,6 +335,10 @@ async def _generate_one(task: str, *, output_dir: Path, api_url: str,
     issues.extend(_node_issues(workflow))
     issues.extend(_hardware_issues(workflow, context, source_instruction=instruction))
     issues.extend(_scientific_pattern_issues(workflow, source_instruction=instruction))
+    issues.extend(audit_scientific_patterns(
+        workflow, source_instruction=instruction, head_type=context.get("head_type"),
+    ))
+    issues = list({(issue["code"], issue.get("path"), issue["message"]): issue for issue in issues}.values())
     if any(issue["code"] == "UNSUPPORTED_NODE" for issue in issues):
         raise RuntimeError("The local model produced a forbidden node; no draft was saved.")
     if len(issues) > 100:

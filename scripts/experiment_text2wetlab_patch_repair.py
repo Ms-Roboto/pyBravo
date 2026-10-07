@@ -28,6 +28,7 @@ from pybravo.evals.text2wetlab.patch_repair import (
     line_patch_messages,
     preserve_existing_task_actions,
     preserve_simulator_repair_facts,
+    task_allows_tip_refill,
 )
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
 from pybravo.workflow.protocols.llm import LocalLLMConfig, structured_json
@@ -107,7 +108,12 @@ async def run_experiment(args: argparse.Namespace) -> dict:
         })
         try:
             patched = apply_line_patch(current_source, patch)
-            task_fact_error = preserve_simulator_repair_facts(source, patched) if baseline is None else None
+            task_fact_error = (preserve_simulator_repair_facts(
+                source, patched,
+                allow_tip_refill=(baseline_stage == "simulator"
+                                  and "OutOfTipsError" in baseline_detail
+                                  and task_allows_tip_refill(instruction)),
+            ) if baseline is None else None)
             if task_fact_error is not None:
                 attempt["status"] = "task_facts_rejected"
                 attempt["diagnostic"] = task_fact_error

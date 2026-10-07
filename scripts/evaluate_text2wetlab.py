@@ -165,6 +165,7 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
                      instruction: str | None = None) -> dict:
     """Use the task's pinned runlog gate and preserve its action events for review."""
     from pybravo.evals.text2wetlab.adapter import EventLog, validate_event_safety
+    from pybravo.evals.text2wetlab.rubric_audit import audit_rubric_coverage
 
     source = _source_bytes(task, "tests/runlog.py", dataset_root)
     if source is None:
@@ -200,6 +201,8 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
     counts = Counter(str(event.get("kind")) for event in events if isinstance(event, dict))
     risks = _cross_well_aspiration_risks(events)
     semantic = validate_event_safety(EventLog(events, payload.get("labware") or {}), instruction=instruction)
+    rubric_audit = audit_rubric_coverage(task, events, protocol.read_text(encoding="utf-8"),
+                                         payload.get("labware") or {})
     return {"status": "passed", "source_sha256": _digest(source),
             "events_path": str(events_file), "event_count": len(events),
             "event_kinds": dict(sorted(counts.items())),
@@ -207,6 +210,7 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
             "cross_well_aspiration_risks": risks[:10],
             "adapter_event_validation": {"status": semantic.status, "detail": semantic.detail,
                                          "event_count": semantic.event_count},
+            "local_rubric_audit": rubric_audit,
             "labware": payload.get("labware") or {}}
 
 
@@ -270,7 +274,7 @@ def run_task(task: str, *, output_dir: Path, simulator: Path,
                "--task-dir", str(task_dir), "--instruction-file", str(task_dir / "instruction.md"),
                "--simulator-command", str(simulator), "--event-logger", str(event_logger),
                "--repair-attempts", str(repair_attempts),
-               "--patch-attempts", str(patch_attempts)]
+               "--patch-attempts", str(patch_attempts), "--rubric-task", task]
     if paper_file:
         command.extend(["--paper-file", str(paper_file)])
     if labware_dir:

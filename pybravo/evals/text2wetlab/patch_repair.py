@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
@@ -46,6 +47,21 @@ def numbered_source(source: str) -> str:
     return "\n".join(f"{number:04d}| {line}" for number, line in enumerate(source.splitlines(), 1))
 
 
+def task_allows_tip_refill(instruction: str) -> bool:
+    """Read explicit task permission; a simulator failure does not grant it."""
+    permission = re.search(
+        r"\b(?:tips are unlimited|tip racks? may be refilled|"
+        r"(?:may|can|should)\s+refill(?:\s+the)?\s+tip racks?|"
+        r"call\s+\w+\.reset_tipracks\(\))",
+        instruction, re.IGNORECASE,
+    )
+    prohibition = re.search(
+        r"\b(?:do not|never|cannot|must not)\b[^\n]{0,80}\b(?:refill|reset_tipracks)\b",
+        instruction, re.IGNORECASE,
+    )
+    return bool(permission) and not bool(prohibition)
+
+
 def line_patch_messages(
     source: str,
     *,
@@ -57,6 +73,12 @@ def line_patch_messages(
     if not source.strip() or not instruction.strip() or not diagnostic.strip():
         raise PatchError("Source, task instruction, and failure diagnostic are required.")
     source_digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    refill_allowed = task_allows_tip_refill(instruction)
+    refill_guidance = (
+        "If the task permits fresh-tip refills, add reset_tipracks() only after the "
+        "loaded rack is exhausted and fresh tips have been supplied. "
+        if refill_allowed else "Do not reset tip racks or reuse spent tips. "
+    )
     task = "Benchmark task instruction (experimental facts to preserve):\n" + instruction.strip()
     if scientific_source and scientific_source.strip():
         task += "\n\nSupplied scientific method passage:\n" + scientific_source.strip()
@@ -74,8 +96,8 @@ def line_patch_messages(
                 "failure. Keep the existing aspirate, dispense, transfer, and mix action count, "
                 "volumes, order, and direct locations. For a pipette working-range failure, "
                 "reassign the same liquid action to a suitable loaded pipette and add fresh-tip "
-                "cycles if needed; do not lower its volume. Do not return used tips or reset "
-                "tip racks to silence a failure. Do not use benchmark reference output or add "
+                "cycles if needed; do not lower its volume. Do not return used tips. "
+                + refill_guidance + "Do not use benchmark reference output or add "
                 "simulation-only branches. "
                 "Do not return a complete protocol or Markdown. The proposed edits will be applied "
                 "mechanically and revalidated; invalid line ranges or broad rewrites are rejected."
@@ -193,6 +215,8 @@ def _program_facts(source: str) -> dict[str, object]:
         name.id for _, volume, _ in liquids if volume is not None
         for name in ast.walk(volume) if isinstance(name, ast.Name)
     }
+
+
     volume_bindings: list[tuple[str, str]] = []
     for node in nodes:
         if isinstance(node, ast.Assign):
@@ -260,7 +284,46 @@ def _program_facts(source: str) -> dict[str, object]:
     }
 
 
-def preserve_simulator_repair_facts(source: str, candidate: str) -> str | None:
+def _refill_guard(node: ast.AST) -> bool:
+    """Only a side-effect-free loop-counter check may guard one rack reset."""
+    if not isinstance(node, ast.If) or len(node.body) != 1 or node.orelse:
+        return False
+    statement = node.body[0]
+    if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+        return False
+    call = statement.value
+    if _call_method(call) != "reset_tipracks" or call.args or call.keywords:
+        return False
+    return not any(isinstance(child, (ast.Call, ast.NamedExpr, ast.Attribute, ast.Subscript))
+                   for child in ast.walk(node.test))
+
+
+def _refill_control_facts(source: str) -> tuple[list[str], Counter[str], Counter[tuple[str, int | float]]]:
+    tree = ast.parse(source)
+    controls: list[str] = []
+    guards: Counter[str] = Counter()
+    guard_numbers: Counter[tuple[str, int | float]] = Counter()
+    for node in ast.walk(tree):
+        if not isinstance(node, _PROTECTED_CONTROL):
+            continue
+        if _refill_guard(node):
+            guards[ast.dump(node, include_attributes=False)] += 1
+            guard_numbers.update((type(child.value).__name__, child.value)
+                                 for child in ast.walk(node.test)
+                                 if isinstance(child, ast.Constant)
+                                 and type(child.value) in {int, float})
+        else:
+            controls.append(ast.dump(node, include_attributes=False) if isinstance(node, ast.If)
+                            else str(type(node).__name__) + ":" + (
+                                ast.dump(node.iter if isinstance(node, (ast.For, ast.AsyncFor))
+                                         else node.test, include_attributes=False)
+                                if isinstance(node, (ast.For, ast.AsyncFor, ast.While, ast.IfExp)) else ""))
+    return controls, guards, guard_numbers
+
+
+def preserve_simulator_repair_facts(
+    source: str, candidate: str, *, allow_tip_refill: bool = False,
+) -> str | None:
     """Reject a simulator fix that changes recorded experimental work.
 
     The original has no usable event log, so this guard compares static facts.
@@ -275,19 +338,33 @@ def preserve_simulator_repair_facts(source: str, candidate: str) -> str | None:
         return "The patch changed liquid actions or their declared volumes."
     if before["locations"] != after["locations"] or before["reagent_bindings"] != after["reagent_bindings"]:
         return "The patch changed an existing liquid source, destination, or reagent binding."
-    if before["control"] != after["control"]:
-        return "The patch changed protocol loop or control-flow structure."
+    if before["control"] != after["control"] or (
+        after["tip_counts"]["reset_tipracks"] > before["tip_counts"]["reset_tipracks"]
+    ):
+        before_control, before_guards, before_guard_numbers = _refill_control_facts(source)
+        after_control, after_guards, after_guard_numbers = _refill_control_facts(candidate)
+        added_guards = after_guards - before_guards
+        if (not allow_tip_refill or before_control != after_control
+                or before_guards - after_guards
+                or sum(added_guards.values()) !=
+                after["tip_counts"]["reset_tipracks"] - before["tip_counts"]["reset_tipracks"]):
+            return "The patch changed protocol loop or control-flow structure."
     if before["timed"] != after["timed"]:
         return "The patch changed an incubation, module command, or manual pause."
     if before["tip_motion"] != after["tip_motion"]:
         return "The patch changed a liquid-contact motion setting."
     earlier_tips, patched_tips = before["tip_counts"], after["tip_counts"]
     if (any(patched_tips[name] < earlier_tips[name] for name in ("pick_up_tip", "drop_tip"))
-            or any(patched_tips[name] != earlier_tips[name]
-                   for name in ("return_tip", "reset_tipracks"))):
+            or patched_tips["return_tip"] != earlier_tips["return_tip"]
+            or patched_tips["reset_tipracks"] < earlier_tips["reset_tipracks"]
+            or (patched_tips["reset_tipracks"] > earlier_tips["reset_tipracks"]
+                and not allow_tip_refill)):
         return "The patch removed a tip change or added tip return/refill behavior."
     if before["numeric_literals"] != after["numeric_literals"]:
-        return "The patch changed a non-index numeric setting or task quantity."
+        if (not allow_tip_refill or before["numeric_literals"] - after["numeric_literals"]
+                or after["numeric_literals"] - before["numeric_literals"] !=
+                after_guard_numbers - before_guard_numbers):
+            return "The patch changed a non-index numeric setting or task quantity."
     if before["literal_wells"] - after["literal_wells"]:
         return "The patch removed an existing liquid-operation well or material reference."
     return None
