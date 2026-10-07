@@ -373,6 +373,26 @@ def _error_count(issues: list[dict[str, Any]]) -> int:
     return sum(issue.get("severity") == "error" for issue in issues)
 
 
+def _scientific_actions_preserved(original: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    """An incomplete repair cannot improve merely by deleting pipetting."""
+    action_types = {"liquid/Aspirate", "liquid/Dispense", "liquid/Mix"}
+    def present(workflow: dict[str, Any]) -> set[str]:
+        return {node.get("type") for node in (workflow.get("graph") or {}).get("nodes") or []
+                if isinstance(node, dict) and node.get("type") in action_types}
+    return present(original) <= present(candidate)
+
+
+def _submitted_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Retain a visible truncation notice within the API's 100-issue limit."""
+    if len(issues) <= 100:
+        return issues
+    return issues[:99] + [{
+        "severity": "warning", "code": "REVIEW_ISSUES_TRUNCATED",
+        "message": f"{len(issues) - 99} additional review issues were omitted from this Designer display; see the local repair record before review.",
+        "path": "/graph",
+    }]
+
+
 def _select_workflows(storage: WorkflowStorage, *, tasks: list[str] | None,
                       workflow_id: str | None) -> list[dict[str, Any]]:
     if workflow_id:
@@ -465,6 +485,8 @@ async def repair_saved_draft(
         "candidate_issue_count": len(candidate_issues),
         "candidate_error_count": _error_count(candidate_issues),
         "candidate_issue_codes": sorted({issue["code"] for issue in candidate_issues}),
+        "candidate_action_types_preserved": (candidate is not None
+                                              and _scientific_actions_preserved(original, candidate)),
         "candidate_sha256": (_digest(json.dumps(candidate, sort_keys=True, ensure_ascii=False).encode("utf-8"))
                              if candidate is not None else None),
     })
@@ -475,7 +497,9 @@ async def repair_saved_draft(
             json.dumps(candidate, indent=2, ensure_ascii=False) + "\n", encoding="utf-8",
         )
     (task_dir / "repair_record.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    improving = candidate is not None and _error_count(candidate_issues) < _error_count(initial_issues)
+    improving = (candidate is not None
+                 and _error_count(candidate_issues) < _error_count(initial_issues)
+                 and _scientific_actions_preserved(original, candidate))
     if candidate is None or not (repaired.passed_checks or save_improving_candidate and improving):
         return record
     to_save = _authoring_workflow(candidate)
@@ -489,7 +513,7 @@ async def repair_saved_draft(
     (task_dir / "repair_trace.json").write_bytes(trace_bytes)
     saved_provenance = deepcopy(provenance)
     saved_provenance["generation_trace_sha256"] = _digest(trace_bytes)
-    posted = _post_draft(api_url, to_save, saved_provenance, candidate_issues[:100])
+    posted = _post_draft(api_url, to_save, saved_provenance, _submitted_issues(candidate_issues))
     record.update({
         "status": "saved_unreviewed" if repaired.passed_checks else "saved_unreviewed_incomplete",
         "workflow_id": posted["workflow_id"], "designer_url": posted["url"],

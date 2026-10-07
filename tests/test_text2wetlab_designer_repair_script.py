@@ -179,6 +179,45 @@ async def test_incomplete_candidate_is_not_saved_without_opt_in(monkeypatch, tmp
     assert (tmp_path / TASK / "repair_candidate.json").is_file()
 
 
+async def test_opted_in_partial_repair_cannot_improve_by_deleting_pipetting(monkeypatch, tmp_path):
+    monkeypatch.setattr(script, "_source_bytes", _source)
+    saved = _saved()
+    saved.update(_graph("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                        "liquid/Dispense", "tips/TipsOff", "flow/End"))
+    incomplete = DraftedWorkflow.model_validate({
+        "name": "Only a handoff now",
+        "graph": {"nodes": [{"id": 1, "type": "flow/Start"},
+                             {"id": 2, "type": "system/Manual", "properties": {"message": "Review transfer"}},
+                             {"id": 3, "type": "flow/End"}],
+                  "links": [{"id": 1, "origin_id": 1, "origin_slot": 0,
+                             "target_id": 2, "target_slot": 0, "link_type": -1},
+                            {"id": 2, "origin_id": 2, "origin_slot": 0,
+                             "target_id": 3, "target_slot": 0, "link_type": -1}]},
+    })
+
+    async def fake_qwen(prompt, **kwargs):
+        return DraftResult(workflow=incomplete, issues=[], attempts=1,
+                           provider="local", model="qwen")
+
+    monkeypatch.setattr(script, "_post_draft", lambda *args: pytest.fail("No degraded draft may be saved"))
+    result = await script.repair_saved_draft(
+        saved, context=CONTEXT, output_dir=tmp_path, api_url="http://test",
+        execute=True, max_attempts=1, drafter=fake_qwen, save_improving_candidate=True,
+    )
+    assert result["status"] == "repair_failed"
+    assert result["candidate_action_types_preserved"] is False
+
+
+def test_submitted_issue_limit_has_visible_omission_notice():
+    issues = [{"severity": "error", "code": f"ISSUE_{index}",
+               "message": "Review this action.", "path": f"/graph/nodes/{index}"}
+              for index in range(105)]
+    submitted = script._submitted_issues(issues)
+    assert len(submitted) == 100
+    assert submitted[-1]["code"] == "REVIEW_ISSUES_TRUNCATED"
+    assert "6 additional" in submitted[-1]["message"]
+
+
 def test_selection_chooses_latest_but_exact_id_is_unambiguous(tmp_path):
     storage = WorkflowStorage(tmp_path)
     old = _saved()
