@@ -103,6 +103,8 @@ Translate the written task faithfully: preserve stated deck slots, labware, pipe
 
 _TIP_REFILL_GUIDANCE = """The task explicitly permits refilling fresh tip racks. Before code generation, count pickups per pipette across every stage, including loops and mixing. Keep a per-pipette pickup counter and compare it with the total number of wells in that pipette's loaded tip racks. Only when the counter reaches actual rack capacity, pause for the operator to replenish fresh tips, call that pipette's reset_tipracks() once before its next pickup, then reset its counter. Never reset on every pickup, reset a partly used rack, or omit the physical fresh-rack handoff."""
 
+_TIP_BUDGET_GUIDANCE = """Before coding, make a per-pipette pickup ledger for the whole method and compare it with every installed rack. A multichannel pickup consumes one physical tip per channel. For a shared reagent, one tip set may feed several empty or untouched destinations only through noncontact dispenses above the liquid and at or above the well rim; once a tip touches a sample or mixture, it must not return to shared stock or another sample. If a sample requires several capacity-limited aspirations, waste removals, or a mix in its own well, retain its dedicated tip set across those same-sample actions where safe, then discard it. Group full, pitch-compatible sample columns with the multichannel pipette when this reduces tip demand. Do not reset, reload, or assume extra racks unless the instruction explicitly permits it; if the pickup ledger does not fit, redesign the sequence before writing code."""
+
 _ALLOWED_IMPORTS = {
     "opentrons.protocol_api",
     "opentrons.types",
@@ -1252,7 +1254,7 @@ async def generate_ot2_protocol(
         simulator_command=simulator_command, labware_dir=resolved_labware_dir,
     )
     trace["labware_geometry"] = geometry
-    system_prompt = _SYSTEM_PROMPT + "\n\n" + SOURCE_FIDELITY_GUIDANCE
+    system_prompt = _SYSTEM_PROMPT + "\n\n" + SOURCE_FIDELITY_GUIDANCE + "\n\n" + _TIP_BUDGET_GUIDANCE
     if task_allows_tip_refill(instruction):
         system_prompt += "\n\n" + _TIP_REFILL_GUIDANCE
     base_messages = [
