@@ -999,6 +999,7 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
             </div>
             <button class="toolbar-btn primary" id="workflow-save-btn" style="font-size: 11px;">Save</button>
             <button class="toolbar-btn" id="workflow-load-btn" style="font-size: 11px;" disabled>Load</button>
+            <button class="toolbar-btn" id="workflow-restore-btn" style="font-size: 11px;" hidden>Restore autosaved draft</button>
             <button class="toolbar-btn" id="workflow-duplicate-btn" style="font-size: 11px;" disabled>Duplicate</button>
             <button class="modal-btn-clear" id="workflow-delete-btn" style="font-size: 11px;" disabled>Delete</button>
         </div>
@@ -6036,6 +6037,7 @@ function openWorkflowModal(mode) {
     document.getElementById('workflow-load-btn').disabled = true;
     document.getElementById('workflow-duplicate-btn').disabled = true;
     document.getElementById('workflow-delete-btn').disabled = true;
+    document.getElementById('workflow-restore-btn').hidden = mode !== 'load' || !readAutosavedDraft();
     workflowModal.classList.remove('hidden');
     loadWorkflowList();
     if (mode === 'save') workflowNameInput.focus();
@@ -6157,6 +6159,11 @@ document.getElementById('workflow-load-btn').addEventListener('click', async () 
         syncActiveTabMeta();
     }
     workflowModal.classList.add('hidden');
+});
+
+// Recovery is opt-in; opening Designer never deserializes this draft.
+document.getElementById('workflow-restore-btn').addEventListener('click', () => {
+    if (restoreDraft()) workflowModal.classList.add('hidden');
 });
 
 // Delete button
@@ -9054,6 +9061,7 @@ async function resumeProtocolChat({activate = true} = {}) {
     let id = protocolChat.sessionId;
     if (!id) { try { id = localStorage.getItem(PROTOCOL_CHAT_STORAGE); } catch (_) {} }
     if (!id) return;
+    document.getElementById('protocol-chat-reload').textContent = 'Reload conversation';
     protocolChat.sessionId = id;
     protocolChat.pending = true; renderProtocolConversation();
     try {
@@ -9116,11 +9124,19 @@ document.getElementById('protocol-chat-form').addEventListener('submit', async e
 
 // Auto-save to localStorage
 let autoSaveTimer = null;
+function hasAutosaveContent() {
+    const tab = getActiveTab();
+    return Boolean(tab && !isProtocolDraftTab(tab) && (
+        tab.id || tab.dirty || tab.library || Object.keys(tab.deckConfig || {}).length ||
+        (tab.graph?._nodes || []).some(node => node.type !== 'flow/Start' && node.type !== 'flow/End')
+    ));
+}
+
 function scheduleAutoSave() {
-    if (isProtocolDraftTab()) return;
+    if (!hasAutosaveContent()) return;
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
-        if (isProtocolDraftTab()) return;
+        if (!hasAutosaveContent()) return;
         try {
             const workflow = serializeWorkflow();
             localStorage.setItem('pybravo-designer-draft', JSON.stringify(workflow));
@@ -9128,17 +9144,37 @@ function scheduleAutoSave() {
     }, 30000);
 }
 
-// Restore draft on load
-function restoreDraft() {
+// Preserve recovery data until the scientist explicitly chooses it in Load.
+function readAutosavedDraft() {
     try {
         const raw = localStorage.getItem('pybravo-designer-draft');
         if (raw) {
             const data = JSON.parse(raw);
-            if (data.deck && Object.keys(data.deck).length > 0) {
-                deserializeWorkflow(data);
-            }
+            if (data && Array.isArray(data.graph?.nodes)) return data;
         }
     } catch (e) { /* ignore */ }
+    return null;
+}
+
+function restoreDraft() {
+    const data = readAutosavedDraft();
+    if (!data) return false;
+    deserializeWorkflow(data);
+    markActiveDirty();
+    return true;
+}
+
+function offerProtocolChatRecovery() {
+    // Merely knowing a previous session exists must not select it or fetch it.
+    // Sending a message from the fresh composer starts a new conversation.
+    if (protocolChat.sessionId || protocolChat.envelope) return;
+    try {
+        if (localStorage.getItem(PROTOCOL_CHAT_STORAGE)) {
+            const button = document.getElementById('protocol-chat-reload');
+            button.textContent = 'Resume previous chat';
+            button.hidden = false;
+        }
+    } catch (_) { /* storage is optional */ }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -9174,8 +9210,6 @@ async function init() {
     if (requestedWorkflow) {
         const workflow = await apiCall(`/api/workflows/${encodeURIComponent(requestedWorkflow)}`);
         if (workflow) deserializeWorkflow(workflow);
-    } else if (!requestedPreview) {
-        restoreDraft();
     }
     if (requestedPreview) {
         try {
@@ -9208,7 +9242,9 @@ async function init() {
     setInterval(scheduleAutoSave, 30000);
     console.log('Designer initialized');
     const openProtocolChat = params.get('protocol-chat') === '1';
-    await resumeProtocolChat({activate: openProtocolChat || (!requestedWorkflow && !requestedPreview)});
+    // Plain Designer always starts with a fresh canvas. Cached drafts and
+    // conversations are available through explicit recovery actions only.
+    offerProtocolChatRecovery();
     if (openProtocolChat) {
         setProtocolChatOpen(true);
         document.getElementById('protocol-chat-message').focus();

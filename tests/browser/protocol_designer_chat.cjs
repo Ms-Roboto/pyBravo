@@ -136,10 +136,15 @@ function envelope(revision) {
         assert.equal(await page.locator('#protocol-chat-reload').isVisible(),false);
         await page.screenshot({path:'/tmp/protocol-designer-chat.png'});
         await page.reload();
-        await page.waitForFunction(()=>document.querySelectorAll('.wf-tab').length===2);
-        assert.equal(await page.locator('.wf-tab.active .wf-tab-name').innerText(),'Existing scientist workflow','Saved chat must not replace an explicitly requested workflow on reload');
+        await page.waitForFunction(()=>document.querySelector('.wf-tab.active .wf-tab-name')?.textContent==='Existing scientist workflow');
+        assert.equal(await page.locator('.wf-tab').count(),1,'Saved chat must not open automatically beside an explicitly requested workflow');
+        assert.equal(await page.locator('#protocol-chat-panel').isVisible(),false);
         await page.locator('#btn-protocol-chat').click();
-        await page.locator('.wf-tab-name').filter({hasText:'Draft · Incubation chat'}).click();
+        assert.equal(await page.locator('#protocol-chat-messages .protocol-chat-message').count(),0,'Opening chat starts with an empty conversation');
+        await page.locator('#protocol-chat-reload').click();
+        await page.waitForFunction(()=>document.querySelector('#protocol-chat-status').textContent.includes('restored'));
+        assert.equal(await page.locator('.wf-tab').count(),2,'Explicit resume opens the stored conversation beside the workflow');
+        assert.equal(await page.locator('.wf-tab.active .wf-tab-name').innerText(),'Draft · Incubation chat');
         assert.deepEqual(await page.evaluate(()=>window.__protocolWorkflowForTest().protocol_materials),envelope(4).preview.protocol_materials,'Resumed preview retains the selected pair');
         assert.equal(await page.evaluate(()=>window.designerState.graph._nodes.find(n=>n.type==='review/ProtocolStep').properties.parameters.duration_s),4);
         await page.locator('#protocol-chat-new').click();

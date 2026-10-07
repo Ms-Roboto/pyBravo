@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node is needed for Designer JavaScript checks")
@@ -152,7 +151,8 @@ def test_preview_button_and_designer_actions_keep_release_separate():
     assert "s?.simulation?.status!=='passed'" in assistant
     assert "'/designer?protocol_preview='+encodeURIComponent(state.session.id)" in assistant
     assert "params.get('protocol_preview')" in designer
-    assert "(!requestedWorkflow && !requestedPreview)" in designer
+    assert "resumeProtocolChat(" not in _function(designer, "init")
+    assert "restoreDraft(" not in _function(designer, "init")
     assert "if (isProtocolDraftTab()) return;" in designer
     assert "if (isProtocolDraftTab()) { progress.textContent = 'This protocol preview cannot run" in designer
 
