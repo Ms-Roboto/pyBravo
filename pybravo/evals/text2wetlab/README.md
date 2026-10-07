@@ -71,3 +71,13 @@ explicit mix event; a full withdrawal still conserves its total components.
 This ledger does not establish reagent identity,
 mixing quality, concentrations, or a protocol's scientific correctness. It is
 currently a standalone audit utility; it does not change official scoring.
+
+`material_plan_bridge.targets_from_accepted_plan()` can supply ledger targets
+from an accepted local-model `PlanningResult`. Because `OT2Plan` has no
+destination-well field, each `TargetBinding` must cite the exact vessel/well
+and the corresponding reaction volume in the task or paper. For a generated
+intermediate, it also needs a matching generated `DeckSource` and a trusted
+stage-to-event boundary. Unlinked quotes, ambiguous reactions, and missing
+boundaries become `review_gaps`; they never create a target by inference.
+Callers can pass the resulting limits, stage targets and boundaries into the
+ledger, along with independently confirmed initial volumes and geometry.
