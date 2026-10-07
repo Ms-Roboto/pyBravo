@@ -80,6 +80,16 @@ def test_explicit_actions_lower_to_fixed_primitives_without_inferred_steps():
     assert ActionPlan.model_json_schema()["additionalProperties"] is False
 
 
+def test_comment_records_exact_model_authored_note_without_pausing():
+    draft = _draft()
+    draft["actions"].insert(0, {
+        "kind": "comment", "message": "Synthetic manual sealing step.",
+    })
+    code = _compile(draft)
+    assert "protocol.comment('Synthetic manual sealing step.')" in code
+    assert "protocol.pause(" not in code
+
+
 @pytest.mark.parametrize("volume,diagnostic", [
     (0.5, "outside"),
     (21, "outside"),
@@ -510,6 +520,30 @@ def test_catalog_selector_uses_model_named_columns_in_selected_order():
     series[1]["columns"] = [99]
     with pytest.raises(ActionPlanError, match="absent columns"):
         _compile(draft, labware=facts, pipettes=multi)
+
+
+def test_catalog_selector_expands_model_selected_wells_within_columns():
+    draft = _catalog_selector_draft()
+    for item in draft["actions"][0]["selector"]["series"]:
+        item["mode"] = "wells_in_columns"
+        item["columns"] = [3, 1]
+    ordered = tuple(f"{row}{column}" for column in (1, 2, 3)
+                    for row in "ABCDEFGH")
+    facts = {
+        name: LabwareFacts(
+            frozenset(ordered), ordered_wells=ordered,
+            is_tiprack=name == "synthetic_96_tiprack_20ul",
+            tip_capacity_ul=20 if name == "synthetic_96_tiprack_20ul" else None,
+        ) for name in LABWARE
+    }
+    code = _compile(draft, labware=facts)
+    assert code.count(".pick_up_tip()") == 16
+    assert code.index("lw_1.wells_by_name()['A3']") < code.index(
+        "lw_1.wells_by_name()['H3']"
+    ) < code.index("lw_1.wells_by_name()['A1']")
+    draft["actions"][0]["selector"]["series"][0]["columns"] = []
+    with pytest.raises(ActionPlanError, match="needs explicit model-selected columns"):
+        _compile(draft, labware=facts)
 
 
 def test_catalog_selector_rejects_ambiguous_or_wrong_labware_relations():

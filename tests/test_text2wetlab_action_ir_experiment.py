@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from pybravo.evals.text2wetlab.trusted_catalog import (
     catalog_names,
     facts_from_definitions,
+    load_trusted_module_catalog,
+    module_deck_requests,
 )
 from scripts import experiment_text2wetlab_action_ir as experiment
 
@@ -39,6 +43,90 @@ def test_catalog_comes_from_definitions_and_preserves_exact_wells():
     assert labware["small_tiprack"].tip_capacity_ul == 20
     assert labware["eight_tiprack"].multichannel_anchor_wells == {"A1"}
     assert pipettes["small_pipette"].min_volume_ul == 1
+
+
+def test_long_trough_requires_centering_quirk_and_tip_clearance():
+    tiprack = _definition([f"{row}1" for row in "ABCDEFGH"],
+                          tiprack=True, volume=200)
+    for details in tiprack["wells"].values():
+        details["diameter"] = 5.23
+    trough = _definition(["A1", "A2"], tiprack=False, volume=15000)
+    trough["parameters"].update({"format": "trough",
+                                 "quirks": ["centerMultichannelOnWells"]})
+    for details in trough["wells"].values():
+        details.update(shape="rectangular", xDimension=8.2, yDimension=71.2)
+    labware, _ = facts_from_definitions(
+        {"tips": tiprack, "long_trough": trough}, {},
+    )
+    assert labware["long_trough"].multichannel_anchor_wells == {"A1", "A2"}
+    trough["parameters"]["quirks"] = []
+    labware, _ = facts_from_definitions({"tips": tiprack, "long_trough": trough}, {})
+    assert not labware["long_trough"].multichannel_compatible
+    trough["parameters"]["quirks"] = ["centerMultichannelOnWells"]
+    trough["wells"]["A1"]["yDimension"] = 65
+    labware, _ = facts_from_definitions({"tips": tiprack, "long_trough": trough}, {})
+    assert labware["long_trough"].multichannel_anchor_wells == {"A2"}
+
+
+def test_module_requests_restrict_alias_slots_and_labware_to_fixed_deck():
+    instruction = """| 4 | Magnetic Module GEN1 (`'magnetic module'`) holding sample plate | `deep_plate` |
+| 6 | Temperature Module GEN1 (`'tempdeck'`) holding elution plate | `cold_plate` |
+| 7, 8, 10, 11 | Thermocycler Module GEN1 (`'thermocycler'`) holding `pcr_plate` | label |
+The paper also mentions a magnetic module without a deck row.
+"""
+    assert module_deck_requests(
+        instruction, known_labware={"deep_plate", "cold_plate", "pcr_plate"},
+    ) == [
+        {"alias": "magnetic module", "expected_slots": [4],
+         "labware_load_names": ["deep_plate"]},
+        {"alias": "tempdeck", "expected_slots": [6],
+         "labware_load_names": ["cold_plate"]},
+        {"alias": "thermocycler", "expected_slots": [7, 8, 10, 11],
+         "labware_load_names": ["pcr_plate"]},
+    ]
+
+
+def test_module_preflight_accepts_only_exact_reported_footprint(tmp_path, monkeypatch):
+    simulator = tmp_path / "opentrons_simulate"
+    simulator.touch()
+    (tmp_path / "python").touch()
+    source = "| 4 | Magnetic Module GEN1 (`'magnetic module'`) | `deep_plate` |\n"
+    calls: list[dict] = []
+
+    def report(*args, **kwargs):
+        calls.append(json.loads(kwargs["input"]))
+        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps({
+            "magnetic module": {
+                "kind": "magnetic", "physical_model": "magneticModuleV1",
+                "occupied_slots": [4], "slot": 4,
+                "compatible_labware": ["deep_plate"],
+                "temperature_range_c": None, "lid_temperature_range_c": None,
+                "magnet_height_range_mm": [0, 20],
+            },
+        }))
+
+    from pybravo.evals.text2wetlab import trusted_catalog
+
+    monkeypatch.setattr(trusted_catalog.subprocess, "run", report)
+    facts = load_trusted_module_catalog(
+        source, simulator=simulator,
+        labware={"deep_plate": object()},
+    )
+    assert calls[0]["requests"][0]["expected_slots"] == [4]
+    assert facts["magnetic module"].allowed_slots == {4}
+    assert facts["magnetic module"].magnet_height_range_mm == (0, 20)
+    assert facts["magnetic module"].compatible_labware_load_names == {"deep_plate"}
+
+    def wrong_footprint(*args, **kwargs):
+        result = report(*args, **kwargs)
+        output = json.loads(result.stdout)
+        output["magnetic module"]["occupied_slots"] = [5]
+        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(output))
+
+    monkeypatch.setattr(trusted_catalog.subprocess, "run", wrong_footprint)
+    assert load_trusted_module_catalog(
+        source, simulator=simulator, labware={"deep_plate": object()},
+    ) == {}
 
 
 def test_exact_source_line_ids_reject_forged_evidence():

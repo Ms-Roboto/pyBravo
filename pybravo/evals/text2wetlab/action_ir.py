@@ -83,6 +83,11 @@ class Pause(_ActionBase):
     message: str = Field(min_length=1)
 
 
+class Comment(_ActionBase):
+    kind: Literal["comment"]
+    message: str = Field(min_length=1)
+
+
 class RefillTips(_ActionBase):
     kind: Literal["refill_tips"]
     pipette: str
@@ -125,7 +130,7 @@ class MagnetDisengage(_ActionBase):
 
 
 PrimitiveAction = Annotated[
-    Pickup | Drop | Stroke | Mix | Delay | Pause | RefillTips |
+    Pickup | Drop | Stroke | Mix | Delay | Pause | Comment | RefillTips |
     SetTemperature | SetBlockTemperature | SetLidTemperature | LidState |
     MagnetEngage | MagnetDisengage,
     Field(discriminator="kind"),
@@ -137,7 +142,7 @@ class WellSeries(_Strict):
 
     binding: str = Field(min_length=1)
     labware: str = Field(min_length=1)
-    mode: Literal["all", "column_anchors"]
+    mode: Literal["all", "column_anchors", "wells_in_columns"]
     columns: list[int] = Field(default_factory=list, max_length=48)
 
 
@@ -163,7 +168,7 @@ class ForEach(_ActionBase):
 
 
 Action = Annotated[
-    Pickup | Drop | Stroke | Mix | Delay | Pause | RefillTips |
+    Pickup | Drop | Stroke | Mix | Delay | Pause | Comment | RefillTips |
     SetTemperature | SetBlockTemperature | SetLidTemperature | LidState |
     MagnetEngage | MagnetDisengage | ForEach,
     Field(discriminator="kind"),
@@ -313,8 +318,10 @@ def _selector_bindings(
             raise ActionPlanError(f"{series_path} needs trusted ordered catalog wells.")
         if series.mode == "column_anchors" and not facts.multichannel_anchor_wells:
             raise ActionPlanError(f"{series_path} has no trusted full-column anchors.")
+        if series.mode == "wells_in_columns" and not series.columns:
+            raise ActionPlanError(f"{series_path} needs explicit model-selected columns.")
         selected = [well for well in facts.ordered_wells
-                    if series.mode == "all" or well in facts.multichannel_anchor_wells]
+                    if series.mode != "column_anchors" or well in facts.multichannel_anchor_wells]
         if series.columns:
             if (len(series.columns) != len(set(series.columns)) or
                     any(column < 1 for column in series.columns)):
@@ -599,7 +606,7 @@ def compile_actions(
     lid_state = {name: "unknown" for name, item in module_loads.items()
                  if trusted_modules[item.model].kind == "thermocycler"}
     for action, path in zip(expanded_actions, action_paths, strict=True):
-        if isinstance(action, (Delay, Pause)):
+        if isinstance(action, (Delay, Pause, Comment)):
             continue
         if isinstance(action, (SetTemperature, SetBlockTemperature,
                                SetLidTemperature, LidState, MagnetEngage,
@@ -729,6 +736,8 @@ def compile_actions(
             lines.append(f"    protocol.delay(seconds={action.seconds!r})")
         elif isinstance(action, Pause):
             lines.append(f"    protocol.pause({action.message!r})")
+        elif isinstance(action, Comment):
+            lines.append(f"    protocol.comment({action.message!r})")
         elif isinstance(action, (SetTemperature, SetBlockTemperature,
                                  SetLidTemperature, LidState, MagnetEngage,
                                  MagnetDisengage)):

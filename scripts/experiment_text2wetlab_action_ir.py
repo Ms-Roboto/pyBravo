@@ -26,6 +26,7 @@ if __package__ in {None, ""}:
 from pybravo.evals.text2wetlab.action_ir import (
     ActionPlanError,
     LabwareFacts,
+    ModuleFacts,
     PipetteFacts,
     SourceSpan,
     compile_actions,
@@ -33,7 +34,10 @@ from pybravo.evals.text2wetlab.action_ir import (
 from pybravo.evals.text2wetlab.adapter import ProtocolValidationError, validate_ot2_source
 from pybravo.evals.text2wetlab.geometry import labware_geometry_context
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
-from pybravo.evals.text2wetlab.trusted_catalog import load_trusted_catalog
+from pybravo.evals.text2wetlab.trusted_catalog import (
+    load_trusted_catalog,
+    load_trusted_module_catalog,
+)
 from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse, structured_json
 from scripts import evaluate_text2wetlab as runner
 from scripts.experiment_text2wetlab_science_patch import _check_candidate
@@ -53,18 +57,18 @@ _PLAN_SCHEMA: dict[str, Any] = {
 _SYSTEM = """You are the local OT-2 action planner. Return one JSON ActionPlan, never Python code, explanation, or a benchmark answer from memory. The user instruction and any supplied paper lines are the only evidence for experimental content. You must supply all reagent choices, labware and instrument selections, deck slots, volumes, well mappings, tip actions, waits, and module actions in execution order. The compiler does not invent or insert any experimental step. Cite at least one exact line ID in evidence_refs for every action, including every action inside a loop. Citations locate text; they do not excuse an unsupported experimental choice. If a choice is unspecified, make the narrowest workable assumption while preserving the fixed deck and inventory. Use only the read-only installed catalog names and wells below. Do not create a source reagent, position, or refill that the instruction does not allow.
 
 ActionPlan keys: labware, modules (optional), pipettes, actions.
-Labware item: id, load_name, exactly one of slot or module_id, optional label. Preserve every explicitly required deck label. Pipette item: id, model, mount (left/right), tip_rack_ids.
+Labware item: id, load_name, exactly one of slot or module_id, optional label. Preserve every explicitly required deck label. Module item: id, model (exact trusted catalog alias), slot for a one-slot module; omit slot for a fixed Thermocycler. Pipette item: id, model, mount (left/right), tip_rack_ids. Write deck slot numbers as JSON integers, not strings.
 Every action has kind and evidence_refs (array of provided line IDs). Supported actions:
 - pickup/drop: pipette
 - aspirate/dispense: pipette, labware, well, volume_ul
 - mix: pipette, labware, well, cycles, volume_ul
-- delay: seconds; pause: message
+- delay: seconds; pause: message (operator intervention); comment: message (record a non-pipetting step without stopping)
 - refill_tips: pipette, message (only when expressly permitted and the rack is exhausted)
 - set_temperature, set_block_temperature, set_lid_temperature: module, celsius; block may have hold_seconds
 - open_lid/close_lid: module; magnet_engage: module, height_from_base_mm; magnet_disengage: module
-- for_each: evidence_refs, either bindings (array of dictionaries mapping symbolic well names to actual well names) OR selector, and actions (ordered primitive actions). In a loop action, a well is exactly "$binding_name". A selector can use trusted catalog wells: {"kind":"catalog_wells","series":[{"binding":"well_name","labware":"labware_id","mode":"all" or "column_anchors","columns":[...] }],"relation":"zip" or "same_name"}. Choose only the wells named by the task; a selector over all plate wells is not a shortcut for a stated subset.
+- for_each: evidence_refs, either bindings (array of dictionaries mapping symbolic well names to actual well names) OR selector, and actions (ordered primitive actions). In a loop action, a well is exactly "$binding_name". A selector can use trusted catalog wells: {"kind":"catalog_wells","series":[{"binding":"well_name","labware":"labware_id","mode":"all" or "wells_in_columns" or "column_anchors","columns":[...] }],"relation":"zip" or "same_name"}. `wells_in_columns` visits every real well in only the model-named columns in column-major order and requires `columns`; use it for many single-channel wells. `column_anchors` visits one full eight-channel anchor per selected column; use it for multichannel strokes. Choose only the wells named by the task; a selector over all plate wells is not a shortcut for a stated subset. Represent repeated well transfers compactly with one for_each selector and a small action body, rather than copying the same action sequence dozens of times.
 
-One tip must be attached before liquid actions and dropped empty. Never dispense more than aspirated or exceed the smaller of pipette and tip capacities. Do not use a multichannel pipette on a 1-well reservoir or irregular rack. Do not cross-contaminate distinct samples. Count pickups before adding a refill action. A protocol's final reaction volume must equal its actual additions, including any premix. Output only the final coherent actions, not an exploratory attempt followed by a correction."""
+One tip must be attached before liquid actions and dropped empty. Never dispense more than aspirated or exceed the smaller of pipette and tip capacities. A multichannel pipette may use only labware wells listed by the trusted catalog as multichannel-compatible; a catalog-verified long trough can legitimately hold all eight tips in one well. Do not use multichannel on unlisted wells or across distinct samples. Count pickups before adding a refill action. A protocol's final reaction volume must equal its actual additions, including any premix. Output only the final coherent actions, not an exploratory attempt followed by a correction."""
 
 
 def _sha(value: str | bytes) -> str:
@@ -88,8 +92,9 @@ def _line_spans(instruction: str, paper: str | None) -> tuple[dict[str, SourceSp
 
 def _catalog_prompt(
     labware: dict[str, LabwareFacts], pipettes: dict[str, PipetteFacts],
+    modules: dict[str, ModuleFacts],
 ) -> str:
-    display = {"labware": {}, "pipettes": {}}
+    display = {"labware": {}, "pipettes": {}, "modules": {}}
     for name, facts in labware.items():
         display["labware"][name] = {
             "well_count": len(facts.wells),
@@ -98,7 +103,7 @@ def _catalog_prompt(
             "last_well": facts.ordered_wells[-1],
             "tiprack": facts.is_tiprack,
             "tip_capacity_ul": facts.tip_capacity_ul,
-            "multichannel_column_anchors": sorted(facts.multichannel_anchor_wells),
+            "multichannel_compatible_wells": sorted(facts.multichannel_anchor_wells),
             **({"all_wells": facts.ordered_wells} if len(facts.wells) <= 24 else {}),
         }
     for name, facts in pipettes.items():
@@ -106,6 +111,16 @@ def _catalog_prompt(
             "min_volume_ul": facts.min_volume_ul,
             "max_volume_ul": facts.max_volume_ul,
             "channels": facts.channels,
+        }
+    for name, facts in modules.items():
+        display["modules"][name] = {
+            "kind": facts.kind,
+            "fixed_occupied_slots": sorted(facts.fixed_occupied_slots),
+            "allowed_slots": sorted(facts.allowed_slots),
+            "compatible_labware": sorted(facts.compatible_labware_load_names),
+            "temperature_range_c": facts.temperature_range_c,
+            "lid_temperature_range_c": facts.lid_temperature_range_c,
+            "magnet_height_range_mm": facts.magnet_height_range_mm,
         }
     return json.dumps(display, ensure_ascii=False, sort_keys=True)
 
@@ -133,14 +148,14 @@ def _check_compiled_plan(
     spans: dict[str, SourceSpan], labware: dict[str, LabwareFacts],
     pipettes: dict[str, PipetteFacts], simulator: Path, task: str,
     task_dir: Path, dataset_root: Path | None, labware_dir: Path | None,
-    refill_authorized: bool,
+    refill_authorized: bool, modules: dict[str, ModuleFacts] | None = None,
 ) -> dict[str, Any]:
     """Compile first, then apply the existing independent pinned gates."""
     try:
         code = compile_actions(
             payload, labware_catalog=labware, pipette_catalog=pipettes,
             source_spans=spans, instruction=instruction, paper=paper,
-            refill_authorized=refill_authorized,
+            refill_authorized=refill_authorized, module_catalog=modules,
         )
     except (ActionPlanError, ValueError) as exc:
         return {"status": "action_plan_rejected", "detail": str(exc),
@@ -214,12 +229,17 @@ async def run_experiment(
     labware, pipettes = load_trusted_catalog(
         instruction, simulator=args.simulator, labware_dir=labware_dir,
     )
+    modules = load_trusted_module_catalog(
+        instruction, simulator=args.simulator, labware=labware,
+        labware_dir=labware_dir,
+    )
     trace: dict[str, Any] = {
         "task": args.task, "dataset": runner.DATASET, "revision": runner.REVISION,
         "instruction_sha256": _sha(raw_instruction),
         "paper_sha256": _sha(source_paper) if source_paper else None,
         "paper_excerpt_sha256": excerpt.excerpt_sha256 if excerpt else None,
         "catalog_load_names": sorted(labware), "catalog_pipette_names": sorted(pipettes),
+        "catalog_module_names": sorted(modules),
         "official_score": None,
     }
     (output / "instruction.md").write_bytes(raw_instruction)
@@ -233,7 +253,7 @@ async def run_experiment(
     messages = [
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": "Pinned task and scientific source lines:\n" + cited_lines
-         + "\n\nInstalled read-only OT-2 catalog:\n" + _catalog_prompt(labware, pipettes)},
+         + "\n\nInstalled read-only OT-2 catalog:\n" + _catalog_prompt(labware, pipettes, modules)},
     ]
     try:
         response = await completion(
@@ -260,7 +280,7 @@ async def run_experiment(
         spans=spans, labware=labware, pipettes=pipettes,
         simulator=args.simulator, task=args.task, task_dir=output,
         dataset_root=args.dataset_root, labware_dir=labware_dir,
-        refill_authorized="reset_tipracks()" in instruction,
+        refill_authorized="reset_tipracks()" in instruction, modules=modules,
     )
     trace.update(result)
     return trace
