@@ -96,3 +96,32 @@ async def test_saved_candidate_with_new_static_error_is_repaired_before_simulati
     assert result["status"] == "passed_local_gates"
     assert simulated == [output / "candidate_patch_1.py"]
     assert (output / "original_candidate.py").read_text() == invalid
+
+
+@pytest.mark.asyncio
+async def test_patch_runner_uses_expanded_local_output_budget(tmp_path, monkeypatch):
+    source = tmp_path / "candidate.py"
+    source.write_text(SOURCE)
+    instruction = tmp_path / "instruction.md"
+    instruction.write_text("Move 5 uL from A1 to A2.")
+    args = argparse.Namespace(
+        source=source, instruction=instruction, paper=None,
+        event_logger=tmp_path / "runlog.py", simulator=tmp_path / "opentrons_simulate",
+        labware_dir=None, output_dir=tmp_path / "experiment", max_attempts=1,
+        model_timeout=30, model_max_tokens=4096,
+    )
+
+    async def local_patch(messages, schema, *, config, **kwargs):
+        assert config.max_tokens == 4096
+        return StructuredResponse({"edits": [
+            {"start_line": 1, "end_line": 0, "replacement": "# Qwen simulator fix"},
+        ]}, {"model": "local-qwen"})
+
+    monkeypatch.setattr(experiment, "simulate_protocol", lambda path, **kwargs: (
+        SimulationResult("passed", "ok") if "Qwen simulator fix" in path.read_text()
+        else SimulationResult("failed", "baseline error")
+    ))
+    monkeypatch.setattr(experiment, "record_simulation_events", lambda *a, **k: EventLog([], {}))
+    monkeypatch.setattr(experiment, "structured_json", local_patch)
+    result = await experiment.run_experiment(args)
+    assert result["status"] == "passed_local_gates"

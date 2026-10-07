@@ -81,7 +81,7 @@ async def run_experiment(args: argparse.Namespace) -> dict:
         return trace
     current_source = source
     diagnostic = baseline_detail
-    config = replace(LocalLLMConfig.from_env(), max_tokens=2048,
+    config = replace(LocalLLMConfig.from_env(), max_tokens=getattr(args, "model_max_tokens", 4096),
                      timeout_s=args.model_timeout, retries=0, enable_thinking=False)
     for number in range(1, args.max_attempts + 1):
         attempt = {"number": number, "input_source_sha256": _digest(current_source),
@@ -189,9 +189,11 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--max-attempts", type=int, default=2)
     parser.add_argument("--model-timeout", type=int, default=120)
+    parser.add_argument("--model-max-tokens", type=int, default=4096)
     args = parser.parse_args()
-    if not 1 <= args.max_attempts <= 3 or not 1 <= args.model_timeout <= 300:
-        parser.error("Use 1–3 patch attempts and a 1–300 second model timeout.")
+    if (not 1 <= args.max_attempts <= 3 or not 1 <= args.model_timeout <= 300
+            or not 512 <= args.model_max_tokens <= 8192):
+        parser.error("Use 1–3 patch attempts, a 1–300 second timeout, and 512–8192 output tokens.")
     trace = asyncio.run(run_experiment(args))
     trace_path = args.output_dir / "patch_trace.json"
     trace_path.write_text(json.dumps(trace, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
