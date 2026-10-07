@@ -69,9 +69,11 @@ def _setup() -> dict:
         "initial_supplies": [
             {"labware": "source", "selection": "wells", "wells": ["A1"],
              "columns": [], "volume_ul": 10, "material_id": "stock",
+             "source_material_name": "stock",
              "evidence_refs": ["task.L1"]},
             {"labware": "target", "selection": "wells", "wells": ["B1"],
              "columns": [], "volume_ul": 5, "material_id": "existing",
+             "source_material_name": "liquid",
              "evidence_refs": ["task.L4"]},
         ],
     }
@@ -109,7 +111,7 @@ def test_setup_claims_need_exact_source_units_and_catalog_wells():
     assert _parsed_setup().initial_supplies[0].volume_ul == 10
     changed = _setup()
     changed["initial_supplies"][0]["volume_ul"] = 11
-    with pytest.raises(ActionPlanError, match="cited source lines"):
+    with pytest.raises(ActionPlanError, match="same cited"):
         parse_setup(changed, spans=_SPANS, instruction=_INSTRUCTION,
                     paper=None, labware_catalog=_LABWARE)
     changed = _setup()
@@ -117,6 +119,44 @@ def test_setup_claims_need_exact_source_units_and_catalog_wells():
     with pytest.raises(ActionPlanError, match="absent"):
         parse_setup(changed, spans=_SPANS, instruction=_INSTRUCTION,
                     paper=None, labware_catalog=_LABWARE)
+    changed = _setup()
+    changed["initial_supplies"][0]["volume_ul"] = 0
+    changed["initial_supplies"][0]["evidence_refs"] = ["task.L1"]
+    with pytest.raises(ActionPlanError, match="same cited"):
+        parse_setup(changed, spans=_SPANS, instruction=_INSTRUCTION,
+                    paper=None, labware_catalog=_LABWARE)
+    changed = _setup()
+    changed["initial_supplies"][0]["source_material_name"] = "buffer"
+    with pytest.raises(ActionPlanError, match="source material"):
+        parse_setup(changed, spans=_SPANS, instruction=_INSTRUCTION,
+                    paper=None, labware_catalog=_LABWARE)
+    changed = _setup()
+    changed["initial_supplies"][0]["volume_ul"] = 5
+    changed["initial_supplies"][0]["evidence_refs"] = ["task.L1", "task.L2"]
+    with pytest.raises(ActionPlanError, match="same cited"):
+        parse_setup(changed, spans=_SPANS, instruction=_INSTRUCTION,
+                    paper=None, labware_catalog=_LABWARE)
+
+
+def test_saved_setup_alias_is_narrow_and_source_coverage_is_not_certification():
+    original = _setup()
+    original["initial_supplies"][0]["labware_id"] = original["initial_supplies"][0].pop(
+        "labware"
+    )
+    canonical, changes = phased._canonicalize_setup_supply_keys(original)
+    assert changes == ["/initial_supplies/0/labware_id -> labware"]
+    assert "labware_id" in original["initial_supplies"][0]
+    assert canonical["initial_supplies"][0]["labware"] == "source"
+    canonical["initial_supplies"][0]["labware_id"] = "other"
+    with pytest.raises(ActionPlanError, match="both labware"):
+        phased._canonicalize_setup_supply_keys(canonical)
+    coverage = phased._setup_source_coverage(
+        _parsed_setup(), "[task.L1] Prepare stock.\n[task.L2] Transfer 5 uL.\n"
+        "[paper.L1] Incubate prepared reactions.\n"
+    )
+    assert coverage["status"] == "needs_review"
+    assert coverage["uncited_procedural_candidates"][0]["ref"] == "paper.L1"
+    assert coverage["scientific_completeness_verified"] is False
 
 
 def test_stage_merge_is_ordered_and_citations_are_scoped():
@@ -131,6 +171,15 @@ def test_stage_merge_is_ordered_and_citations_are_scoped():
     with pytest.raises(ActionPlanError, match="evidence scope"):
         parse_stage(bad, expected=setup.stages[0], spans=_SPANS,
                     instruction=_INSTRUCTION, paper=None)
+    paper = "Prepare the aliquot by transferring 5 uL."
+    spans, _ = one_shot._line_spans(_INSTRUCTION, paper)
+    paper_stage = setup.stages[0].model_copy(update={
+        "evidence_refs": ["task.L2", "paper.L1"],
+    })
+    with pytest.raises(ActionPlanError, match="paper evidence"):
+        parse_stage(_stage("first", "B1", "task.L2"),
+                    expected=paper_stage, spans=spans,
+                    instruction=_INSTRUCTION, paper=paper)
 
 
 def test_tip_handoff_is_global_across_stages():
@@ -186,6 +235,8 @@ def test_multichannel_resolves_true_plate_columns_and_centered_trough():
             well_capacity_ul={f"{row}1": 10 for row in "ABCDEFGH"},
         ),
     }
+    instruction = "Load 10 uL of stock in trough A1.\n"
+    spans, _ = one_shot._line_spans(instruction, None)
     raw = {"labware": [
         {"id": "trough", "load_name": "trough", "slot": 1, "label": "trough"},
         {"id": "plate", "load_name": "plate", "slot": 2, "label": "plate"},
@@ -193,8 +244,9 @@ def test_multichannel_resolves_true_plate_columns_and_centered_trough():
                                "evidence_refs": ["task.L1"]}],
            "initial_supplies": [{"labware": "trough", "selection": "all",
                                  "volume_ul": 10, "material_id": "stock",
+                                 "source_material_name": "stock",
                                  "evidence_refs": ["task.L1"]}]}
-    setup = parse_setup(raw, spans=_SPANS, instruction=_INSTRUCTION,
+    setup = parse_setup(raw, spans=spans, instruction=instruction,
                         paper=None, labware_catalog=catalog)
     events = [
         {"kind": "pick", "instrument": "multi", "channels": 8},
@@ -293,7 +345,8 @@ async def test_two_mocked_local_calls_checkpoint_each_stage(tmp_path, monkeypatc
 
     monkeypatch.setattr(phased, "_prefix_gate", mock_gate)
     monkeypatch.setattr(phased, "_check_compiled_plan", lambda *a, **k:
-                        {"status": "mechanical_gates_passed", "official_score": None})
+                        {"status": "mechanical_gates_passed", "official_score": None,
+                         "local_rubric_status": "supported"})
     args = argparse.Namespace(task="split-200ul-two-wells", simulator=simulator,
                               output_dir=output, dataset_root=None, paper_override=None,
                               model_timeout=30, max_output_tokens=1024)
@@ -361,4 +414,71 @@ async def test_stage_call_limit_stops_after_setup(tmp_path, monkeypatch):
                               max_output_tokens=1024, max_stages=1)
     trace = await phased.run_experiment(args, completion=mock_model)
     assert trace["status"] == "setup_stage_limit_exceeded"
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_verified_saved_model_setup_skips_repeated_setup_call(tmp_path, monkeypatch):
+    simulator = tmp_path / "simulator"
+    simulator.touch()
+    output = tmp_path / "new_run"
+    previous_dir = tmp_path / "previous"
+    previous_dir.mkdir()
+    saved = previous_dir / "qwen_setup.json"
+    saved.write_text(json.dumps(_setup()))
+    previous_trace = {
+        "task": "split-200ul-two-wells", "revision": phased.runner.REVISION,
+        "instruction_sha256": phased._sha(_INSTRUCTION),
+        "paper_sha256": None, "paper_excerpt_sha256": None,
+        "setup_model": {"raw_payload_sha256": phased._sha(
+            json.dumps(_setup(), sort_keys=True))},
+    }
+    (previous_dir / "phased_action_ir_trace.json").write_text(
+        json.dumps(previous_trace)
+    )
+    monkeypatch.setattr(phased.runner, "_source_bytes", lambda task, name, root:
+                        _INSTRUCTION.encode() if name == "instruction.md" else None)
+    monkeypatch.setattr(phased, "load_trusted_catalog", lambda *a, **k:
+                        (_LABWARE, _PIPETTES))
+    monkeypatch.setattr(phased, "load_trusted_module_catalog", lambda *a, **k: {})
+    monkeypatch.setattr(phased.LocalLLMConfig, "from_env", LocalLLMConfig)
+    calls = 0
+
+    async def mock_model(messages, schema, **kwargs):
+        nonlocal calls
+        calls += 1
+        return StructuredResponse(
+            payload=_stage("first", "B1", "task.L2") if calls == 1
+            else _stage("second", "B2", "task.L3"),
+            metadata={"model": "mock"},
+        )
+
+    def mock_gate(setup, stages, **kwargs):
+        return {"status": "prefix_passed"}, {
+            "tips": {}, "materials": {}, "completed_stage_ids":
+            [item.stage_id for item in stages], "event_count": len(stages),
+        }
+
+    monkeypatch.setattr(phased, "_prefix_gate", mock_gate)
+    monkeypatch.setattr(phased, "_check_compiled_plan", lambda *a, **k:
+                        {"status": "mechanical_gates_passed", "official_score": None,
+                         "local_rubric_status": "supported"})
+    args = argparse.Namespace(task="split-200ul-two-wells", simulator=simulator,
+                              output_dir=output, dataset_root=None,
+                              paper_override=None, saved_setup=saved,
+                              model_timeout=30, max_output_tokens=1024,
+                              max_stages=16, max_new_stages=1)
+    trace = await phased.run_experiment(args, completion=mock_model)
+    assert trace["status"] == "partial_prefix_passed"
+    assert calls == 1
+    assert trace["remaining_stage_ids"] == ["second"]
+    assert trace["setup_model"]["reused_raw_payload_path"] == str(saved.resolve())
+    assert trace["setup_source_coverage"]["scientific_completeness_verified"] is False
+
+    previous_trace["instruction_sha256"] = "tampered"
+    (previous_dir / "phased_action_ir_trace.json").write_text(
+        json.dumps(previous_trace)
+    )
+    trace = await phased.run_experiment(args, completion=mock_model)
+    assert trace["status"] == "saved_setup_rejected"
     assert calls == 1

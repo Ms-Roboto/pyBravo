@@ -67,7 +67,9 @@ prefix stops the experiment; the raw Qwen response and failure remain in the
 output directory. The complete merged plan then runs the existing pinned lint,
 simulator, event, and local science gates. `official_score` is always null;
 Harbor's private scoring is not run. This path never controls hardware or
-changes the production generator.
+changes the production generator. The setup trace also lists procedural-looking
+source lines omitted from stage citations for review; citations alone never
+certify scientific completeness.
 
 ```sh
 .venv/bin/python scripts/experiment_text2wetlab_phased_action_ir.py \
@@ -75,6 +77,10 @@ changes the production generator.
   --simulator /path/to/opentrons_simulate \
   --output-dir /tmp/text2wetlab-rna-phased
 ```
+
+An exact earlier model setup can be resumed with `--saved-setup
+/path/to/qwen_setup.json` only when its sibling trace matches the pinned task,
+source digests, and raw response digest. `--max-stages` caps further local calls.
 
 ## Optional per-well material ledger
 

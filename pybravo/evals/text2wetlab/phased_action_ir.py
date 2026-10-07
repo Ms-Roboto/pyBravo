@@ -55,6 +55,7 @@ class InitialSupply(_Strict):
     wells: list[str] = Field(default_factory=list, max_length=384)
     volume_ul: float | None = Field(default=None, ge=0)
     material_id: str = Field(min_length=1)
+    source_material_name: str = Field(min_length=1)
     evidence_refs: list[str] = Field(min_length=1, max_length=20)
 
 
@@ -74,6 +75,24 @@ class StageDraft(_Strict):
 
 _QUANTITY = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*(µl|μl|ul|ml)\b", re.I)
 _COLUMN = re.compile(r"([A-Z]+)([1-9][0-9]*)\Z")
+
+
+def _source_binds_supply(
+    quote: str, *, item: LabwareLoad, supply: InitialSupply, well: str,
+) -> bool:
+    named_labware = any(
+        re.search(rf"(?<![\w]){re.escape(name)}(?![\w])", quote, re.I)
+        for name in (item.label, item.id, item.load_name) if name is not None
+    )
+    named_material = supply.source_material_name.casefold() in quote.casefold()
+    named_well = re.search(rf"(?<![A-Za-z0-9]){re.escape(well)}(?![A-Za-z0-9])",
+                           quote, re.I) is not None
+    if supply.selection == "all" and re.search(
+        r"\b(?:all|every|each|entire)\b.*\b(?:well|plate|rack)\b|"
+        r"\bempty\s+at\s+the\s+start\b", quote, re.I,
+    ):
+        named_well = True
+    return named_labware and named_well and named_material
 
 
 def _quotes(
@@ -155,23 +174,37 @@ def parse_setup(
             if (supply.volume_ul is not None and capacity is not None and
                     supply.volume_ul > capacity):
                 raise ActionPlanError("An initial supply exceeds trusted well capacity.")
-        if supply.volume_ul is not None:
-            quantities = [float(number) * (1000 if unit.lower() == "ml" else 1)
-                          for quote in quotes for number, unit in _QUANTITY.findall(quote)]
-            if not any(math.isclose(supply.volume_ul, amount, abs_tol=1e-6)
-                       for amount in quantities):
-                # A citation that merely contains a number in another unit or
-                # names an unrelated amount cannot establish initial supply.
+            bound = [quote for ref, quote in zip(supply.evidence_refs, quotes, strict=True)
+                     if spans[ref].source == "instruction" and _source_binds_supply(
+                         quote, item=item, supply=supply, well=well,
+                     )]
+            if not bound:
                 raise ActionPlanError(
-                    "A claimed initial volume must occur with µL/mL units in its cited source lines."
+                    f"Initial supply {item.id}/{well} needs one cited line naming "
+                    "that labware, well, and source material."
                 )
+            if supply.volume_ul is not None:
+                quantities = [float(number) * (1000 if unit.lower() == "ml" else 1)
+                              for quote in bound for number, unit in _QUANTITY.findall(quote)]
+                cited_empty = supply.volume_ul == 0 and any(
+                    re.search(r"\b(?:empty|blank|unfilled)\b", quote, re.I)
+                    for quote in bound
+                )
+                if not cited_empty and not any(
+                    math.isclose(supply.volume_ul, amount, abs_tol=1e-6)
+                    for amount in quantities
+                ):
+                    raise ActionPlanError(
+                        f"Initial volume for {item.id}/{well} must occur on the "
+                        "same cited material/well/labware line with µL/mL units, "
+                        "or be explicitly empty."
+                    )
     return setup
 
 
 def parse_stage(
     raw: dict[str, Any], *, expected: StageSpec,
     spans: Mapping[str, SourceSpan], instruction: str, paper: str | None,
-    shared_refs: Sequence[str] = (),
 ) -> StageDraft:
     try:
         stage = StageDraft.model_validate(raw)
@@ -179,7 +212,7 @@ def parse_stage(
         raise ActionPlanError(str(exc)) from exc
     if stage.stage_id != expected.id:
         raise ActionPlanError(f"Expected stage {expected.id!r}, received {stage.stage_id!r}.")
-    allowed = set(expected.evidence_refs) | set(shared_refs)
+    allowed = set(expected.evidence_refs)
     if not set(stage.evidence_refs) <= allowed:
         raise ActionPlanError("Stage cites lines outside its setup-approved evidence scope.")
     _quotes(stage.evidence_refs, spans=spans, instruction=instruction, paper=paper)
@@ -192,6 +225,13 @@ def parse_stage(
                 )
             _quotes(item.evidence_refs, spans=spans,
                     instruction=instruction, paper=paper)
+            if (any(ref.startswith("paper.") for ref in expected.evidence_refs)
+                    and item.kind not in {"pickup", "drop", "refill_tips"}
+                    and not any(ref.startswith("paper.") for ref in item.evidence_refs)):
+                raise ActionPlanError(
+                    "A paper-grounded stage's process action must cite its "
+                    "stage-specific paper evidence."
+                )
     return stage
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -58,7 +59,22 @@ _SETUP_SCHEMA: dict[str, Any] = {
         "modules": {"type": "array", "items": {"type": "object"}},
         "pipettes": {"type": "array", "items": {"type": "object"}},
         "stages": {"type": "array", "items": {"type": "object"}},
-        "initial_supplies": {"type": "array", "items": {"type": "object"}},
+        "initial_supplies": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "labware": {"type": "string"},
+                "selection": {"type": "string"},
+                "columns": {"type": "array", "items": {"type": "integer"}},
+                "wells": {"type": "array", "items": {"type": "string"}},
+                "volume_ul": {"type": ["number", "null"]},
+                "material_id": {"type": "string"},
+                "source_material_name": {"type": "string"},
+                "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["labware", "selection", "volume_ul", "material_id",
+                         "source_material_name", "evidence_refs"],
+            "additionalProperties": False,
+        }},
     },
     "required": ["labware", "pipettes", "stages", "initial_supplies"],
     "additionalProperties": False,
@@ -77,7 +93,7 @@ _STAGE_SCHEMA: dict[str, Any] = {
 
 _SETUP_SYSTEM = """You are the local OT-2 scientific planner. Author only the JSON setup and an ordered outline of bounded stages; do not write Python, protocol actions, or final code in this call. Use the pinned task and cited scientific source lines, plus the installed read-only OT-2 catalog. The setup must include every fixed deck item, compatible module and pipette, and installed tip rack. Preserve explicit deck labels. Stage IDs must be unique snake_case; each stage has id, a concise goal, and exact evidence_refs (line IDs) covering every scientific requirement of that stage. Put sample loading before any treatment, and split a long procedure into small complete stages. Avoid one enormous stage. The number and sequence of stages come from the source; no downstream code inserts missing work.
 
-Return keys labware, modules, pipettes, stages, initial_supplies. Labware: id, load_name, exactly one of integer slot or module_id, optional label. Module: id, exact catalog model, and slot for non-fixed modules only. Pipette: id, model, mount, tip_rack_ids. Stage: id, goal, evidence_refs. Optional initial-supply record: labware ID, selection ('all', 'wells_in_columns', or 'wells'), columns or wells as appropriate, volume_ul per selected well or null when unmeasured, material_id, evidence_refs. A non-null initial volume needs the exact amount and units in its cited source lines; do not invent starting liquid. Unknown volume is null. Source claims are audited and remain model-authored, not a hardware reading. Return no unsupported labware, reagent, refill, or sample."""
+Return keys labware, modules, pipettes, stages, initial_supplies. Labware: id, load_name, exactly one of integer slot or module_id, optional label. Module: id, exact catalog model, and slot for non-fixed modules only. Pipette: id, model, mount, tip_rack_ids. Stage: id, goal, evidence_refs. Optional initial-supply record: key `labware` (the loaded labware ID), selection ('all', 'wells_in_columns', or 'wells'), columns or wells as appropriate, volume_ul per selected well or null when unmeasured, material_id, source_material_name, evidence_refs. `source_material_name` must quote verbatim material words on the cited task line that also names the exact labware and each selected well. A positive initial volume needs the exact amount and units on that same line; a zero needs the same line to say that well starts empty. Split different materials into different records. Do not invent starting liquid. Unknown volume is null. Source claims are audited and remain model-authored, not a hardware reading. Return no unsupported labware, reagent, refill, or sample."""
 
 _STAGE_SYSTEM = """You are authoring exactly one bounded, ordered ActionPlan stage for a pinned OT-2 task. Return only JSON with stage_id, evidence_refs, actions. Every action, including every action in a loop, must cite exact source line IDs in evidence_refs. Use only the stage-specific paper lines and task lines supplied below; do not invent experimental steps, wells, reagent, volumes, or refills. The completed prefix's state and inventory are authoritative observations. If an absolute source volume is unknown, do not claim it is sufficient. A stage must finish with no tip attached and no liquid held. Complete the stage goal before the next stage; do not repeat earlier actions.
 
@@ -93,6 +109,57 @@ def _model_record(response: StructuredResponse, payload_path: Path) -> dict[str,
         "model": response.metadata.get("model"),
         "elapsed_s": response.metadata.get("elapsed_s"),
         "usage": response.metadata.get("usage"),
+    }
+
+
+def _canonicalize_setup_supply_keys(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Normalize only one unambiguous name for a loaded-labware reference."""
+    normalized = json.loads(json.dumps(payload))
+    changes: list[str] = []
+    supplies = normalized.get("initial_supplies")
+    if not isinstance(supplies, list):
+        return normalized, changes
+    for index, item in enumerate(supplies):
+        if not isinstance(item, dict) or "labware_id" not in item:
+            continue
+        if "labware" in item:
+            raise ActionPlanError(
+                f"/initial_supplies/{index} supplies both labware and labware_id."
+            )
+        item["labware"] = item.pop("labware_id")
+        changes.append(f"/initial_supplies/{index}/labware_id -> labware")
+    return normalized, changes
+
+
+_PROCESS_WORDS = re.compile(
+    r"\b(?:add(?:ed|ing)?|transfer(?:red|ring)?|mix(?:ed|ing)?|incubat\w*|"
+    r"heat(?:ed|ing)?|cool(?:ed|ing)?|wash(?:ed|ing)?|elut\w*|centrifug\w*|"
+    r"purif\w*|extract\w*|digest\w*|amplif\w*|cycl\w*|transform\w*|"
+    r"recover\w*|seal(?:ed|ing)?|prepar\w*)\b", re.I,
+)
+
+
+def _setup_source_coverage(setup: PhasedSetup, cited_lines: str) -> dict[str, Any]:
+    """Report uncited procedural-looking lines; never infer or insert stages."""
+    cited = {ref for stage in setup.stages for ref in stage.evidence_refs}
+    candidates: list[dict[str, str]] = []
+    total = 0
+    for line in cited_lines.splitlines():
+        matched = re.match(r"^\[([^]]+)\] (.*)$", line)
+        if matched is None:
+            continue
+        total += 1
+        ref, quote = matched.groups()
+        if ref not in cited and _PROCESS_WORDS.search(quote):
+            candidates.append({"ref": ref, "quote": quote[:300]})
+    return {
+        "status": "needs_review" if candidates else "citation_coverage_only",
+        "stage_cited_line_count": len(cited),
+        "source_line_count": total,
+        "uncited_procedural_candidate_count": len(candidates),
+        "uncited_procedural_candidates": candidates[:60],
+        "scientific_completeness_verified": False,
+        "note": "Line citations do not prove the stage outline covers every procedure step.",
     }
 
 
@@ -179,7 +246,7 @@ def _prefix_gate(
                "completed_stage_ids": [stage.stage_id for stage in stages],
                "event_count": len(events)}
     result = {
-        "status": "prefix_passed",
+        "status": "prefix_material_review_required" if ledger_issues else "prefix_passed",
         "protocol_path": str(protocol_path), "protocol_sha256": _sha(code),
         "simulator": {"status": simulation["status"]},
         "event_safety": safety,
@@ -246,6 +313,7 @@ async def run_experiment(
         "catalog_pipette_names": sorted(pipettes),
         "catalog_module_names": sorted(modules),
         "stages": [], "official_score": None,
+        "scientific_completeness_verified": False,
     }
     config = replace(LocalLLMConfig.from_env(), timeout_s=args.model_timeout,
                      max_tokens=args.max_output_tokens, retries=0,
@@ -253,18 +321,52 @@ async def run_experiment(
     if config.base_url != "http://sparky.local:8000/v1":
         raise ValueError("This experiment permits only local Qwen at sparky.local:8000")
     catalog_text = _catalog_prompt(labware, pipettes, modules)
+    saved_setup = getattr(args, "saved_setup", None)
+    if saved_setup is not None:
+        saved_path = saved_setup.expanduser().resolve()
+        source_trace = saved_path.parent / "phased_action_ir_trace.json"
+        if not source_trace.is_file():
+            trace.update(status="saved_setup_rejected", detail="Source trace is missing.")
+            return trace
+        previous = json.loads(source_trace.read_text(encoding="utf-8"))
+        setup_payload = json.loads(saved_path.read_text(encoding="utf-8"))
+        if (previous.get("task") != args.task or previous.get("revision") != runner.REVISION
+                or previous.get("instruction_sha256") != trace["instruction_sha256"]
+                or previous.get("paper_sha256") != trace["paper_sha256"]
+                or previous.get("paper_excerpt_sha256") != trace["paper_excerpt_sha256"]
+                or (previous.get("setup_model") or {}).get("raw_payload_sha256") !=
+                   _sha(json.dumps(setup_payload, sort_keys=True))):
+            trace.update(status="saved_setup_rejected",
+                         detail="Saved model setup does not match the pinned task and sources.")
+            return trace
+        trace["setup_model"] = {
+            "reused_raw_payload_path": str(saved_path),
+            "raw_payload_sha256": _sha(json.dumps(setup_payload, sort_keys=True)),
+            "source_trace_path": str(source_trace),
+        }
+        (output / "qwen_setup.json").write_text(
+            json.dumps(setup_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    else:
+        try:
+            setup_response = await completion([
+                {"role": "system", "content": _SETUP_SYSTEM},
+                {"role": "user", "content": "Pinned source lines:\n" + cited_lines
+                 + "\n\nInstalled catalog:\n" + catalog_text},
+            ], _SETUP_SCHEMA, config=config, schema_name="ot2_phased_setup")
+        except Exception as exc:
+            trace.update(status="setup_model_failed", detail=f"{type(exc).__name__}: {exc}")
+            return trace
+        setup_payload = setup_response.payload
+        trace["setup_model"] = _model_record(setup_response, output / "qwen_setup.json")
+    canonical, conversions = _canonicalize_deck_slots(setup_payload)
     try:
-        setup_response = await completion([
-            {"role": "system", "content": _SETUP_SYSTEM},
-            {"role": "user", "content": "Pinned source lines:\n" + cited_lines
-             + "\n\nInstalled catalog:\n" + catalog_text},
-        ], _SETUP_SCHEMA, config=config, schema_name="ot2_phased_setup")
-    except Exception as exc:
-        trace.update(status="setup_model_failed", detail=f"{type(exc).__name__}: {exc}")
+        canonical, key_conversions = _canonicalize_setup_supply_keys(canonical)
+    except ActionPlanError as exc:
+        trace.update(status="setup_rejected", detail=str(exc))
         return trace
-    trace["setup_model"] = _model_record(setup_response, output / "qwen_setup.json")
-    canonical, conversions = _canonicalize_deck_slots(setup_response.payload)
-    trace["setup_syntax_canonicalizations"] = conversions
+    trace["setup_syntax_canonicalizations"] = [*conversions, *key_conversions]
     try:
         setup = parse_setup(canonical, spans=spans, instruction=instruction,
                             paper=paper_for_model, labware_catalog=labware)
@@ -291,6 +393,7 @@ async def run_experiment(
         json.dumps(setup.model_dump(), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    trace["setup_source_coverage"] = _setup_source_coverage(setup, cited_lines)
     accepted: list[StageDraft] = []
     handoff: dict[str, Any] = {
         "tips": tip_handoff(merge_prefix(setup, []), labware_catalog=labware,
@@ -298,7 +401,6 @@ async def run_experiment(
         "materials": {"status": "initial volumes are model claims or unknown; no actions yet"},
         "completed_stage_ids": [], "event_count": 0,
     }
-    task_refs = [ref for ref in spans if ref.startswith("task.")]
     task_lines = "\n".join(line for line in cited_lines.splitlines()
                            if line.startswith("[task."))
     for index, spec in enumerate(setup.stages, 1):
@@ -342,7 +444,6 @@ async def run_experiment(
             draft = parse_stage(
                 stage_response.payload, expected=spec, spans=spans,
                 instruction=instruction, paper=paper_for_model,
-                shared_refs=task_refs,
             )
         except (ActionPlanError, ValueError) as exc:
             stage_trace.update(status="source_or_shape_rejected", detail=str(exc))
@@ -365,6 +466,16 @@ async def run_experiment(
         (stage_dir / "state_handoff.json").write_text(
             json.dumps(handoff, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
         )
+        max_new = getattr(args, "max_new_stages", None)
+        if max_new is not None and len(accepted) >= max_new:
+            prefix = merge_prefix(setup, accepted).model_dump()
+            (output / "model_authored_prefix.json").write_text(
+                json.dumps(prefix, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            trace["status"] = "partial_prefix_passed"
+            trace["remaining_stage_ids"] = [item.id for item in setup.stages[len(accepted):]]
+            return trace
     merged = merge_prefix(setup, accepted).model_dump()
     (output / "model_authored_action_plan.json").write_text(
         json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
@@ -380,7 +491,21 @@ async def run_experiment(
         refill_authorized="reset_tipracks()" in instruction,
     )
     trace["final"] = final
-    trace["status"] = final["status"]
+    material_review = any(
+        stage.get("material_status") == "needs_review" for stage in trace["stages"]
+    )
+    coverage_review = trace["setup_source_coverage"]["status"] == "needs_review"
+    rubric_review = final.get("local_rubric_status") != "supported"
+    trace["status"] = (
+        "science_review_required"
+        if final["status"] == "mechanical_gates_passed"
+        and (material_review or coverage_review or rubric_review)
+        else final["status"]
+    )
+    trace["review_reasons"] = {
+        "material": material_review, "source_coverage": coverage_review,
+        "local_rubric": rubric_review,
+    }
     return trace
 
 
@@ -391,16 +516,22 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--dataset-root", type=Path)
     parser.add_argument("--paper-override", type=Path)
+    parser.add_argument("--saved-setup", type=Path,
+                        help="Reuse an exact local-Qwen setup with a matching source trace")
     parser.add_argument("--model-timeout", type=int, default=180)
     parser.add_argument("--max-output-tokens", type=int, default=8192)
     parser.add_argument("--max-stages", type=int, default=8,
                         help="Hard cap on model-authored stages and subsequent local calls")
+    parser.add_argument("--max-new-stages", type=int,
+                        help="Stop after this many accepted stage calls and save the partial prefix")
     args = parser.parse_args()
     if (not args.simulator.is_file() or not 1 <= args.model_timeout <= 300
             or not 512 <= args.max_output_tokens <= 16000
-            or not 1 <= args.max_stages <= 16):
+            or not 1 <= args.max_stages <= 16
+            or (args.max_new_stages is not None and
+                not 1 <= args.max_new_stages <= args.max_stages)):
         parser.error("Provide a simulator, 1–300 s timeout, 512–16000 output tokens, "
-                     "and 1–16 maximum stages")
+                     "and bounded stage counts")
     try:
         trace = asyncio.run(run_experiment(args))
     except (OSError, RuntimeError, ValueError) as exc:
