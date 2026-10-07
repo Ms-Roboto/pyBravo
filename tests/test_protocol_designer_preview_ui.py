@@ -29,6 +29,7 @@ def test_compiled_preview_is_transient_read_only_and_rejects_unsafe_payloads(tmp
             "isCompiledProtocolPreviewTab",
             "isProtocolDraftTab",
             "configureWorkflowGraph",
+            "labelCompiledProtocolPreviewNodes",
             "displayCompiledSimulationPreview",
         )
     )
@@ -54,8 +55,8 @@ const workflow={id:'stored-id-must-not-survive',name:'Four source transfer',
   protocol_compiled_preview:true,protocol_session_id:'session-1',protocol_revision:4,
   deck:{'1':[{material_id:'tips-4'}]},graph:{nodes:[
     {id:1,type:'flow/Start',properties:{},pos:[0,0],size:[100,50]},
-    {id:2,type:'liquid/Aspirate',properties:{volume:5,_source_citation:{paragraph_id:'p1'}},pos:[0,100],size:[200,100]},
-    {id:3,type:'liquid/Dispense',properties:{volume:5},pos:[0,220],size:[200,100]},
+    {id:2,type:'liquid/Aspirate',title:'Transfer every source well',properties:{volume:5,location:6,anchor:'A1',_source_citation:{paragraph_id:'p1'}},pos:[0,100],size:[200,100]},
+    {id:3,type:'liquid/Dispense',title:'Transfer every source well',properties:{volume:5,location:5,anchor:'B2'},pos:[0,220],size:[200,100]},
   ]}};
 const preview={status:'simulation_only',session_id:'session-1',revision:4,
   read_only:true,executable:false,approved:false};
@@ -69,6 +70,11 @@ assert.equal(isProtocolDraftTab(tab),true,'Existing Designer action guards must 
 assert.deepEqual(tab.deckConfig,workflow.deck);
 assert.deepEqual(tab.graph.getNodeById(2).properties,workflow.graph.nodes[1].properties,
   'LiteGraph constructor defaults must not contaminate the compiled graph');
+assert.equal(tab.graph.getNodeById(2).title,'Aspirate · 5 µL · slot 6 · A1');
+assert.equal(tab.graph.getNodeById(3).title,'Dispense · 5 µL · slot 5 · B2');
+assert.equal(tab.graph.getNodeById(2)._protocolPreviewOriginalTitle,'Transfer every source well');
+assert.equal(workflow.graph.nodes[1].title,'Transfer every source well',
+  'The backend compiler payload must retain its original title');
 for (const bad of [
   {...preview,executable:true},
   {...preview,approved:true},
@@ -76,6 +82,63 @@ for (const bad of [
   {...preview,revision:5},
 ]) assert.throws(()=>displayCompiledSimulationPreview({workflow,preview:bad}),/safe, compiled/);
 assert.equal(openTabs.length,2,'Rejected payloads cannot create tabs');
+"""
+    )
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_preview_canvas_starts_with_readable_nodes_below_banner(tmp_path):
+    html = (ROOT / "frontend" / "designer.html").read_text()
+    script = tmp_path / "preview-framing.cjs"
+    script.write_text(
+        """
+const assert=require('node:assert/strict');
+const banner={hidden:false,getBoundingClientRect(){return {bottom:180};}};
+const document={getElementById(id){assert.equal(id,'protocol-draft-banner');return banner;}};
+"""
+        + _function(html, "frameProtocolPreviewGraph")
+        + """
+const canvas={canvas:{width:320,height:450,getBoundingClientRect(){return {top:70};}},
+  ds:{},resize(){},setDirty(){this.redrawn=true;}};
+const nodes=[
+  {pos:[0,100],size:[230,130]},
+  {pos:[9100,100],size:[230,130]},
+];
+frameProtocolPreviewGraph(canvas,nodes,.85);
+const [x,y]=canvas.ds.offset;
+assert.ok(canvas.ds.scale>=.85,'First nodes should open at readable zoom');
+assert.equal(x + nodes[0].pos[0]*canvas.ds.scale,25);
+assert.equal(y + nodes[0].pos[1]*canvas.ds.scale,180,
+  'First node must be visible below the banner, not shifted off-screen');
+assert.ok(x + (nodes[0].pos[0]+nodes[0].size[0])*canvas.ds.scale < canvas.canvas.width,
+  'First complete operation should fit horizontally');
+assert.equal(canvas.redrawn,true);
+"""
+    )
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_read_only_preview_nodes_remain_inspectable(tmp_path):
+    html = (ROOT / "frontend" / "designer.html").read_text()
+    script = tmp_path / "preview-selection.cjs"
+    script.write_text(
+        """
+const assert=require('node:assert/strict');
+const node={id:2,type:'liquid/Aspirate',properties:{volume:5}};
+let preview=true,rendered=null,query=null;
+const designerState={graphCanvas:{convertEventToCanvasOffset(event){return [event.clientX-20,event.clientY-30];}},
+  graph:{getNodeOnPos(x,y){query=[x,y];return x===100&&y===200?node:null;}}};
+function isProtocolDraftTab(){return preview;}
+function renderPropertiesPanel(value){rendered=value;}
+"""
+        + _function(html, "inspectReadonlyProtocolNode")
+        + """
+inspectReadonlyProtocolNode({clientX:120,clientY:230});
+assert.deepEqual(query,[100,200]);
+assert.equal(rendered,node);
+preview=false;rendered='unchanged';
+inspectReadonlyProtocolNode({clientX:120,clientY:230});
+assert.equal(rendered,'unchanged','Ordinary Designer selection still uses LiteGraph');
 """
     )
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)

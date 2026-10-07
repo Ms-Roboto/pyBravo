@@ -704,6 +704,7 @@ body {
 .protocol-draft-banner { position:absolute; top:10px; left:12px; right:12px; z-index:5; border:1px solid var(--btn-primary-border); border-radius:5px; padding:10px 12px; background:var(--bg-panel); font-size:11px; line-height:1.5; color:var(--text); }
 .protocol-draft-banner strong { color:var(--accent); margin-right:8px; }
 .protocol-draft-banner a { color:var(--accent); white-space:nowrap; }
+body.protocol-compiled-preview .protocol-draft-banner { font-size:10px; line-height:1.35; padding:8px 10px; }
 body.protocol-preview-active .left-panel { display:flex; }
 body.protocol-preview-active #section-tasks { display:none; }
 body.protocol-preview-active #section-deck .deck-cell { pointer-events:none; }
@@ -716,6 +717,7 @@ body.protocol-preview-active #viewport-float { display:none; }
 .protocol-review-property strong { display:block; color:var(--text-dim); margin-bottom:4px; }
 @media(max-width:1100px) { body.protocol-chat-open .left-panel { display:none; } .protocol-chat-panel { width:320px; } }
 @media(max-width:760px) { .protocol-chat-panel { position:absolute; top:0; bottom:0; left:0; z-index:30; width:min(350px,90vw); max-width:90vw; box-shadow:8px 0 24px #0005; } .main { position:relative; } }
+@media(max-width:760px) { body.protocol-compiled-preview .left-panel { width:140px; min-width:140px; } body.protocol-compiled-preview .right-panel { width:180px; min-width:180px; } }
 
 </style>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/css/litegraph.css">
@@ -3958,6 +3960,9 @@ function initGraph() {
     graphCanvas.onNodeDeselected = function() {
         renderPropertiesPanel(null);
     };
+    // LiteGraph's read_only flag also suppresses onNodeSelected. Let a
+    // preview inspect node details without enabling drag, edits, or execution.
+    canvasEl.addEventListener('click', inspectReadonlyProtocolNode);
 
     // Drag-reparenting: when the user drops a non-Frame node inside an
     // expanded Frame's body, join it to that Frame; when dropped outside
@@ -4672,10 +4677,15 @@ function renderPropertiesPanel(node) {
         const note = document.createElement('p');
         note.className = 'protocol-review-property';
         note.textContent = 'Compiled simulation preview · read only. These settings are not approved for hardware use.';
+        const planStep = document.createElement('p');
+        planStep.className = 'protocol-review-property';
+        planStep.textContent = node._protocolPreviewOriginalTitle ? 'Plan step: ' + node._protocolPreviewOriginalTitle : '';
         const details = document.createElement('pre');
         details.className = 'protocol-review-property';
         details.textContent = JSON.stringify(node.properties || {}, null, 2);
-        body.append(note, details);
+        body.append(note);
+        if (node._protocolPreviewOriginalTitle) body.append(planStep);
+        body.append(details);
         return;
     }
 
@@ -7799,6 +7809,14 @@ function isProtocolDraftTab(tab = getActiveTab()) {
 function isCompiledProtocolPreviewTab(tab = getActiveTab()) {
     return Boolean(tab?.protocolPreviewSessionId && tab?.protocolMetadata?.protocol_compiled_preview);
 }
+function inspectReadonlyProtocolNode(event) {
+    if (!isProtocolDraftTab()) return;
+    const canvas = designerState.graphCanvas;
+    const graph = designerState.graph;
+    if (!canvas || !graph) return;
+    const point = canvas.convertEventToCanvasOffset(event);
+    renderPropertiesPanel(graph.getNodeOnPos(point[0], point[1]) || null);
+}
 function protocolChatStatus(message, error = false) {
     const status = document.getElementById('protocol-chat-status');
     status.textContent = message;
@@ -7848,6 +7866,7 @@ function updateProtocolDraftControls() {
     const draft = isProtocolDraftTab(tab);
     const compiledPreview = isCompiledProtocolPreviewTab(tab);
     document.body.classList.toggle('protocol-preview-active', draft);
+    document.body.classList.toggle('protocol-compiled-preview', compiledPreview);
     document.getElementById('protocol-draft-banner').hidden = !draft;
     for (const id of ['btn-save', 'btn-save-as', 'btn-library', 'btn-draft', 'btn-import', 'btn-export', 'btn-simulate', 'btn-execute', 'btn-play', 'btn-pause', 'btn-stop']) {
         const button = document.getElementById(id);
@@ -7868,8 +7887,8 @@ function updateProtocolDraftControls() {
     document.getElementById('protocol-draft-review').textContent = compiledPreview ? 'Return to Protocol Assistant →' : 'Review setup, simulate & approve →';
     if (compiledPreview) {
         const operations = (tab.graph?._nodes || []).filter(node => !['flow/Start', 'flow/End', 'flow/Frame'].includes(node.type)).length;
-        const assumption = tab.protocolPreviewStatus === 'simulation_only' ? ' · Provisional liquid method and height; hardware use unavailable.' : ' · Awaiting scientist approval.';
-        document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata.protocol_revision} · ${operations} compiled operation nodes · read only; cannot save, export, simulate or execute.${assumption}`;
+        const assumption = tab.protocolPreviewStatus === 'simulation_only' ? ' Liquid method and height are provisional; hardware use unavailable.' : ' Scientist approval is still required.';
+        document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata.protocol_revision} · ${operations} compiled operations · read only.${assumption} Click nodes for parameters; drag to pan.`;
     } else if (draft) {
         document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;
     }
@@ -7987,6 +8006,39 @@ function adoptProtocolChat(envelope, remember = true) {
     if (remember) { try { localStorage.setItem(PROTOCOL_CHAT_STORAGE, envelope.session.id); } catch (_) {} }
     renderProtocolConversation();
 }
+function frameProtocolPreviewGraph(canvas, nodes, minimumScale = .08) {
+    if (!canvas || !nodes.length) return;
+    canvas.resize();
+    const minX = Math.min(...nodes.map(node => node.pos[0]));
+    const minY = Math.min(...nodes.map(node => node.pos[1]));
+    const width = Math.max(...nodes.map(node => node.pos[0] + node.size[0])) - minX;
+    const height = Math.max(...nodes.map(node => node.pos[1] + node.size[1])) - minY;
+    const banner = document.getElementById('protocol-draft-banner');
+    const bannerClearance = banner && !banner.hidden ?
+        banner.getBoundingClientRect().bottom - canvas.canvas.getBoundingClientRect().top + 70 : 0;
+    const xPadding = 25, yPadding = Math.max(85, bannerClearance);
+    const fittedScale = Math.min((canvas.canvas.width - xPadding * 2) / Math.max(width, 1),
+        (canvas.canvas.height - yPadding - 25) / Math.max(height, 1));
+    canvas.ds.scale = Math.min(1, Math.max(minimumScale, fittedScale));
+    // DragAndScale offsets are screen pixels. Dividing the padding by zoom
+    // moved previews far outside the viewport on small Designer windows.
+    canvas.ds.offset = [xPadding - minX * canvas.ds.scale, yPadding - minY * canvas.ds.scale];
+    canvas.setDirty(true, true);
+}
+function labelCompiledProtocolPreviewNodes(graph) {
+    for (const node of graph._nodes || []) {
+        const operation = node.type === 'liquid/Aspirate' ? 'Aspirate' :
+            node.type === 'liquid/Dispense' ? 'Dispense' : null;
+        if (!operation) continue;
+        node._protocolPreviewOriginalTitle = node.title || '';
+        const volume = Number(node.properties?.volume);
+        const parts = [operation];
+        if (Number.isFinite(volume)) parts.push(`${volume} µL`);
+        if (node.properties?.location != null) parts.push(`slot ${node.properties.location}`);
+        if (node.properties?.anchor) parts.push(node.properties.anchor);
+        node.title = parts.join(' · ');
+    }
+}
 function displayProtocolPreview(envelope, {activate = true} = {}) {
     const preview = envelope.preview;
     if (!preview?.protocol_chat_draft || !preview.graph || !envelope.session?.id) throw new Error('The server did not return a reviewable protocol draft.');
@@ -8017,17 +8069,7 @@ function displayProtocolPreview(envelope, {activate = true} = {}) {
         requestAnimationFrame(() => {
             const canvas = designerState.graphCanvas;
             if (!canvas || !isProtocolDraftTab()) return;
-            canvas.resize();
-            const nodes = tab.graph._nodes || [];
-            if (nodes.length) {
-                const minX = Math.min(...nodes.map(node => node.pos[0]));
-                const minY = Math.min(...nodes.map(node => node.pos[1]));
-                const width = Math.max(...nodes.map(node => node.pos[0] + node.size[0])) - minX;
-                const height = Math.max(...nodes.map(node => node.pos[1] + node.size[1])) - minY;
-                canvas.ds.scale = Math.min(1, Math.max(.25, Math.min((canvas.canvas.width - 50) / Math.max(width, 1), (canvas.canvas.height - 120) / Math.max(height, 1))));
-                canvas.ds.offset = [25 / canvas.ds.scale - minX, 85 / canvas.ds.scale - minY];
-                canvas.setDirty(true, true);
-            }
+            frameProtocolPreviewGraph(canvas, tab.graph._nodes || [], .25);
         });
     } else renderTabStrip();
 }
@@ -8044,6 +8086,7 @@ function displayCompiledSimulationPreview(envelope) {
     }
     const graph = new LGraph();
     configureWorkflowGraph(graph, workflow);
+    labelCompiledProtocolPreviewNodes(graph);
     const tab = {
         id: null,
         name: 'Simulation preview · ' + (workflow.name || 'Protocol'),
@@ -8066,16 +8109,7 @@ function displayCompiledSimulationPreview(envelope) {
         if (getActiveTab() !== tab) return;
         const canvas = designerState.graphCanvas;
         if (!canvas) return;
-        canvas.resize();
-        const nodes = graph._nodes || [];
-        if (!nodes.length) return;
-        const minX = Math.min(...nodes.map(node => node.pos[0]));
-        const minY = Math.min(...nodes.map(node => node.pos[1]));
-        const width = Math.max(...nodes.map(node => node.pos[0] + node.size[0])) - minX;
-        const height = Math.max(...nodes.map(node => node.pos[1] + node.size[1])) - minY;
-        canvas.ds.scale = Math.min(1, Math.max(.08, Math.min((canvas.canvas.width - 50) / Math.max(width, 1), (canvas.canvas.height - 130) / Math.max(height, 1))));
-        canvas.ds.offset = [25 / canvas.ds.scale - minX, 90 / canvas.ds.scale - minY];
-        canvas.setDirty(true, true);
+        frameProtocolPreviewGraph(canvas, graph._nodes || [], .85);
     });
 }
 async function loadCompiledSimulationPreview(sessionId) {
