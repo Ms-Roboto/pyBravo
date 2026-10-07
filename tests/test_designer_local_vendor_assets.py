@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -78,6 +80,26 @@ def test_vendored_distributions_match_their_pinned_checksums():
         digest, relative = entry.split("  ", 1)
         asset = VENDOR / relative
         assert hashlib.sha256(asset.read_bytes()).hexdigest() == digest, relative
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is optional for Python-only installs")
+def test_graph_vendor_builds_publish_browser_globals():
+    script = r"""
+const fs = require('fs'), vm = require('vm');
+for (const [name, file, globals] of JSON.parse(process.argv[1])) {
+  const context = {console, document: {}, navigator: {}, setTimeout, clearTimeout};
+  context.window = context;
+  vm.runInNewContext(fs.readFileSync(file, 'utf8'), context, {timeout: 2000});
+  for (const symbol of globals) if (!context[symbol]) throw new Error(name + ' lacks ' + symbol);
+}
+"""
+    required = [
+        ["LiteGraph", str(VENDOR / "litegraph/0.7.18/build/litegraph.min.js"),
+         ["LiteGraph", "LGraph", "LGraphCanvas"]],
+        ["Dagre", str(VENDOR / "dagre/0.8.5/dist/dagre.min.js"), ["dagre"]],
+    ]
+    subprocess.run([shutil.which("node"), "-e", script, json.dumps(required)],
+                   check=True, capture_output=True, text=True, timeout=5)
 
 
 def test_run_server_default_port_override_mounts_frontend_static_files(monkeypatch):
