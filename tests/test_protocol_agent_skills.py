@@ -2,6 +2,7 @@
 
 from pybravo.workflow.protocols.agent_skills import selected_skills
 from pybravo.workflow.protocols.ingest import ingest_text
+from pybravo.workflow.protocols.llm import _EXTRACTION_PROMPT
 
 
 def test_protocol_skills_are_selected_by_task():
@@ -29,5 +30,13 @@ def test_quadrant_skills_keep_tip_reuse_distinct_from_aspiration():
     assert "at least 10 µL usable volume per source well" in skills["protocol-interpretation"]
     assert "Tip reuse and shared aspiration are separate decisions" in skills["liquid-methods"]
     assert "one 10 µL aspiration" in skills["liquid-methods"]
-    assert "one distinct ST10 rack per source" in skills["deck-and-tips"]
-    assert "source 1→A1, 2→A2, 3→B1, 4→B2" in skills["deck-and-tips"]
+    assert "one distinct ST10 rack per source" in skills["384-to-1536-quadrants"]
+    assert "source 1→A1, 2→A2, 3→B1, 4→B2" in skills["384-to-1536-quadrants"]
+    assert "Each sample well is its own contamination domain" in skills["deck-and-tips"]
+
+
+def test_quadrant_geometry_is_not_sent_for_unrelated_protocols():
+    skills = dict(selected_skills(ingest_text("Transfer 100 uL from reservoir to plate wells A1 through A12.")))
+    assert "384-to-1536-quadrants" not in skills
+    assert "four source plates into two" not in _EXTRACTION_PROMPT.lower()
+    assert "source 1→A1" not in skills["deck-and-tips"]
