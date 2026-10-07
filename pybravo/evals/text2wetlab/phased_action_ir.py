@@ -205,6 +205,7 @@ def parse_setup(
 def parse_stage(
     raw: dict[str, Any], *, expected: StageSpec,
     spans: Mapping[str, SourceSpan], instruction: str, paper: str | None,
+    equipment_refs: Sequence[str] = (),
 ) -> StageDraft:
     try:
         stage = StageDraft.model_validate(raw)
@@ -216,12 +217,24 @@ def parse_stage(
     if not set(stage.evidence_refs) <= allowed:
         raise ActionPlanError("Stage cites lines outside its setup-approved evidence scope.")
     _quotes(stage.evidence_refs, spans=spans, instruction=instruction, paper=paper)
-    for action in stage.actions:
-        nested = [action, *getattr(action, "actions", [])]
-        for item in nested:
-            if not set(item.evidence_refs) <= allowed:
+    verified_equipment: set[str] = set()
+    for ref in equipment_refs:
+        quotes = _quotes([ref], spans=spans, instruction=instruction, paper=paper)
+        if (spans[ref].source != "instruction" or
+                re.search(r"\b(?:pipette|tiprack|tips?)\b", quotes[0], re.I) is None):
+            raise ActionPlanError("Equipment references must be exact task instrument lines.")
+        verified_equipment.add(ref)
+    for index, action in enumerate(stage.actions):
+        nested = [(f"actions[{index}]", action)]
+        nested.extend((f"actions[{index}].actions[{body_index}]", item)
+                      for body_index, item in enumerate(getattr(action, "actions", [])))
+        for path, item in nested:
+            item_allowed = allowed | verified_equipment if item.kind in {
+                "pickup", "drop", "refill_tips",
+            } else allowed
+            if not set(item.evidence_refs) <= item_allowed:
                 raise ActionPlanError(
-                    "An action cites lines outside its stage evidence scope."
+                    f"{path} cites lines outside its stage evidence scope."
                 )
             _quotes(item.evidence_refs, spans=spans,
                     instruction=instruction, paper=paper)
@@ -229,8 +242,8 @@ def parse_stage(
                     and item.kind not in {"pickup", "drop", "refill_tips"}
                     and not any(ref.startswith("paper.") for ref in item.evidence_refs)):
                 raise ActionPlanError(
-                    "A paper-grounded stage's process action must cite its "
-                    "stage-specific paper evidence."
+                    f"{path} is a paper-grounded process action and must cite "
+                    "its stage-specific paper evidence."
                 )
     return stage
 

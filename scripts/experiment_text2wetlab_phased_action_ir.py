@@ -95,9 +95,9 @@ _SETUP_SYSTEM = """You are the local OT-2 scientific planner. Author only the JS
 
 Return keys labware, modules, pipettes, stages, initial_supplies. Labware: id, load_name, exactly one of integer slot or module_id, optional label. Module: id, exact catalog model, and slot for non-fixed modules only. Pipette: id, model, mount, tip_rack_ids. Stage: id, goal, evidence_refs. Optional initial-supply record: key `labware` (the loaded labware ID), selection ('all', 'wells_in_columns', or 'wells'), columns or wells as appropriate, volume_ul per selected well or null when unmeasured, material_id, source_material_name, evidence_refs. `source_material_name` must quote verbatim material words on the cited task line that also names the exact labware and each selected well. A positive initial volume needs the exact amount and units on that same line; a zero needs the same line to say that well starts empty. Split different materials into different records. Do not invent starting liquid. Unknown volume is null. Source claims are audited and remain model-authored, not a hardware reading. Return no unsupported labware, reagent, refill, or sample."""
 
-_STAGE_SYSTEM = """You are authoring exactly one bounded, ordered ActionPlan stage for a pinned OT-2 task. Return only JSON with stage_id, evidence_refs, actions. Every action, including every action in a loop, must cite exact source line IDs in evidence_refs. Use only the stage-specific paper lines and task lines supplied below; do not invent experimental steps, wells, reagent, volumes, or refills. The completed prefix's state and inventory are authoritative observations. If an absolute source volume is unknown, do not claim it is sufficient. A stage must finish with no tip attached and no liquid held. Complete the stage goal before the next stage; do not repeat earlier actions.
+_STAGE_SYSTEM = """You are authoring exactly one bounded, ordered ActionPlan stage for a pinned OT-2 task. Return only JSON with stage_id, evidence_refs, actions. Every action, including every action in a loop, must cite exact source line IDs in evidence_refs. Process actions may cite only the current stage's evidence_refs. Pickup/drop/refill may also cite the separately listed fixed instrument/tip task lines. If the stage cites paper lines, every non-tip action must cite a stage-specific paper line. Do not invent experimental steps, wells, reagents, volumes, or refills. The completed prefix's state and inventory are authoritative observations. If an absolute source volume is unknown, do not claim it is sufficient. A stage must finish with no tip attached and no liquid held. Complete the stage goal before the next stage; do not repeat earlier actions.
 
-Action kinds: pickup/drop with pipette; aspirate/dispense with pipette, labware, well, volume_ul; mix with pipette, labware, well, cycles, volume_ul; delay seconds; pause message for real operator intervention; comment message for a non-pipetting instruction without a stop; refill_tips pipette and message only if the task permits a physical refill and existing racks are exhausted; set_temperature/set_block_temperature/set_lid_temperature with module and celsius (block may have hold_seconds); open_lid/close_lid with module; magnet_engage with module and height_from_base_mm; magnet_disengage with module. For repetition, for_each has either explicit bindings or a catalog_wells selector and a short ordered actions body. Selector series specify binding, labware, mode ('all', 'wells_in_columns', or 'column_anchors'), and explicit columns when narrowing. 'wells_in_columns' walks every physical well in named columns; 'column_anchors' walks one full eight-channel anchor per column. Use '$binding' as the entire well field. A multichannel pipette may touch only catalog-listed multichannel anchors, including a catalog-verified long trough. Never use an eight-channel head on individual sample wells. Each stroke must be within the installed pipette's minimum and the effective tip capacity, and each dispense must be funded by liquid in that tip. Plan the total tip inventory across all stages; do not assume a refill unless the source explicitly permits it. Return a complete coherent stage, not trial steps followed by corrections."""
+Action kinds: pickup/drop with pipette; aspirate/dispense with pipette, labware, well, volume_ul; mix with pipette, labware, well, cycles, volume_ul; delay seconds; pause message for real operator intervention; comment message for a non-pipetting instruction without a stop; refill_tips pipette and message only if the task permits a physical refill and existing racks are exhausted; set_temperature/set_block_temperature/set_lid_temperature with module and celsius (block may have hold_seconds); open_lid/close_lid with module; magnet_engage with module and height_from_base_mm; magnet_disengage with module. For repetition, for_each has either explicit bindings or a catalog_wells selector and a short ordered actions body. Selector series specify binding, labware, mode ('all', 'wells_in_columns', or 'column_anchors'), and explicit columns when narrowing. 'wells_in_columns' walks every physical well in named columns; 'column_anchors' walks one full eight-channel anchor per column. Use '$binding' as the entire well field. A multichannel pipette may touch only catalog-listed multichannel anchors, including a catalog-verified long trough. Never use an eight-channel head on individual sample wells. Never aspirate from distinct reagent-stock wells with the same tip; change tips between stocks and samples to avoid carryover. Each stroke must be within the installed pipette's minimum and the effective tip capacity, and each dispense must be funded by liquid in that tip. Check arithmetic against cited reaction counts and final volumes before returning the stage. Plan the total tip inventory across all stages; do not assume a refill unless the source explicitly permits it. Return a complete coherent stage, not trial steps followed by corrections."""
 
 
 def _model_record(response: StructuredResponse, payload_path: Path) -> dict[str, Any]:
@@ -138,6 +138,18 @@ _PROCESS_WORDS = re.compile(
     r"recover\w*|seal(?:ed|ing)?|prepar\w*)\b", re.I,
 )
 
+_PREPARATION_WELL = re.compile(
+    r"`(?P<labware>[^`]+)`\s+well\s+(?P<well>[A-Z]+[1-9][0-9]*)\s*:.*"
+    r"\bmaster\s+mix\b.*\bfor\s+(?P<count>[1-9][0-9]*)\s+reactions?\b",
+    re.I,
+)
+_REACTION_VOLUME = re.compile(
+    r"\b(?:PCRs?|reactions?)\s+(?:were|was|are|is)\s+"
+    r"(?:performed|run|prepared)\s+in\s+(?P<volume>\d+(?:\.\d+)?)\s*"
+    r"(?:µL|μL|uL)\s+volumes?\b",
+    re.I,
+)
+
 
 def _setup_source_coverage(setup: PhasedSetup, cited_lines: str) -> dict[str, Any]:
     """Report uncited procedural-looking lines; never infer or insert stages."""
@@ -161,6 +173,77 @@ def _setup_source_coverage(setup: PhasedSetup, cited_lines: str) -> dict[str, An
         "scientific_completeness_verified": False,
         "note": "Line citations do not prove the stage outline covers every procedure step.",
     }
+
+
+def _setup_digest(setup: PhasedSetup) -> str:
+    """Bind saved-stage replay to the exact parsed setup, including supplies."""
+    return _sha(json.dumps(setup.model_dump(mode="json"), sort_keys=True,
+                           separators=(",", ":")))
+
+
+def _preparation_envelope_issues(
+    setup: PhasedSetup, stage: StageDraft, *, spans: dict,
+    instruction: str, paper: str | None, events: list[dict],
+    event_labware: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Check an explicitly cited reaction-count/volume upper bound.
+
+    This is deliberately an upper bound, not an inferred recipe. A stage must
+    cite both the task's named empty premix well/count and a paper reaction
+    volume. Unrecognized wording yields no invented constraint.
+    """
+    task_bounds: list[tuple[str, str, int, str]] = []
+    paper_volumes: list[tuple[float, str]] = []
+    for ref in stage.evidence_refs:
+        span = spans.get(ref)
+        if span is None:
+            continue
+        quote = (instruction if span.source == "instruction" else paper or "")[
+            span.start:span.end
+        ]
+        if span.source == "instruction":
+            target = _PREPARATION_WELL.search(quote)
+            if target and re.search(r"\bempty\s+at\s+the\s+start\b", quote, re.I):
+                task_bounds.append((target["labware"], target["well"],
+                                    int(target["count"]), ref))
+        else:
+            for volume in _REACTION_VOLUME.finditer(quote):
+                paper_volumes.append((float(volume["volume"]), ref))
+    if len(task_bounds) != 1 or len(paper_volumes) != 1:
+        return []
+    labware_id, well, count, task_ref = task_bounds[0]
+    load = next((item for item in setup.labware if item.id == labware_id), None)
+    if load is None:
+        return []
+    label = load.label or load.id
+    observed_names = [name for name, load_name in event_labware.items()
+                      if load_name == load.load_name and
+                      (name == label or name.startswith(f"{label} on "))]
+    if len(observed_names) != 1:
+        return []
+    bound = count * paper_volumes[0][0]
+    running = 0.0
+    peak = 0.0
+    for event in events:
+        if (event.get("labware") != observed_names[0] or
+                event.get("well") != well):
+            continue
+        if event.get("kind") == "dispense":
+            running += float(event.get("volume") or 0)
+        elif event.get("kind") == "aspirate":
+            running -= float(event.get("volume") or 0)
+        peak = max(peak, running)
+    if peak <= bound + 1e-6:
+        return []
+    return [{
+        "code": "cited_preparation_exceeds_reaction_envelope",
+        "labware": labware_id, "well": well,
+        "observed_peak_ul": round(peak, 6), "maximum_final_reaction_ul": bound,
+        "reaction_count": count, "reaction_volume_ul": paper_volumes[0][0],
+        "source_refs": [task_ref, paper_volumes[0][1]],
+        "message": "Prepared intermediate exceeds the cited count × final reaction "
+                   "volume before other required additions.",
+    }]
 
 
 def _prefix_gate(
@@ -219,12 +302,20 @@ def _prefix_gate(
             safety = {"status": partial.status, "detail": partial.detail,
                       "event_count": partial.event_count,
                       "full_process_check": "pending_later_stage"}
-    if safety.get("status") != "passed" or runlog.get("cross_well_aspiration_risk_count", 0):
-        return {"status": "event_safety_rejected", "runlog": runlog}, None
     events_path = runlog.get("events_path")
     if not isinstance(events_path, str):
         return {"status": "runlog_rejected", "detail": "Pinned event path is missing."}, None
     events = json.loads(Path(events_path).read_text(encoding="utf-8"))
+    envelope_issues = _preparation_envelope_issues(
+        setup, stages[-1], spans=spans, instruction=instruction, paper=paper,
+        events=events, event_labware=runlog.get("labware") or {},
+    )
+    if safety.get("status") != "passed" or runlog.get("cross_well_aspiration_risk_count", 0):
+        return {"status": "event_safety_rejected", "runlog": runlog,
+                "preparation_envelope_issues": envelope_issues}, None
+    if envelope_issues:
+        return {"status": "preparation_envelope_rejected",
+                "preparation_envelope_issues": envelope_issues}, None
     try:
         ledger = audit_prefix_material(
             events, runlog.get("labware") or {}, setup, labware_catalog=labware,
@@ -256,6 +347,50 @@ def _prefix_gate(
         "tip_state": tips,
     }
     return result, handoff
+
+
+def _retry_feedback(failure: dict[str, Any]) -> dict[str, Any]:
+    """Expose only the failed mechanical path, never rubric or reference text."""
+    status = failure.get("status")
+    feedback: dict[str, Any] = {"status": status}
+    if status == "source_or_shape_rejected":
+        detail = str(failure.get("detail", ""))
+        # Custom parser errors carry a fixed action path. Pydantic messages
+        # may echo candidate values, so never return those to the model.
+        feedback["detail"] = (detail[:300] if re.match(
+            r"^(?:actions\[\d+\]|Stage cites|Expected stage|Equipment references)",
+            detail,
+        ) else "Stage JSON failed schema or source-scope validation.")
+    elif status in {"compiler_rejected", "static_rejected",
+                    "material_unresolved", "tip_state_unresolved"}:
+        feedback["detail"] = str(failure.get("detail", "")).splitlines()[0][:300]
+    elif status == "simulator_rejected":
+        feedback["detail"] = "Simulator rejected the compiled prefix; raw output is untrusted and retained only in the local trace."
+    elif status == "runlog_rejected":
+        feedback["detail"] = "Pinned runlog rejected the compiled prefix; raw output is retained only in the local trace."
+    elif status == "event_safety_rejected":
+        runlog = failure.get("runlog") or {}
+        feedback["detail"] = "Pinned event safety rejected this prefix."
+        feedback["cross_well_aspiration_risk_count"] = int(
+            runlog.get("cross_well_aspiration_risk_count") or 0
+        )
+        feedback["cross_well_aspiration_risks"] = [{
+            "distinct_wells": int(item.get("distinct_wells") or 0),
+            "example_wells": [well for well in item.get("example_wells", [])[:8]
+                              if isinstance(well, str) and
+                              re.fullmatch(r"[A-Z]+[1-9][0-9]*", well)],
+        } for item in (runlog.get("cross_well_aspiration_risks") or [])[:3]
+            if isinstance(item, dict)]
+        feedback["preparation_envelope_issues"] = (
+            failure.get("preparation_envelope_issues") or []
+        )[:2]
+    elif status == "preparation_envelope_rejected":
+        feedback["preparation_envelope_issues"] = (
+            failure.get("preparation_envelope_issues") or []
+        )[:2]
+    elif status == "material_rejected":
+        feedback["issues"] = (failure.get("issues") or [])[:8]
+    return feedback
 
 
 async def run_experiment(
@@ -393,6 +528,7 @@ async def run_experiment(
         json.dumps(setup.model_dump(), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    trace["setup_sha256"] = _setup_digest(setup)
     trace["setup_source_coverage"] = _setup_source_coverage(setup, cited_lines)
     accepted: list[StageDraft] = []
     handoff: dict[str, Any] = {
@@ -401,8 +537,11 @@ async def run_experiment(
         "materials": {"status": "initial volumes are model claims or unknown; no actions yet"},
         "completed_stage_ids": [], "event_count": 0,
     }
-    task_lines = "\n".join(line for line in cited_lines.splitlines()
-                           if line.startswith("[task."))
+    equipment_refs = [ref for ref, span in spans.items()
+                      if span.source == "instruction" and re.search(
+                          r"\b(?:pipette|tiprack|tips?)\b",
+                          instruction[span.start:span.end], re.I,
+                      )]
     for index, spec in enumerate(setup.stages, 1):
         stage_dir = output / f"stage_{index:02d}_{spec.id}"
         stage_dir.mkdir(exist_ok=True)
@@ -412,9 +551,15 @@ async def run_experiment(
         paper_lines = "\n".join(line for line in cited_lines.splitlines()
                                 if any(line.startswith(f"[{ref}]")
                                        for ref in spec.evidence_refs if ref.startswith("paper.")))
+        task_lines = "\n".join(line for line in cited_lines.splitlines()
+                               if any(line.startswith(f"[{ref}]")
+                                      for ref in [*spec.evidence_refs, *equipment_refs]
+                                      if ref.startswith("task.")))
         stage_prompt = (
             "Current stage:\n" + json.dumps(spec.model_dump(), ensure_ascii=False)
             + "\n\nPinned task lines:\n" + task_lines
+            + "\n\nFixed instrument/tip refs allowed for pickup/drop/refill only:\n"
+            + json.dumps(equipment_refs)
             + "\n\nOnly these stage-specific paper lines:\n" + paper_lines
             + "\n\nFixed setup:\n" + json.dumps({
                 "labware": [item.model_dump() for item in setup.labware],
@@ -428,38 +573,129 @@ async def run_experiment(
             + "\n\nValidated state and inventory handoff:\n"
             + json.dumps(handoff, ensure_ascii=False)
         )
-        try:
-            stage_response = await completion([
-                {"role": "system", "content": _STAGE_SYSTEM},
-                {"role": "user", "content": stage_prompt},
-            ], _STAGE_SCHEMA, config=config, schema_name="ot2_phased_stage")
-        except Exception as exc:
-            stage_trace.update(status="model_failed", detail=f"{type(exc).__name__}: {exc}")
-            trace["status"] = "stage_model_failed"
-            return trace
-        stage_trace["model"] = _model_record(
-            stage_response, stage_dir / "qwen_stage.json",
-        )
-        try:
-            draft = parse_stage(
-                stage_response.payload, expected=spec, spans=spans,
-                instruction=instruction, paper=paper_for_model,
+        attempts: list[dict[str, Any]] = []
+        stage_trace["attempts"] = attempts
+        previous_payload: dict[str, Any] | None = None
+        previous_failure: dict[str, Any] | None = None
+        max_retries = getattr(args, "stage_retries", 0)
+        for attempt_index in range(max_retries + 1):
+            attempt: dict[str, Any] = {"attempt": attempt_index + 1}
+            attempts.append(attempt)
+            saved_failed = getattr(args, "saved_failed_stage", None)
+            if attempt_index == 0 and index == 1 and saved_failed is not None:
+                saved_path = saved_failed.expanduser().resolve()
+                source_trace_path = saved_path.parent.parent / "phased_action_ir_trace.json"
+                if not source_trace_path.is_file():
+                    trace.update(status="saved_stage_rejected",
+                                 detail="Failed-stage source trace is missing.")
+                    return trace
+                prior_trace = json.loads(source_trace_path.read_text(encoding="utf-8"))
+                stage_payload = json.loads(saved_path.read_text(encoding="utf-8"))
+                prior_stages = prior_trace.get("stages") or []
+                prior_stage = prior_stages[0] if prior_stages else {}
+                prior_model = prior_stage.get("model") or {}
+                prior_setup_path = source_trace_path.parent / "compiler_setup.json"
+                if not prior_setup_path.is_file():
+                    trace.update(status="saved_stage_rejected",
+                                 detail="Saved stage has no exact parsed setup snapshot.")
+                    return trace
+                prior_parsed_setup = json.loads(prior_setup_path.read_text(encoding="utf-8"))
+                prior_setup_sha = _sha(json.dumps(prior_parsed_setup, sort_keys=True,
+                                                  separators=(",", ":")))
+                if (prior_trace.get("task") != args.task
+                        or prior_trace.get("revision") != runner.REVISION
+                        or prior_trace.get("instruction_sha256") != trace["instruction_sha256"]
+                        or prior_trace.get("paper_sha256") != trace["paper_sha256"]
+                        or prior_trace.get("paper_excerpt_sha256") != trace["paper_excerpt_sha256"]
+                        or (prior_trace.get("setup_model") or {}).get("raw_payload_sha256") !=
+                           (trace.get("setup_model") or {}).get("raw_payload_sha256")
+                        or prior_setup_sha != trace["setup_sha256"]
+                        or (prior_trace.get("setup_sha256") is not None and
+                            prior_trace["setup_sha256"] != trace["setup_sha256"])
+                        or prior_stage.get("stage_id") != spec.id
+                        or prior_model.get("raw_payload_sha256") !=
+                           _sha(json.dumps(stage_payload, sort_keys=True))):
+                    trace.update(status="saved_stage_rejected",
+                                 detail="Saved failed stage does not match the pinned source.")
+                    return trace
+                attempt["model"] = {
+                    "reused_raw_payload_path": str(saved_path),
+                    "raw_payload_sha256": prior_model["raw_payload_sha256"],
+                    "source_trace_path": str(source_trace_path),
+                }
+                (stage_dir / "qwen_stage.json").write_text(
+                    json.dumps(stage_payload, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            else:
+                messages = [
+                    {"role": "system", "content": _STAGE_SYSTEM},
+                    {"role": "user", "content": stage_prompt},
+                ]
+                if previous_payload is not None and previous_failure is not None:
+                    messages.extend([
+                        {"role": "assistant", "content": json.dumps(
+                            previous_payload, ensure_ascii=False,
+                        )},
+                        {"role": "user", "content":
+                         "The preceding stage response failed a formal local gate. "
+                         "Return a complete corrected stage JSON using only the "
+                         "cited source and trusted catalog. Do not omit valid work. "
+                         "Failure:\n" + json.dumps(
+                             _retry_feedback(previous_failure), ensure_ascii=False,
+                         )},
+                    ])
+                try:
+                    stage_response = await completion(
+                        messages, _STAGE_SCHEMA, config=config,
+                        schema_name="ot2_phased_stage",
+                    )
+                except Exception as exc:
+                    attempt.update(status="model_failed",
+                                   detail=f"{type(exc).__name__}: {exc}")
+                    stage_trace.update(status="model_failed", detail=attempt["detail"])
+                    trace["status"] = "stage_model_failed"
+                    return trace
+                stage_payload = stage_response.payload
+                response_path = stage_dir / (
+                    "qwen_stage.json" if attempt_index == 0 else
+                    f"qwen_stage_retry_{attempt_index}.json"
+                )
+                attempt["model"] = _model_record(stage_response, response_path)
+            stage_trace["model"] = attempt["model"]
+            previous_payload = stage_payload
+            try:
+                draft = parse_stage(
+                    stage_payload, expected=spec, spans=spans,
+                    instruction=instruction, paper=paper_for_model,
+                    equipment_refs=equipment_refs,
+                )
+            except (ActionPlanError, ValueError) as exc:
+                failure = {"status": "source_or_shape_rejected", "detail": str(exc)}
+                attempt.update(failure)
+                previous_failure = failure
+                if attempt_index < max_retries:
+                    continue
+                stage_trace.update(failure)
+                trace["status"] = "stage_rejected"
+                return trace
+            prefix_result, next_handoff = _prefix_gate(
+                setup, [*accepted, draft], instruction=instruction,
+                paper=paper_for_model, spans=spans, labware=labware,
+                pipettes=pipettes, modules=modules, simulator=args.simulator,
+                task=args.task, task_dir=stage_dir / f"attempt_{attempt_index + 1}",
+                dataset_root=args.dataset_root,
+                labware_dir=labware_dir,
             )
-        except (ActionPlanError, ValueError) as exc:
-            stage_trace.update(status="source_or_shape_rejected", detail=str(exc))
-            trace["status"] = "stage_rejected"
-            return trace
-        prefix_result, next_handoff = _prefix_gate(
-            setup, [*accepted, draft], instruction=instruction,
-            paper=paper_for_model, spans=spans, labware=labware,
-            pipettes=pipettes, modules=modules, simulator=args.simulator,
-            task=args.task, task_dir=stage_dir, dataset_root=args.dataset_root,
-            labware_dir=labware_dir,
-        )
-        stage_trace.update(prefix_result)
-        if next_handoff is None:
-            trace["status"] = "stage_rejected"
-            return trace
+            attempt.update(prefix_result)
+            if next_handoff is not None:
+                stage_trace.update(prefix_result)
+                break
+            previous_failure = prefix_result
+            if attempt_index == max_retries:
+                stage_trace.update(prefix_result)
+                trace["status"] = "stage_rejected"
+                return trace
         accepted.append(draft)
         handoff = next_handoff
         stage_trace["handoff_path"] = str(stage_dir / "state_handoff.json")
@@ -518,16 +754,23 @@ def main() -> int:
     parser.add_argument("--paper-override", type=Path)
     parser.add_argument("--saved-setup", type=Path,
                         help="Reuse an exact local-Qwen setup with a matching source trace")
+    parser.add_argument("--saved-failed-stage", type=Path,
+                        help="Start a bounded repair from an exact saved local-Qwen stage")
     parser.add_argument("--model-timeout", type=int, default=180)
     parser.add_argument("--max-output-tokens", type=int, default=8192)
     parser.add_argument("--max-stages", type=int, default=8,
                         help="Hard cap on model-authored stages and subsequent local calls")
     parser.add_argument("--max-new-stages", type=int,
                         help="Stop after this many accepted stage calls and save the partial prefix")
+    parser.add_argument("--stage-retries", type=int, default=0,
+                        help="Maximum local-Qwen repairs after a formal failed stage gate")
     args = parser.parse_args()
     if (not args.simulator.is_file() or not 1 <= args.model_timeout <= 300
             or not 512 <= args.max_output_tokens <= 16000
             or not 1 <= args.max_stages <= 16
+            or not 0 <= args.stage_retries <= 2
+            or (args.saved_failed_stage is not None and
+                (args.saved_setup is None or args.stage_retries == 0))
             or (args.max_new_stages is not None and
                 not 1 <= args.max_new_stages <= args.max_stages)):
         parser.error("Provide a simulator, 1–300 s timeout, 512–16000 output tokens, "
