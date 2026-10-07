@@ -23,6 +23,13 @@ def run(protocol: protocol_api.ProtocolContext):
 REVISED_PROTOCOL = VALID_PROTOCOL.replace("    for well in plate.rows()[0]:", "    # Revised tip sequence\n    for well in plate.rows()[0]:")
 
 
+def _local_science_audit(status: str, *, evidence: str = "") -> dict:
+    return {"items": [{"id": "local_check", "status": status,
+                       "checks": [{"name": "sample volumes", "status": status,
+                                   "evidence": evidence}]}],
+            "status": status, "official_score": None}
+
+
 @pytest.mark.parametrize("source, reason", [
     ("import os\n" + VALID_PROTOCOL, "Unsupported import"),
     (VALID_PROTOCOL.replace("from opentrons import protocol_api", "from opentrons import execute"),
@@ -194,6 +201,88 @@ async def test_simulation_error_repairs_protocol_and_sets_trace_gate(tmp_path, m
     assert [attempt["simulation"] for attempt in trace["attempts"]] == ["failed", "passed"]
     assert trace["attempts"][0]["candidate_path"] == str(tmp_path / "candidate_attempt_1.py")
     assert "candidate_path" not in trace["attempts"][1]
+
+
+@pytest.mark.asyncio
+async def test_observable_scientific_failure_requests_source_grounded_full_repair(tmp_path, monkeypatch):
+    monkeypatch.setattr(adapter, "simulate_protocol",
+                        lambda *args, **kwargs: adapter.SimulationResult("passed", "ok"))
+    monkeypatch.setattr(adapter, "audit_rubric_coverage",
+                        lambda task, events, code, labware: _local_science_audit(
+                            "supported" if "Revised tip sequence" in code else "failed",
+                            evidence="SECRET BENCHMARK REFERENCE SHOULD NOT LEAK"))
+    model_messages = []
+
+    async def completion(messages, schema, **kwargs):
+        model_messages.append(messages)
+        return StructuredResponse({"code": VALID_PROTOCOL if len(model_messages) == 1 else REVISED_PROTOCOL},
+                                  {"model": "local-qwen"})
+
+    result = await adapter.generate_ot2_protocol(
+        "Transfer 100 µL from reservoir A1 into each well A1 through A12.", tmp_path,
+        rubric_task="a1-a12-100ul", completion=completion,
+        event_reader=lambda _: adapter.EventLog([], {}), repair_attempts=1,
+    )
+    assert result.attempts == 2
+    assert result.protocol_path.read_text() == REVISED_PROTOCOL
+    second_prompt = model_messages[1][-1]["content"]
+    assert "Transfer 100 µL from reservoir A1" in second_prompt
+    assert "SECRET BENCHMARK" not in second_prompt
+    assert "observable gaps" in second_prompt
+    trace = json.loads(result.trace_path.read_text())
+    assert [attempt["scientific_audit"] for attempt in trace["attempts"]] == ["failed", "passed"]
+    assert trace["attempts"][0]["local_rubric_audit"]["official_score"] is None
+
+
+@pytest.mark.asyncio
+async def test_scientific_needs_review_does_not_block_simulated_candidate(tmp_path, monkeypatch):
+    monkeypatch.setattr(adapter, "simulate_protocol",
+                        lambda *args, **kwargs: adapter.SimulationResult("passed", "ok"))
+    monkeypatch.setattr(adapter, "audit_rubric_coverage",
+                        lambda *args: _local_science_audit("needs_review", evidence="manual step"))
+
+    async def completion(*args, **kwargs):
+        return StructuredResponse({"code": VALID_PROTOCOL}, {"model": "local-qwen"})
+
+    result = await adapter.generate_ot2_protocol(
+        "Transfer 100 µL from reservoir A1 into each well A1 through A12.", tmp_path,
+        rubric_task="a1-a12-100ul", completion=completion,
+        event_reader=lambda _: adapter.EventLog([], {}), repair_attempts=0,
+    )
+    assert result.simulation.status == "passed"
+    trace = json.loads(result.trace_path.read_text())
+    assert trace["attempts"][0]["scientific_audit"] == "passed"
+
+
+@pytest.mark.asyncio
+async def test_scientific_failure_in_mechanically_valid_patch_needs_full_repair(tmp_path, monkeypatch):
+    async def completion(messages, schema, **kwargs):
+        code = VALID_PROTOCOL if not any("Your previous generated code failed" in m["content"]
+                                          for m in messages) else REVISED_PROTOCOL
+        return StructuredResponse({"code": code}, {"model": "local-qwen"})
+
+    async def patch_completion(*args, **kwargs):
+        return StructuredResponse({"edits": [{"start_line": 1, "end_line": 0,
+                                               "replacement": "# simulator repair"}]},
+                                  {"model": "local-qwen"})
+
+    def simulate(path, **kwargs):
+        return adapter.SimulationResult("failed" if path.read_text() == VALID_PROTOCOL else "passed", "error")
+
+    monkeypatch.setattr(adapter, "simulate_protocol", simulate)
+    monkeypatch.setattr(adapter, "audit_rubric_coverage",
+                        lambda task, events, code, labware: _local_science_audit(
+                            "failed" if "# simulator repair" in code else "supported"))
+    result = await adapter.generate_ot2_protocol(
+        "Transfer 100 µL from reservoir A1 into each well A1 through A12.", tmp_path,
+        rubric_task="a1-a12-100ul", completion=completion, patch_completion=patch_completion,
+        event_reader=lambda _: adapter.EventLog([], {}), repair_attempts=1, patch_attempts=1,
+    )
+    assert result.attempts == 2
+    assert result.protocol_path.read_text() == REVISED_PROTOCOL
+    trace = json.loads(result.trace_path.read_text())
+    assert trace["attempts"][0]["patches"][0]["status"] == "scientific_audit_rejected"
+    assert trace["attempts"][1]["scientific_audit"] == "passed"
 
 
 @pytest.mark.asyncio

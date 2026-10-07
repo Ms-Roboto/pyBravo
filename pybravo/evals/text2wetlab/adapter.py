@@ -34,6 +34,7 @@ from pybravo.evals.text2wetlab.planning import plan_to_prompt
 from pybravo.evals.text2wetlab.planning_runtime import run_grounded_plan
 from pybravo.evals.text2wetlab.reaction import PipetteRange, Stroke, audit_strokes
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
+from pybravo.evals.text2wetlab.rubric_audit import RUBRIC_IDS, audit_rubric_coverage
 from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse, structured_json
 
 
@@ -221,6 +222,57 @@ def _repair_guidance(error: str, code: str) -> str:
 
 
 def _validate_literal_pipette_volumes(run: ast.FunctionDef) -> None:
+def _scientific_audit(
+    task: str | None,
+    event_log: EventLog,
+    code: str,
+    instruction: str,
+    scientific_source: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Check observable task coverage without disclosing benchmark criteria to the model.
+
+    The model's repair diagnostic contains only passages already supplied by the
+    user or paper. The full local audit is retained in the trace for human review;
+    ``needs_review`` is deliberately not a failure.
+    """
+    if task is None:
+        return None, None
+    audit = audit_rubric_coverage(task, event_log.events, code, event_log.labware)
+    failed_checks = [check for item in audit["items"] for check in item["checks"]
+                     if check["status"] == "failed"]
+    if not failed_checks:
+        return audit, None
+
+    source_lines = [line.strip() for line in (instruction + "\n" + (scientific_source or "")).splitlines()
+                    if 12 <= len(line.strip()) <= 500 and not line.strip().startswith("```")]
+    stopwords = {"and", "the", "for", "with", "from", "into", "each", "after", "before",
+                 "that", "this", "must", "well", "wells", "volume", "volumes", "source",
+                 "destination", "needs", "use", "used", "per", "all", "one", "two"}
+
+    def words(value: str) -> set[str]:
+        return {word.lower() for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]*|\d+(?:\.\d+)?", value)
+                if word.lower() not in stopwords}
+
+    relevant: list[str] = []
+    for check in failed_checks[:5]:
+        anchors = words(check["name"] + " " + check["evidence"])
+        ranked = sorted(((len(words(line) & anchors), line) for line in source_lines), reverse=True)
+        for score, line in ranked[:2]:
+            if score and line not in relevant:
+                relevant.append(line)
+    if not relevant:
+        relevant = source_lines[:3]
+    quoted = "\n".join(f"- {line[:350]}" for line in relevant[:8])
+    diagnostic = (
+        "Read-only review of the simulated actions found observable gaps against the supplied "
+        "experimental procedure. Recheck the requested volumes, well mapping, stage order, "
+        "and tip policy against these verbatim task/source passages; correct the complete "
+        "protocol only where the supplied procedure supports it. Do not infer any new "
+        "scientific requirement from this diagnostic.\n" + quoted
+    )
+    return audit, diagnostic
+
+
     """Reject literal strokes outside pipette or loaded-tip bounds before simulation."""
     instruments: dict[str, tuple[float, float]] = {}
     bounds = {"p20": (1.0, 20.0), "p300": (20.0, 300.0), "p1000": (100.0, 1000.0)}
@@ -802,6 +854,7 @@ async def _repair_failure_with_line_edits(
     event_reader: Callable[[Path], EventLog] | None,
     patch_attempts: int,
 ) -> tuple[Path, SimulationResult] | None:
+    rubric_task: str | None,
     """Repair a simulator or event error while keeping its task facts intact."""
     draft_trace["patches"] = []
     current_code = source
@@ -905,6 +958,17 @@ async def _repair_failure_with_line_edits(
         current_code = patched_code
         current_error = event_validation.detail
         patch_record["status"] = "event_rejected"
+            audit, scientific_failure = _scientific_audit(
+                rubric_task, patched_events, patched_code, instruction, scientific_source,
+            )
+            if audit is not None:
+                patch_record["local_rubric_audit"] = audit
+            if scientific_failure is not None:
+                patch_record["status"] = "scientific_audit_rejected"
+                patch_record["diagnostic"] = scientific_failure
+                # A broad scientific omission needs a fresh complete protocol,
+                # not another narrow line edit of this mechanically valid patch.
+                return None
     return None
 
 
@@ -924,6 +988,7 @@ async def generate_ot2_protocol(
     simulation_timeout_s: float = 180.0,
     http_client: Any = None,
     completion: Callable[..., Awaitable[StructuredResponse]] | None = None,
+    rubric_task: str | None = None,
     patch_completion: Callable[..., Awaitable[StructuredResponse]] | None = None,
     event_reader: Callable[[Path], EventLog] | None = None,
 ) -> GenerationResult:
@@ -943,6 +1008,8 @@ async def generate_ot2_protocol(
     directory = Path(task_dir).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
     resolved_labware_dir = Path(labware_dir).expanduser().resolve() if labware_dir is not None else None
+    if rubric_task is not None and rubric_task not in RUBRIC_IDS:
+        raise ValueError(f"Unknown pinned Text2WetLab task: {rubric_task}")
     if resolved_labware_dir is not None and not resolved_labware_dir.is_dir():
         raise ValueError(f"Custom labware directory does not exist: {resolved_labware_dir}.")
     output_path = directory / "protocol.py"
@@ -1142,11 +1209,14 @@ async def generate_ot2_protocol(
                         shutil.copyfile(patched_candidate, output_path)
                         attempt["accepted_via_patch"] = True
                         trace["status"] = "simulated"
+                        rubric_task=rubric_task,
                         trace["static_validation_passed"] = True
                         trace["event_validation_passed"] = True
                         _write_json_atomic(trace_path, trace)
                         return GenerationResult(output_path, trace_path, index + 1, patched_simulation)
-                prior_code, prior_error = code, simulation.detail
+                patch_science_error = next((patch["diagnostic"] for patch in reversed(attempt.get("patches", []))
+                                            if patch.get("status") == "scientific_audit_rejected"), None)
+                prior_code, prior_error = code, patch_science_error or simulation.detail
                 continue
             if simulation.status == "passed" and event_validation.status == "failed":
                 if patch_complete is not None and patch_attempts:
@@ -1175,11 +1245,14 @@ async def generate_ot2_protocol(
                         shutil.copyfile(patched_candidate, output_path)
                         attempt["accepted_via_patch"] = True
                         trace["status"] = "simulated"
+                        rubric_task=rubric_task,
                         trace["static_validation_passed"] = True
                         trace["event_validation_passed"] = True
                         _write_json_atomic(trace_path, trace)
                         return GenerationResult(output_path, trace_path, index + 1, patched_simulation)
-                prior_code, prior_error = code, event_validation.detail
+                patch_science_error = next((patch["diagnostic"] for patch in reversed(attempt.get("patches", []))
+                                            if patch.get("status") == "scientific_audit_rejected"), None)
+                prior_code, prior_error = code, patch_science_error or event_validation.detail
                 continue
             # An unavailable simulator is stated explicitly in the trace and result.
             os.replace(candidate, output_path)
@@ -1187,6 +1260,16 @@ async def generate_ot2_protocol(
             trace["status"] = "simulated" if simulation.status == "passed" else "static_validated_only"
             trace["static_validation_passed"] = True
             trace["event_validation_passed"] = simulation.status == "passed"
+            if simulation.status == "passed":
+                audit, scientific_failure = _scientific_audit(
+                    rubric_task, event_log, code, instruction, method_text,
+                )
+                if audit is not None:
+                    attempt["local_rubric_audit"] = audit
+                    attempt["scientific_audit"] = "failed" if scientific_failure else "passed"
+                if scientific_failure is not None:
+                    prior_code, prior_error = code, scientific_failure
+                    continue
             _write_json_atomic(trace_path, trace)
             return GenerationResult(output_path, trace_path, index + 1, simulation)
         trace["status"] = "failed"
