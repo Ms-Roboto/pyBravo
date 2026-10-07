@@ -684,6 +684,7 @@ async def test_generation_uses_verbatim_methods_passage_with_source_digest(tmp_p
     assert "premix before adding primers or templates separately" in messages_seen[0]["content"]
     assert "Do not reinterpret a stated starting stock identity or concentration" in messages_seen[0]["content"]
     assert "A vertical range such as A1:G1" in messages_seen[0]["content"]
+    assert "never an exploratory preparation followed by a corrected preparation" in messages_seen[0]["content"]
     trace = json.loads(result.trace_path.read_text(encoding="utf-8"))
     assert trace["scientific_source"]["source_sha256"] == hashlib.sha256(source.encode()).hexdigest()
     assert trace["scientific_source"]["strategy"] == "verbatim_methods_section"
