@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts import evaluate_text2wetlab as runner
 
 
@@ -249,10 +251,13 @@ def test_event_audit_flags_cross_sample_aspiration_but_not_stock_distribution():
     }]
 
 
-def test_pinned_runlog_can_return_json_on_stdout_or_in_output_file(tmp_path):
+def test_pinned_runlog_requires_file_except_for_rna_stdout_transport(tmp_path):
     output = tmp_path / "result.json"
     stdout_payload = {"ok": True, "events": [{"kind": "pick"}]}
     file_payload = {"ok": True, "events": [{"kind": "drop"}]}
-    assert runner._runlog_payload(output, json.dumps(stdout_payload)) == stdout_payload
+    with pytest.raises(ValueError, match="required result file"):
+        runner._runlog_payload(output, json.dumps(stdout_payload))
+    assert runner._runlog_payload(output, json.dumps(stdout_payload),
+                                  allow_stdout=True) == stdout_payload
     output.write_text(json.dumps(file_payload), encoding="utf-8")
     assert runner._runlog_payload(output, json.dumps(stdout_payload)) == file_payload

@@ -160,8 +160,10 @@ def _cross_well_aspiration_risks(events: list[dict]) -> list[dict]:
     return findings
 
 
-def _runlog_payload(output: Path, stdout: str) -> dict:
-    """Accept the pinned logger's file or stdout JSON transport."""
+def _runlog_payload(output: Path, stdout: str, *, allow_stdout: bool = False) -> dict:
+    """Require file evidence except for the pinned RNA stdout-only logger."""
+    if not output.is_file() and not allow_stdout:
+        raise ValueError("Pinned runlog did not write its required result file")
     raw = output.read_text(encoding="utf-8") if output.is_file() else stdout
     payload = json.loads(raw)
     if not isinstance(payload, dict):
@@ -173,7 +175,7 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
                      dataset_root: Path | None, labware_dir: Path | None = None,
                      instruction: str | None = None) -> dict:
     """Use the task's pinned runlog gate and preserve its action events for review."""
-    from pybravo.evals.text2wetlab.adapter import EventLog, validate_event_safety
+    from pybravo.evals.text2wetlab.adapter import record_simulation_events, validate_event_safety
     from pybravo.evals.text2wetlab.rubric_audit import audit_rubric_coverage
 
     source = _source_bytes(task, "tests/runlog.py", dataset_root)
@@ -184,6 +186,7 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
         return {"status": "unavailable", "detail": "Simulator environment has no Python executable"}
     runlog_file = task_dir / "official_runlog.py"
     runlog_file.write_bytes(source)
+    contact_labware_dir = labware_dir
     with tempfile.TemporaryDirectory(prefix="text2wetlab-runlog-") as temp:
         temp_dir = Path(temp)
         if labware_dir is None:
@@ -194,7 +197,8 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
         try:
             completed = subprocess.run(command, capture_output=True, text=True, timeout=600,
                                        env=_local_env(), check=False)
-            payload = _runlog_payload(output, completed.stdout)
+            payload = _runlog_payload(output, completed.stdout,
+                                      allow_stdout=task == "opentrons-rna-extraction")
         except (subprocess.TimeoutExpired, OSError, ValueError) as exc:
             return {"status": "error", "source_sha256": _digest(source),
                     "detail": f"{type(exc).__name__}: {exc}"[-1500:]}
@@ -207,13 +211,32 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
                 "detail": "runlog did not return an events array"}
     events_file = task_dir / "official_events.json"
     events_file.write_text(json.dumps(events, indent=2) + "\n", encoding="utf-8")
+    # The pinned log is the scoring evidence. Run a separate trusted wrapper
+    # around that same logger to retain dispense-height evidence omitted by the
+    # pinned JSON format. Never substitute its output for the pinned log.
+    try:
+        annotated = record_simulation_events(
+            protocol, event_logger_path=runlog_file, simulator_command=simulator,
+            labware_dir=contact_labware_dir, timeout_s=600,
+        )
+    except Exception as exc:
+        return {"status": "error", "source_sha256": _digest(source),
+                "detail": f"Contact evidence unavailable: {type(exc).__name__}: {exc}"[-1500:]}
+    clean_events = [{key: value for key, value in event.items()
+                     if key != "at_or_above_well_rim"} for event in annotated.events]
+    if clean_events != events or annotated.labware != (payload.get("labware") or {}):
+        return {"status": "error", "source_sha256": _digest(source),
+                "detail": "Contact wrapper changed the pinned runlog events or labware."}
+    annotated_file = task_dir / "contact_evidence_events.json"
+    annotated_file.write_text(json.dumps(annotated.events, indent=2) + "\n", encoding="utf-8")
     counts = Counter(str(event.get("kind")) for event in events if isinstance(event, dict))
     risks = _cross_well_aspiration_risks(events)
-    semantic = validate_event_safety(EventLog(events, payload.get("labware") or {}), instruction=instruction)
+    semantic = validate_event_safety(annotated, instruction=instruction)
     rubric_audit = audit_rubric_coverage(task, events, protocol.read_text(encoding="utf-8"),
                                          payload.get("labware") or {})
     return {"status": "passed", "source_sha256": _digest(source),
             "events_path": str(events_file), "event_count": len(events),
+            "contact_evidence_events_path": str(annotated_file),
             "event_kinds": dict(sorted(counts.items())),
             "cross_well_aspiration_risk_count": len(risks),
             "cross_well_aspiration_risks": risks[:10],
