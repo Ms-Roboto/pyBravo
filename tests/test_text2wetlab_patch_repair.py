@@ -53,6 +53,20 @@ def test_insertion_and_append_use_original_line_coordinates():
     assert patched == "zero()\none()\ntwo()\nthree()\n"
 
 
+def test_bounded_many_stage_repairs_are_allowed_without_a_broad_rewrite():
+    source = "".join(f"stage_{index}()\n" for index in range(1, 25))
+    edits = [{"start_line": index, "end_line": index,
+              "replacement": f"repaired_stage_{index}()"}
+             for index in range(1, 25, 2)]
+    patched = apply_line_patch(source, {"edits": edits})
+    assert patched == "".join(
+        f"{'repaired_' if index % 2 else ''}stage_{index}()\n"
+        for index in range(1, 25)
+    )
+    with pytest.raises(PatchError, match="one to sixteen"):
+        apply_line_patch(source, {"edits": edits + edits[:5]})
+
+
 @pytest.mark.parametrize("edits", [
     [],
     [{"start_line": 0, "end_line": 0, "replacement": "x"}],

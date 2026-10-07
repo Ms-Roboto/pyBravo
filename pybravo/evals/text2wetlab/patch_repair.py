@@ -122,8 +122,8 @@ def apply_line_patch(source: str, payload: dict[str, Any]) -> str:
     task-fact checks before accepting the resulting protocol.
     """
     edits = payload.get("edits")
-    if not isinstance(edits, list) or not 1 <= len(edits) <= 8:
-        raise PatchError("Expected one to eight line edits.")
+    if not isinstance(edits, list) or not 1 <= len(edits) <= 16:
+        raise PatchError("Expected one to sixteen line edits.")
     lines = source.splitlines()
     line_count = len(lines)
     normalized: list[tuple[int, int, str]] = []
@@ -141,6 +141,8 @@ def apply_line_patch(source: str, payload: dict[str, Any]) -> str:
             raise PatchError("A patch cannot replace more than 60 original lines at once.")
         normalized.append((start, end, replacement))
     normalized.sort()
+    if sum(max(0, end - start + 1) for start, end, _ in normalized) > 160:
+        raise PatchError("A patch cannot replace more than 160 original lines in total.")
     for (left_start, left_end, _), (right_start, right_end, _) in zip(normalized, normalized[1:]):
         if right_start <= max(left_end + 1, left_start):
             raise PatchError("Edits overlap or share an ambiguous insertion boundary.")
