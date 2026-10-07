@@ -323,6 +323,61 @@ def _refill_control_facts(source: str) -> tuple[list[str], Counter[str], Counter
     return controls, guards, guard_numbers
 
 
+def _multichannel_column_anchor_repair(source: str, candidate: str) -> bool:
+    """Recognize only list-of-wells to first-well repairs on a multi head.
+
+    Opentrons represents a full column by its first well when addressing an
+    eight-channel pipette. A rejected script may pass ``columns()[i]`` (a
+    Python list) instead. This narrow normalization keeps the same column and
+    rejects a changed column, a different pipette, or a single-channel edit.
+    """
+    before_tree, after_tree = ast.parse(source), ast.parse(candidate)
+    multi_names: set[str] = set()
+    column_names: set[str] = set()
+    for node in ast.walk(before_tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        name = node.targets[0].id
+        if (isinstance(node.value, ast.Call) and _call_method(node.value) == "load_instrument"
+                and node.value.args and isinstance(node.value.args[0], ast.Constant)
+                and isinstance(node.value.args[0].value, str)
+                and "_multi_" in node.value.args[0].value):
+            multi_names.add(name)
+        if (isinstance(node.value, ast.Subscript) and isinstance(node.value.value, ast.Call)
+                and _call_method(node.value.value) == "columns"):
+            column_names.add(name)
+
+    def column_vector(node: ast.AST) -> bool:
+        return ((isinstance(node, ast.Name) and node.id in column_names)
+                or (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Call)
+                    and _call_method(node.value) == "columns"))
+
+    def signature(tree: ast.AST, *, normalize: bool) -> list[tuple[str, str, list[str], list[tuple[str | None, str]]]]:
+        result = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or (method := _call_method(node)) not in _LIQUID_METHODS:
+                continue
+            receiver = node.func.value
+            pipette = receiver.id if isinstance(receiver, ast.Name) else ""
+            volume = _volume_argument(node, method)
+
+            def dump_location(location: ast.expr) -> str:
+                if (normalize and pipette in multi_names
+                        and isinstance(location, ast.Subscript)
+                        and isinstance(location.slice, ast.Constant)
+                        and location.slice.value == 0 and column_vector(location.value)):
+                    location = location.value
+                return ast.dump(location, include_attributes=False)
+
+            result.append((method, ast.dump(receiver, include_attributes=False),
+                           [dump_location(arg) for arg in node.args if arg is not volume],
+                           [(word.arg, dump_location(word.value)) for word in node.keywords
+                            if word.value is not volume]))
+        return result
+
+    return signature(before_tree, normalize=False) == signature(after_tree, normalize=True)
+
+
 def preserve_simulator_repair_facts(
     source: str, candidate: str, *, allow_tip_refill: bool = False,
 ) -> str | None:
@@ -338,7 +393,9 @@ def preserve_simulator_repair_facts(
         return "The patch changed loaded hardware, labware, or deck bindings."
     if before["liquids"] != after["liquids"] or before["volume_bindings"] != after["volume_bindings"]:
         return "The patch changed liquid actions or their declared volumes."
-    if before["locations"] != after["locations"] or before["reagent_bindings"] != after["reagent_bindings"]:
+    if ((before["locations"] != after["locations"]
+         and not _multichannel_column_anchor_repair(source, candidate))
+            or before["reagent_bindings"] != after["reagent_bindings"]):
         return "The patch changed an existing liquid source, destination, or reagent binding."
     if before["control"] != after["control"] or (
         after["tip_counts"]["reset_tipracks"] > before["tip_counts"]["reset_tipracks"]

@@ -120,6 +120,29 @@ def test_simulator_repair_may_correct_only_a_computed_well_index():
     assert preserve_simulator_repair_facts(bad, fixed) is None
 
 
+def test_multichannel_column_list_can_be_repaired_to_its_first_well_only():
+    source = '''from opentrons import protocol_api
+metadata = {"apiLevel": "2.15"}
+def run(protocol):
+    tips = protocol.load_labware("opentrons_96_tiprack_200ul", 1)
+    plate = protocol.load_labware("corning_96_wellplate_360ul_flat", 2)
+    waste = protocol.load_labware("corning_96_wellplate_360ul_flat", 3)
+    pipette = protocol.load_instrument("p300_multi_gen2", "left", tip_racks=[tips])
+    for index in range(2):
+        column = plate.columns()[index]
+        pipette.pick_up_tip()
+        pipette.aspirate(100, column)
+        pipette.dispense(100, waste.columns()[index])
+        pipette.drop_tip()
+'''
+    fixed = source.replace("100, column)", "100, column[0])").replace(
+        "100, waste.columns()[index])", "100, waste.columns()[index][0])")
+    assert preserve_simulator_repair_facts(source, fixed) is None
+    assert preserve_simulator_repair_facts(source, fixed.replace("column[0]", "column[1]")) is not None
+    single = source.replace("p300_multi_gen2", "p300_single_gen2")
+    assert preserve_simulator_repair_facts(single, fixed.replace("p300_multi_gen2", "p300_single_gen2")) is not None
+
+
 def test_simulator_repair_may_add_fresh_tip_cycle_without_removing_work():
     fixed = PROGRAM.replace("        pipette.mix(2, volume)",
                             "        pipette.drop_tip()\n"
