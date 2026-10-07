@@ -196,6 +196,9 @@ class LabwareFacts:
     # Trusted anchors for an entire multichannel pickup. A boolean alone does
     # not establish that B1 or an irregular column is a valid 8-channel anchor.
     multichannel_anchor_wells: frozenset[str] = frozenset()
+    # Exact per-well capacities from the installed labware definition, when
+    # present. They are independent of any model-authored initial volume.
+    well_capacity_ul: Mapping[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -445,6 +448,10 @@ def _facts_are_valid(labware: Mapping[str, LabwareFacts],
                                  not math.isfinite(facts.tip_capacity_ul) or
                                  facts.tip_capacity_ul <= 0):
             raise ValueError(f"Trusted tip rack {name!r} needs a positive capacity.")
+        if (set(facts.well_capacity_ul) - facts.wells or
+                any(not math.isfinite(value) or value <= 0
+                    for value in facts.well_capacity_ul.values())):
+            raise ValueError(f"Trusted labware {name!r} has invalid well capacities.")
     for name, facts in pipettes.items():
         if (not math.isfinite(facts.min_volume_ul) or
                 not math.isfinite(facts.max_volume_ul) or

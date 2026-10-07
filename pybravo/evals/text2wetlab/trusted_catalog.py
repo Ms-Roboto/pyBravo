@@ -137,6 +137,13 @@ def facts_from_definitions(
             is_tiprack=is_tiprack, tip_capacity_ul=capacity,
             multichannel_compatible=bool(anchors),
             multichannel_anchor_wells=anchors,
+            well_capacity_ul={well: float(details["totalLiquidVolume"])
+                              for well, details in wells.items()
+                              if isinstance(details, dict)
+                              and isinstance(details.get("totalLiquidVolume"), (int, float))
+                              and not isinstance(details["totalLiquidVolume"], bool)
+                              and math.isfinite(details["totalLiquidVolume"])
+                              and details["totalLiquidVolume"] > 0},
         )
     pipettes: dict[str, PipetteFacts] = {}
     for name, definition in pipette_definitions.items():

@@ -50,6 +50,32 @@ serial recovery pipetting begins. Simulation does
 not establish that the protocol satisfies a scientific rubric or is safe to
 run on physical hardware.
 
+## Optional phased ActionPlan experiment
+
+`scripts/experiment_text2wetlab_phased_action_ir.py` is an isolated alternative
+for protocols too long to fit in one local-model response. The first Qwen call
+authors the fixed OT-2 setup, cited initial-supply claims, and a short ordered
+stage outline. A separate call authors the actions for each stage. Every
+action cites an exact pinned task or paper line. The merger only concatenates
+accepted stage actions; it inserts no experimental steps.
+
+Each prefix is compiled against the installed OT-2 catalog, statically checked,
+simulated, passed through the pinned event logger and event-safety check, and
+audited for tip use and per-well material balance before the next Qwen call.
+Unknown starting volumes stay unknown and are reported for review. A failed
+prefix stops the experiment; the raw Qwen response and failure remain in the
+output directory. The complete merged plan then runs the existing pinned lint,
+simulator, event, and local science gates. `official_score` is always null;
+Harbor's private scoring is not run. This path never controls hardware or
+changes the production generator.
+
+```sh
+.venv/bin/python scripts/experiment_text2wetlab_phased_action_ir.py \
+  --task opentrons-rna-extraction \
+  --simulator /path/to/opentrons_simulate \
+  --output-dir /tmp/text2wetlab-rna-phased
+```
+
 ## Optional per-well material ledger
 
 `material_ledger.audit_material_flow()` can inspect the trusted logger's
