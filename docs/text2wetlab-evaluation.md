@@ -12,9 +12,10 @@ score.
 
 The requested 100% means **35/35 Harbor rubric items across all seven tasks** under the
 dataset's actual verifier. The local runner has **no official Harbor score** (official_score
-is null). The Docker daemon was unavailable and ANTHROPIC_API_KEY was unset in this
-environment when checked. Even with those services available, a local simulator or audit
-pass would not substitute for the official verifier. All protocol candidates in this effort
+is null). Docker Desktop was started on 2026-10-07, and pinned container checks now run;
+`ANTHROPIC_API_KEY` remains unset, so the rubric judge cannot run. A local simulator or
+pre-judge container pass does not substitute for the complete official verifier. All protocol
+candidates in this effort
 are authored by the local Qwen model at http://sparky.local:8000/v1; pyBravo supplies source
 material, prompts, validators, and storage, not hand-written protocol answers.
 
@@ -65,10 +66,11 @@ an official score.
 | RNA extraction | No accepted local simulation | Fresh drafts exceeded the effective 200 µL filter-tip capacity or exhausted installed tips; 48-sample mapping and elution recovery remain unresolved. |
 
 The provenance-checked current recheck reports are in
-/tmp/pybravo-text2wetlab-a1-saved-recheck-full/,
-/tmp/pybravo-text2wetlab-split-recheck-current/,
-/tmp/pybravo-text2wetlab-ampure-recheck-current/, and
-/tmp/pybravo-text2wetlab-ecoli-recheck-current/. Their `generation` field is null: each
+/tmp/pybravo-text2wetlab-a1-current-timed/,
+/tmp/pybravo-text2wetlab-split-current-timed/,
+/tmp/pybravo-text2wetlab-ampure-current-timed2/,
+/tmp/pybravo-text2wetlab-ecoli-current-timed/, and
+/tmp/pybravo-text2wetlab-colony-current-timed/. Their `generation` field is null: each
 recheck verified the original Qwen trace and protocol digest, then applied the current
 pinned gates without asking the model to regenerate a protocol. Other reports are in
 /tmp/pybravo-text2wetlab-golden-planning/, /tmp/pybravo-text2wetlab-golden-direct5/,
@@ -83,9 +85,19 @@ science-gated rerun also failed: Qwen repaired tip isolation but overfilled a ci
 PCR and did not produce an accepted ordered handoff sequence.
 
 The read-only aggregate audit is
-`/tmp/pybravo-text2wetlab-current-saved-evidence-audit.json`. It confirms the five
+`/tmp/pybravo-text2wetlab-current-timed-evidence-audit.json`. It confirms the five
 mechanical-evidence tasks above; Golden Gate has failed observable science checks and RNA
 has no accepted local report. It cannot run the official anti-hack gate or rubric judge.
+
+The **unchanged pinned `tests/test.sh`** has now also run inside task-specific Docker images
+for six saved Qwen candidates. A1–A12, split, AMPure, E. coli, colony PCR, and the older
+Golden Gate candidate all passed that container's lint, anti-hack, and simulation gates.
+Golden Gate remains rejected by the separate local scientific audit. In all six container
+runs the judge returned an authentication error because no Anthropic key was supplied;
+its zero `reward` is therefore **not** a judged rubric score. Candidate digests, pinned
+test/Dockerfile hashes, verdicts, and verifier paths are recorded in
+`/tmp/pybravo-text2wetlab-official-container-summary-all.json`. RNA has no accepted
+candidate to check. No official 35-item claim follows from these pre-judge passes.
 
 ## How the current local harness stays grounded
 
