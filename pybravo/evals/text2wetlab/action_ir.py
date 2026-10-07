@@ -30,6 +30,7 @@ class LabwareLoad(_Strict):
     load_name: str = Field(min_length=1)
     slot: int | None = Field(default=None, ge=1, le=11)
     module_id: str | None = None
+    label: str | None = Field(default=None, min_length=1)
 
 
 class ModuleLoad(_Strict):
@@ -712,12 +713,13 @@ def compile_actions(
         lines.append(f"    {var_by_module[item.id]} = protocol.load_module("
                      f"{item.model!r}{location})")
     for item in plan.labware:
+        label = "" if item.label is None else f", label={item.label!r}"
         if item.module_id is not None:
             lines.append(f"    {var_by_labware[item.id]} = "
-                         f"{var_by_module[item.module_id]}.load_labware({item.load_name!r})")
+                         f"{var_by_module[item.module_id]}.load_labware({item.load_name!r}{label})")
         else:
             lines.append(f"    {var_by_labware[item.id]} = protocol.load_labware("
-                         f"{item.load_name!r}, {item.slot!r})")
+                         f"{item.load_name!r}, {item.slot!r}{label})")
     for item in plan.pipettes:
         racks = ", ".join(var_by_labware[rack] for rack in item.tip_rack_ids)
         lines.append(f"    {var_by_pipette[item.id]} = protocol.load_instrument("
