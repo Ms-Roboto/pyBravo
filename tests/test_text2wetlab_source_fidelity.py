@@ -152,4 +152,6 @@ def test_mixed_tip_lineage_is_left_for_review_instead_of_false_attribution():
 
 def test_guidance_forbids_unsourced_predilution_to_hide_subminimum_transfer():
     assert "do not invent a diluted stock" in SOURCE_FIDELITY_GUIDANCE.lower()
-    assert "manual operator-handoff stage" in SOURCE_FIDELITY_GUIDANCE
+    assert "newly prepared dilution" in SOURCE_FIDELITY_GUIDANCE
+    assert "stock-equivalent" in SOURCE_FIDELITY_GUIDANCE
+    assert "manual operator-handoff stage" in " ".join(SOURCE_FIDELITY_GUIDANCE.split())

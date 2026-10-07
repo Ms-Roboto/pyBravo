@@ -7,7 +7,10 @@ import json
 import pytest
 
 from pybravo.evals.text2wetlab import adapter
-from pybravo.workflow.protocols.llm import StructuredResponse
+from pybravo.evals.text2wetlab.planning import DeckSource, OT2Plan, PlannedAddition, PlannedReaction
+from pybravo.evals.text2wetlab.planning_runtime import PlanningResult
+from pybravo.evals.text2wetlab.reaction import Addition
+from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse
 
 VALID_PROTOCOL = '''from opentrons import protocol_api
 metadata = {"apiLevel": "2.15"}
@@ -21,6 +24,17 @@ def run(protocol: protocol_api.ProtocolContext):
         pipette.transfer(100, source["A1"], well, new_tip="always")
 '''
 REVISED_PROTOCOL = VALID_PROTOCOL.replace("    for well in plate.rows()[0]:", "    # Revised tip sequence\n    for well in plate.rows()[0]:")
+
+SOURCE_DRIFT_PROTOCOL = '''from opentrons import protocol_api
+metadata = {"apiLevel": "2.15"}
+
+def run(protocol: protocol_api.ProtocolContext):
+    tips = protocol.load_labware("opentrons_96_tiprack_20ul", 10)
+    primer = protocol.load_labware("corning_96_wellplate_360ul_flat", 4, label="primer_plate")
+    reaction = protocol.load_labware("corning_96_wellplate_360ul_flat", 2, label="reaction_plate")
+    pipette = protocol.load_instrument("p20_single_gen2", "left", tip_racks=[tips])
+    pipette.transfer(1, primer["A1"], reaction["A1"], new_tip="always")
+'''
 
 
 def _local_science_audit(status: str, *, evidence: str = "") -> dict:
@@ -255,6 +269,49 @@ async def test_scientific_needs_review_does_not_block_simulated_candidate(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_simulated_direct_source_dose_must_match_accepted_local_plan(tmp_path, monkeypatch):
+    plan = OT2Plan(
+        (DeckSource("primer_plate", "primer pairs", "corning_96_wellplate_360ul_flat", ()),),
+        (PlannedReaction("reaction", 0.5, None, (
+            PlannedAddition(Addition("primer pairs", 0.5), "primer_plate", ()),
+        ), ()),), (), (),
+    )
+
+    async def fake_plan(**kwargs):
+        return PlanningResult(plan, ())
+
+    async def completion(messages, schema, **kwargs):
+        assert "stock-equivalent" in messages[0]["content"]
+        return StructuredResponse({"code": SOURCE_DRIFT_PROTOCOL}, {"model": "local-qwen"})
+
+    log = adapter.EventLog([
+        {"kind": "pick", "instrument": "P20 Single", "channels": 1},
+        {"kind": "aspirate", "instrument": "P20 Single", "channels": 1,
+         "volume": 1.0, "well": "A1", "labware": "primer_plate on 4"},
+        {"kind": "dispense", "instrument": "P20 Single", "channels": 1,
+         "volume": 1.0, "well": "A1", "labware": "reaction_plate on 2"},
+        {"kind": "drop", "instrument": "P20 Single", "channels": 1},
+    ], {
+        "primer_plate on 4": "corning_96_wellplate_360ul_flat",
+        "reaction_plate on 2": "corning_96_wellplate_360ul_flat",
+    })
+    monkeypatch.setattr(adapter, "run_grounded_plan", fake_plan)
+    monkeypatch.setattr(adapter, "labware_geometry_context", lambda *args, **kwargs: {})
+    monkeypatch.setattr(adapter, "simulate_protocol",
+                        lambda *args, **kwargs: adapter.SimulationResult("passed", "ok"))
+    with pytest.raises(adapter.GenerationError, match="simulated liquid actions differ"):
+        await adapter.generate_ot2_protocol(
+            "Transfer primer pairs to a reaction well.", tmp_path,
+            completion=completion, event_reader=lambda _: log,
+            evidence_planning=True, repair_attempts=0, patch_attempts=0,
+        )
+    trace = json.loads((tmp_path / "generation_trace.json").read_text())
+    assert trace["status"] == "failed"
+    assert trace["attempts"][0]["source_fidelity"][0]["code"] == "delivered_volume_differs_from_plan"
+    assert not (tmp_path / "protocol.py").exists()
+
+
+@pytest.mark.asyncio
 async def test_scientific_failure_in_mechanically_valid_patch_needs_full_repair(tmp_path, monkeypatch):
     async def completion(messages, schema, **kwargs):
         code = VALID_PROTOCOL if not any("Your previous generated code failed" in m["content"]
@@ -262,6 +319,7 @@ async def test_scientific_failure_in_mechanically_valid_patch_needs_full_repair(
         return StructuredResponse({"code": code}, {"model": "local-qwen"})
 
     async def patch_completion(*args, **kwargs):
+        assert kwargs["config"].max_tokens == 4096
         return StructuredResponse({"edits": [{"start_line": 1, "end_line": 0,
                                                "replacement": "# simulator repair"}]},
                                   {"model": "local-qwen"})
@@ -277,6 +335,7 @@ async def test_scientific_failure_in_mechanically_valid_patch_needs_full_repair(
         "Transfer 100 µL from reservoir A1 into each well A1 through A12.", tmp_path,
         rubric_task="a1-a12-100ul", completion=completion, patch_completion=patch_completion,
         event_reader=lambda _: adapter.EventLog([], {}), repair_attempts=1, patch_attempts=1,
+        config=LocalLLMConfig(max_tokens=12_000),
     )
     assert result.attempts == 2
     assert result.protocol_path.read_text() == REVISED_PROTOCOL

@@ -21,9 +21,15 @@ SOURCE_FIDELITY_GUIDANCE = """A quoted paper quantity and a cited plan are const
 Do not silently change a planned transfer to the nearest executable pipette volume.
 If a requested stroke is below every loaded pipette's stated working minimum,
 do not invent a diluted stock or claim that an inventory vessel contains a
-different concentration. Keep the unsupported transfer unresolved, or assign
-it to a clearly named manual operator-handoff stage with its actual component
-and volume when the task permits manual work. Before code generation, account
+different concentration. If a listed diluent and a suitable vessel are
+available, a newly prepared dilution may solve this: add an explicit earlier
+preparation stage, keep each stock and diluent preparation stroke inside a
+loaded pipette's working range, and preserve the required stock-equivalent
+dose in the final reaction. Cite the source stock concentration and calculate
+the dilution factor; do not merely round the aliquot up. Otherwise keep the
+unsupported transfer unresolved, or assign it to a clearly named manual
+operator-handoff stage with its actual component and volume when the task
+permits manual work. Before code generation, account
 for every robot-delivered component in a named pipette stage and every manual
 addition in a named manual stage. The code's delivered quantities must agree
 with the cited plan; if a source-supported alternative changes the plan,

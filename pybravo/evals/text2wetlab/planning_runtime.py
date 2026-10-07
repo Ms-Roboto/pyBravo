@@ -21,6 +21,11 @@ from pybravo.evals.text2wetlab.planning import (
     audit_plan,
     parse_plan,
 )
+from pybravo.evals.text2wetlab.source_fidelity import (
+    SOURCE_FIDELITY_GUIDANCE,
+    audit_inventory_strength_claims,
+    audit_manual_addition_stages,
+)
 from pybravo.workflow.protocols.llm import LocalLLMConfig, ProtocolLLMError, StructuredResponse
 
 _PLANNING_CHECKLIST = """Before returning the plan, check these distinctions against the task and paper:
@@ -50,6 +55,9 @@ _REPAIR_HINTS: dict[str, str] = {
     "insufficient_tips": "Count pickups across all stages; plan fresh-rack reloads only if explicitly authorized by the task.",
     "pipette_range_mismatch": "Use a provided pipette and tip rack that support each single stroke; split a large total into valid strokes.",
     "module_state_mismatch": "Place the required state-setting stage before the dependent pipetting stage.",
+    "source_strength_conflicts_with_inventory": "Keep the stock concentration named in the starting-inventory quote; do not reinterpret a loaded stock as a prepared dilution.",
+    "addition_stock_strength_conflicts_with_inventory": "Use the inventory-cited stock concentration for this addition, then recalculate its required volume.",
+    "manual_addition_stage_missing": "Name an explicit, ordered manual handoff stage for each manual liquid addition and link it with stage_name.",
 }
 
 
@@ -116,7 +124,8 @@ async def run_grounded_plan(
             "reagents or liquid volumes):\n" + json.dumps(geometry, sort_keys=True)
         )
     messages = [
-        {"role": "system", "content": PLAN_SYSTEM_PROMPT + "\n\n" + _PLANNING_CHECKLIST},
+        {"role": "system", "content": (PLAN_SYSTEM_PROMPT + "\n\n" + _PLANNING_CHECKLIST
+                                       + "\n\n" + SOURCE_FIDELITY_GUIDANCE)},
         {"role": "user", "content": user_text},
     ]
     records: list[dict[str, Any]] = []
@@ -149,7 +158,9 @@ async def run_grounded_plan(
             record["error"] = str(exc)
             feedback = _parse_feedback(exc)
         else:
-            issues = audit_plan(plan, geometry=geometry)
+            issues = (audit_plan(plan, geometry=geometry)
+                      + audit_inventory_strength_claims(plan)
+                      + audit_manual_addition_stages(plan))
             record["issues"] = [issue.__dict__ for issue in issues]
             errors = [issue for issue in issues if issue.severity == "error"]
             if not errors:

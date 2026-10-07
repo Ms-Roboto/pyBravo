@@ -31,11 +31,15 @@ from pybravo.evals.text2wetlab.patch_repair import (
     preserve_simulator_repair_facts,
     task_allows_tip_refill,
 )
-from pybravo.evals.text2wetlab.planning import plan_to_prompt
+from pybravo.evals.text2wetlab.planning import OT2Plan, plan_to_prompt
 from pybravo.evals.text2wetlab.planning_runtime import run_grounded_plan
 from pybravo.evals.text2wetlab.reaction import PipetteRange, Stroke, audit_strokes
 from pybravo.evals.text2wetlab.rubric_audit import RUBRIC_IDS, audit_rubric_coverage
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
+from pybravo.evals.text2wetlab.source_fidelity import (
+    SOURCE_FIDELITY_GUIDANCE,
+    audit_direct_source_delivery,
+)
 from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse, structured_json
 
 
@@ -271,6 +275,25 @@ def _scientific_audit(
         "scientific requirement from this diagnostic.\n" + quoted
     )
     return audit, diagnostic
+
+
+def _plan_execution_audit(plan: OT2Plan | None, event_log: EventLog) -> tuple[list[dict[str, Any]], str | None]:
+    """Reject observable deviations from an accepted, cited local-model plan."""
+    if plan is None:
+        return [], None
+    issues = audit_direct_source_delivery(plan, event_log.events, labware=event_log.labware)
+    findings = [issue.__dict__ for issue in issues]
+    if not issues:
+        return findings, None
+    visible = "\n".join(f"- {issue.message}" for issue in issues[:8])
+    if len(issues) > 8:
+        visible += f"\n- … and {len(issues) - 8} more direct-source discrepancy/ies."
+    return findings, (
+        "The simulated liquid actions differ from your own cited, audited plan. "
+        "Keep the task and paper authoritative; regenerate the plan if a change "
+        "is scientifically supported instead of silently changing code volumes.\n"
+        + visible
+    )
 
 
 def _validate_literal_pipette_volumes(run: ast.FunctionDef) -> None:
@@ -855,6 +878,7 @@ async def _repair_failure_with_line_edits(
     event_reader: Callable[[Path], EventLog] | None,
     patch_attempts: int,
     rubric_task: str | None,
+    accepted_plan: OT2Plan | None = None,
 ) -> tuple[Path, SimulationResult] | None:
     """Repair a simulator or event error while keeping its task facts intact."""
     draft_trace["patches"] = []
@@ -862,7 +886,7 @@ async def _repair_failure_with_line_edits(
     current_error = diagnostic
     rejected_hashes = {hashlib.sha256(source.encode("utf-8")).hexdigest()}
     base_config = config or LocalLLMConfig.from_env()
-    patch_config = replace(base_config, max_tokens=min(base_config.max_tokens, 2048),
+    patch_config = replace(base_config, max_tokens=min(base_config.max_tokens, 4096),
                            retries=0, enable_thinking=False)
     for patch_number in range(1, patch_attempts + 1):
         patch_record: dict[str, Any] = {
@@ -958,6 +982,13 @@ async def _repair_failure_with_line_edits(
         patch_record["event_detail"] = event_validation.detail
         patch_record["event_count"] = event_validation.event_count
         if event_validation.status == "passed":
+            plan_findings, plan_failure = _plan_execution_audit(accepted_plan, patched_events)
+            if accepted_plan is not None:
+                patch_record["source_fidelity"] = plan_findings
+            if plan_failure is not None:
+                patch_record["status"] = "source_fidelity_rejected"
+                patch_record["diagnostic"] = plan_failure
+                return None
             audit, scientific_failure = _scientific_audit(
                 rubric_task, patched_events, patched_code, instruction, scientific_source,
             )
@@ -1053,7 +1084,7 @@ async def generate_ot2_protocol(
     )
     trace["labware_geometry"] = geometry
     base_messages = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": _SYSTEM_PROMPT + "\n\n" + SOURCE_FIDELITY_GUIDANCE},
         {"role": "user", "content": task_text},
     ]
     if geometry:
@@ -1068,6 +1099,7 @@ async def generate_ot2_protocol(
         })
     complete = completion or structured_json
     patch_complete = patch_completion or (structured_json if completion is None else None)
+    accepted_plan: OT2Plan | None = None
     if evidence_planning:
         planned = await run_grounded_plan(
             instruction=instruction,
@@ -1084,6 +1116,7 @@ async def generate_ot2_protocol(
             "attempts": list(planned.attempts),
         }
         if planned.plan is not None:
+            accepted_plan = planned.plan
             base_messages.append({
                 "role": "user",
                 "content": (
@@ -1210,6 +1243,7 @@ async def generate_ot2_protocol(
                         event_reader=event_reader,
                         patch_attempts=patch_attempts,
                         rubric_task=rubric_task,
+                        accepted_plan=accepted_plan,
                     )
                     if repaired is not None:
                         patched_candidate, patched_simulation = repaired
@@ -1246,6 +1280,7 @@ async def generate_ot2_protocol(
                         event_reader=event_reader,
                         patch_attempts=patch_attempts,
                         rubric_task=rubric_task,
+                        accepted_plan=accepted_plan,
                     )
                     if repaired is not None:
                         patched_candidate, patched_simulation = repaired
@@ -1261,6 +1296,12 @@ async def generate_ot2_protocol(
                 prior_code, prior_error = code, patch_science_error or event_validation.detail
                 continue
             if simulation.status == "passed":
+                plan_findings, plan_failure = _plan_execution_audit(accepted_plan, event_log)
+                if accepted_plan is not None:
+                    attempt["source_fidelity"] = plan_findings
+                if plan_failure is not None:
+                    prior_code, prior_error = code, plan_failure
+                    continue
                 audit, scientific_failure = _scientific_audit(
                     rubric_task, event_log, code, instruction, method_text,
                 )
