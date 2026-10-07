@@ -2560,6 +2560,29 @@ class Bravo:
         wells = selected_tip_wells(rows, cols, selection)
         if not wells:
             raise RuntimeError("No tips are selected for the current head mode")
+        # Packing/occupancy alone cannot establish that the selected barrel can
+        # reach this rack cell. Apply the native XY mapping to explicit and
+        # restored selections too, before motion or inventory bookkeeping.
+        try:
+            target_x, target_y = self._tip_xy_target(
+                selection.location, labware, head_mode, selection.row, selection.col,
+            )
+            (x_min, x_max), (y_min, y_max) = self._axis_xy_range()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Cannot establish tip reachability at location {selection.location}: {exc}"
+            ) from exc
+        epsilon = 1e-6
+        if not (
+            x_min - epsilon <= target_x <= x_max + epsilon
+            and y_min - epsilon <= target_y <= y_max + epsilon
+        ):
+            raise RuntimeError(
+                f"Tip selection ({selection.row}, {selection.col}) at location {selection.location} "
+                f"is outside the configured X/Y range: selected head barrels require "
+                f"X {target_x:.2f}, Y {target_y:.2f} mm; "
+                f"allowed X {x_min:.2f}..{x_max:.2f}, Y {y_min:.2f}..{y_max:.2f} mm"
+            )
         self._ensure_tipbox_occupancy(selection.location, labware)
         if purpose == "pickup" and set(wells) & self._spent_tip_wells(selection.location):
             raise RuntimeError("Selected tip wells contain spent tips; load fresh tips or choose a fresh legal region")

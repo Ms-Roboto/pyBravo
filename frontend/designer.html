@@ -2180,11 +2180,11 @@ function getTipboxGeometryFromDetail(detail) {
 // → low row, low col; "front_right" → high row, high col). The tipbox
 // model is NOT row-flipped — model row 0 == top-of-display == back of the
 // labware, matching the live control app's 2D selector.
-function tipboxCellsForAnchor(tipboxGeom, headMode, anchor) {
+function tipboxCellsForAnchor(tipboxGeom, headMode, anchor, headType = designerState.headType) {
     if (!tipboxGeom || !anchor) {
         return { selected: new Set(), anchorKey: null, clampedRow: 0, clampedCol: 0 };
     }
-    const normalized = normalizeHeadModeForUi(designerState.headType, headMode);
+    const normalized = normalizeHeadModeForUi(headType, headMode);
     const rowCount = Math.max(1, Number(anchor.row_count || normalized.row_count || 1));
     const colCount = Math.max(1, Number(anchor.column_count || normalized.column_count || 1));
     const rowStride = Math.max(1, Math.floor(Number(anchor.row_stride) || 1));
@@ -2584,11 +2584,14 @@ function openTipboxPicker(location, headMode, anchorRow, anchorCol, onSave, opts
         colStride: Math.max(1, Math.floor(Number(opts.sourceNode?.properties?.col_stride) || 1)),
         location: Number(location) || 1,
         headMode: headMode || { subset_type: 'all_barrels', subset_config: 'back_left' },
+        headType: getActiveTab()?.protocolMetadata?.protocol_simulation_target?.head_type || designerState.headType,
         purpose: opts.purpose || 'pickup',
         sourceNode: opts.sourceNode || null,
         occupied,
         fresh,
         spent,
+        reachability: null,
+        lookupMessage: 'Checking rack occupancy and deck reachability…',
     };
     tbOnSave = onSave;
     tbLegalAnchors = [];
@@ -2612,9 +2615,13 @@ function closeTipboxPicker() {
 // operations are seen as occupied; cells removed by earlier Tips On are
 // seen as empty. Trash destinations skip the constraint entirely.
 async function refreshTipboxLegalAnchors() {
+    const draft = tbDraft;
+    tbDraft.reachability = null;
+    document.getElementById('hm-tipbox-save').disabled = true;
     const detail = getTipboxDetailAtLocation(tbDraft.location);
     const geom = getTipboxGeometryFromDetail(detail) || { rows: 8, cols: 12 };
-    const hm = normalizeHeadModeForUi(designerState.headType, tbDraft.headMode);
+    const target = getActiveTab()?.protocolMetadata?.protocol_simulation_target;
+    const hm = normalizeHeadModeForUi(target?.head_type || designerState.headType, tbDraft.headMode);
     const isTrash = TRASH_BASE_CLASSES.has(String(detail?.base_class || '').toLowerCase());
     if (isTrash) {
         // Trash destinations have one trivially-legal anchor at (0, 0).
@@ -2629,6 +2636,8 @@ async function refreshTipboxLegalAnchors() {
         }];
         tbDraft.row = 0;
         tbDraft.col = 0;
+        tbDraft.reachability = { assessed: true };
+        tbDraft.lookupMessage = 'Tip trash selected; physical clearance is checked during rehearsal.';
         renderTipboxGrid();
         document.getElementById('hm-tipbox-save').disabled = false;
         return;
@@ -2644,6 +2653,16 @@ async function refreshTipboxLegalAnchors() {
         col_stride: String(tbDraft.colStride || 1),
         purpose: tbDraft.purpose,
     });
+    const rackId = detail?.labware_id || detail?.id;
+    if (!rackId) {
+        tbLegalAnchors = [];
+        tbDraft.lookupMessage = 'Choose a catalog tip box at this deck position before selecting tips.';
+        renderTipboxGrid();
+        return;
+    }
+    params.set('location', String(tbDraft.location));
+    params.set('labware_id', rackId);
+    if (target) params.set('simulation_target', JSON.stringify(target));
     // Pass the simulated occupancy when we have a source node — this is
     // the key signal that lets the backend's legality check distinguish
     // between "empty cell available for return" and "already-occupied
@@ -2660,10 +2679,23 @@ async function refreshTipboxLegalAnchors() {
     }
     try {
         const res = await apiCall(`/api/tipbox/legal_anchors?${params.toString()}`);
-        tbLegalAnchors = Array.isArray(res?.legal_anchors) ? res.legal_anchors : [];
+        if (tbDraft !== draft) return;
+        tbDraft.reachability = res?.reachability || null;
+        tbLegalAnchors = res?.reachability?.assessed && Array.isArray(res?.legal_anchors) ? res.legal_anchors : [];
+        const rejected = res?.unreachable_anchors || [];
+        tbDraft.lookupMessage = !res?.reachability?.assessed
+            ? 'Deck reachability could not be checked. Select a catalog box and profile.'
+            : rejected.length && !tbLegalAnchors.length
+                ? `No tip placement is reachable at position ${tbDraft.location} with this head mode. Choose another deck position or head corner.`
+                : !tbLegalAnchors.length
+                    ? 'No fresh or empty placement is available for this operation.'
+                    : 'Checked against the selected deck position and profile travel limits. Collision rehearsal is still required.';
     } catch (e) {
+        if (tbDraft !== draft) return;
         console.warn('legal_anchors fetch failed', e);
         tbLegalAnchors = [];
+        tbDraft.reachability = null;
+        tbDraft.lookupMessage = 'Tip placement could not be checked: ' + (e?.message || 'catalog lookup failed');
     }
     // Snap the current draft to the nearest legal anchor (or the first one)
     // so the displayed selection is always a valid configuration.
@@ -2676,7 +2708,6 @@ async function refreshTipboxLegalAnchors() {
         }
     }
     renderTipboxGrid();
-    document.getElementById('hm-tipbox-save').disabled = tbLegalAnchors.length === 0;
 }
 
 function renderTipboxGrid() {
@@ -2701,8 +2732,8 @@ function renderTipboxGrid() {
     const anchorForRender = { ...stridesForRender, ...(matched || {
         row: tbDraft.row,
         col: tbDraft.col,
-        row_count: normalizeHeadModeForUi(designerState.headType, tbDraft.headMode).row_count,
-        column_count: normalizeHeadModeForUi(designerState.headType, tbDraft.headMode).column_count,
+        row_count: normalizeHeadModeForUi(tbDraft.headType || designerState.headType, tbDraft.headMode).row_count,
+        column_count: normalizeHeadModeForUi(tbDraft.headType || designerState.headType, tbDraft.headMode).column_count,
         // Derive head_anchor from the head's subset_config so the anchor
         // cell still points at the right corner while the backend response
         // is still in flight.
@@ -2712,7 +2743,7 @@ function renderTipboxGrid() {
         })(),
     }) };
     const { selected, anchorKey, clampedRow, clampedCol } =
-        tipboxCellsForAnchor(geom, tbDraft.headMode, anchorForRender);
+        tipboxCellsForAnchor(geom, tbDraft.headMode, anchorForRender, tbDraft.headType || designerState.headType);
     tbDraft.row = clampedRow;
     tbDraft.col = clampedCol;
 
@@ -2721,10 +2752,10 @@ function renderTipboxGrid() {
     document.getElementById('hm-tipbox-col').value = String(tbDraft.col);
     document.getElementById('hm-tipbox-col').max = String(Math.max(0, geom.cols - 1));
 
-    const normalized = normalizeHeadModeForUi(designerState.headType, tbDraft.headMode);
+    const normalized = normalizeHeadModeForUi(tbDraft.headType || designerState.headType, tbDraft.headMode);
     const summary = document.getElementById('hm-tipbox-summary');
     if (tbLegalAnchors.length === 0) {
-        summary.textContent = 'Loading legal anchors… (or no legal placement exists for this head mode + tipbox).';
+        summary.textContent = tbDraft.lookupMessage || 'Checking tip placements…';
     } else if (tbLegalAnchors.length === 1) {
         summary.textContent =
             `Head footprint ${normalized.row_count}×${normalized.column_count} (${describeHeadMode(normalized)}). ` +
@@ -2734,13 +2765,15 @@ function renderTipboxGrid() {
             `Head footprint ${normalized.row_count}×${normalized.column_count} (${describeHeadMode(normalized)}). ` +
             `${tbLegalAnchors.length} legal placements — click any green region to choose.`;
     }
+    if (tbLegalAnchors.length && tbDraft.lookupMessage) summary.textContent += ' ' + tbDraft.lookupMessage;
+    document.getElementById('hm-tipbox-save').disabled = !tbDraft.reachability?.assessed || !matched;
 
     // Build a per-cell "what anchor does this cell belong to" map so a
     // click anywhere within a legal region snaps to that region's anchor.
     const cellToAnchor = new Map();  // "r:c" -> anchor dict
     const legalCells = new Set();    // "r:c" of every cell in any legal region
     for (const a of tbLegalAnchors) {
-        const region = tipboxCellsForAnchor(geom, tbDraft.headMode, { ...stridesForRender, ...a });
+        const region = tipboxCellsForAnchor(geom, tbDraft.headMode, { ...stridesForRender, ...a }, tbDraft.headType || designerState.headType);
         for (const key of region.selected) {
             legalCells.add(key);
             if (!cellToAnchor.has(key)) cellToAnchor.set(key, a);
@@ -2798,6 +2831,7 @@ function wireTipboxModal() {
         renderTipboxGrid();
     });
     document.getElementById('hm-tipbox-save').addEventListener('click', () => {
+        if (!tbDraft.reachability?.assessed || !tbLegalAnchors.some(a => Number(a.row) === tbDraft.row && Number(a.col) === tbDraft.col)) return;
         if (tbOnSave) tbOnSave(tbDraft.row, tbDraft.col);
         closeTipboxPicker();
     });

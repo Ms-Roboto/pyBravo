@@ -75,6 +75,7 @@ async def test_picker_keeps_physical_occupancy_but_excludes_spent_pickup(monkeyp
         invalid = await client.get('/api/tipbox/legal_anchors', params={**params, 'fresh_cells': '8:12'})
     assert unknown.status_code == spent.status_code == 200
     assert unknown.json()['legal_anchors']
+    assert unknown.json()['reachability']['assessed'] is False
     assert spent.json()['occupied_cells_count'] == 96
     assert spent.json()['fresh_cells_count'] == 0
     assert spent.json()['legal_anchors'] == []
@@ -97,3 +98,63 @@ async def test_picker_checks_interleaved_quadrant_freshness_and_empty_return(mon
     assert [(a['row'], a['col']) for a in pickup.json()['legal_anchors']] == [(0, 0)]
     assert returning.json()['legal_anchors'] == []
     assert bad.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_picker_checks_actual_deck_reachability_without_mutating_live_state(monkeypatch):
+    from pathlib import Path
+
+    from pybravo.bravo import Bravo
+    from pybravo.profile.profile import BravoProfile
+
+    live = Bravo(profile=BravoProfile.load(Path(__file__).resolve().parents[1] / 'profiles/simulation.yaml'),
+                 mode='simulation')
+    before = live.profile._to_dict()
+    monkeypatch.setattr(server, 'get_bravo', lambda: live)
+    params = {'subset_type': 'single_barrel', 'subset_config': 'back_left',
+              'tipbox_rows': 16, 'tipbox_cols': 24, 'labware_id': 'lw-4914769d0af7'}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url='http://test') as client:
+        allowed = await client.get('/api/tipbox/legal_anchors', params={**params, 'location': 2})
+        rejected = await client.get('/api/tipbox/legal_anchors', params={**params, 'location': 8})
+        wrong_grid = await client.get('/api/tipbox/legal_anchors', params={**params, 'location': 2, 'tipbox_cols': 12})
+        unknown = await client.get('/api/tipbox/legal_anchors', params={**params, 'location': 2, 'labware_id': 'missing'})
+    assert allowed.status_code == rejected.status_code == 200
+    assert [(a['row'], a['col']) for a in allowed.json()['legal_anchors']] == [(15, 23)]
+    report = rejected.json()
+    assert report['legal_anchors'] == []
+    assert report['reachability']['assessed'] is True
+    assert report['reachability']['limits_mm']['Y'] == [0.5, 231]
+    assert report['unreachable_anchors'] == [{'row': 15, 'col': 23,
+                                              'target_x_mm': pytest.approx(297.53),
+                                              'target_y_mm': pytest.approx(293.22)}]
+    assert wrong_grid.status_code == unknown.status_code == 400
+    assert live.profile._to_dict() == before
+    assert not live.is_connected
+    assert all(live.deck.get_stack(slot).top is None for slot in range(1, 10))
+
+
+@pytest.mark.asyncio
+async def test_picker_uses_validated_virtual_head_without_changing_active_head(monkeypatch):
+    import json
+    from pathlib import Path
+
+    from pybravo.bravo import Bravo
+    from pybravo.profile.profile import BravoProfile
+
+    live = Bravo(profile=BravoProfile.load(Path(__file__).resolve().parents[1] / 'profiles/simulation.yaml'),
+                 mode='simulation')
+    before = live.profile._to_dict()
+    monkeypatch.setattr(server, 'get_bravo', lambda: live)
+    params = {'subset_type': 'all_barrels', 'tipbox_rows': 16, 'tipbox_cols': 24,
+              'labware_id': 'lw-4914769d0af7', 'location': 2,
+              'row_stride': 2, 'col_stride': 2,
+              'simulation_target': json.dumps({'machine_id': live.profile.connection.machine_id,
+                                               'head_type': 'HT_96_D_70', 'tip_definition_id': 'st_10ul'})}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url='http://test') as client:
+        response = await client.get('/api/tipbox/legal_anchors', params=params)
+    assert response.status_code == 200, response.text
+    assert response.json()['head_mode']['row_count'] == 8
+    assert response.json()['head_mode']['column_count'] == 12
+    assert response.json()['reachability']['head_type'] == 'HT_96_D_70'
+    assert live.profile._to_dict() == before
+    assert not live.is_connected

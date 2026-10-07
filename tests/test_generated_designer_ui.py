@@ -280,8 +280,10 @@ const document={getElementById(id){
   return elements.get(id);
 },createElement(){return new Element();}};
 let tbDraft={},tbOnSave=null,tbLegalAnchors=[];
+let activeTab={};
+function getActiveTab(){return activeTab;}
 const requests=[];
-let response={legal_anchors:[]};
+let response={legal_anchors:[],reachability:{assessed:true}};
 let requestError=null;
 async function apiCall(path){requests.push(new URL(path,'http://test'));if(requestError)throw requestError;return response;}
 """ + geometry.group(0) + "\n" + "\n".join(_function(html, name) for name in (
@@ -336,12 +338,14 @@ def test_pickup_picker_sends_freshness_and_disables_spent_or_exhausted_choices(t
   const save=document.getElementById('hm-tipbox-save');
   const grid=document.getElementById('hm-tipbox-grid');
   // Backend offers the remaining fresh A2 cell, despite A1 being occupied.
-  response={legal_anchors:[{row:0,col:1,row_count:1,column_count:1,head_anchor:'back_left'}]};
+  response={legal_anchors:[{row:0,col:1,row_count:1,column_count:1,head_anchor:'back_left'}],reachability:{assessed:true}};
   openTipboxPicker(1,mode,0,0,()=>{}, {sourceNode:pickA2,purpose:'pickup'});
   assert.equal(save.disabled,true,'No selection can be saved while lookup is pending');
   await new Promise(resolve=>setImmediate(resolve));
   let params=requests.at(-1).searchParams;
   assert.equal(params.get('purpose'),'pickup');
+  assert.equal(params.get('location'),'1');
+  assert.equal(params.get('labware_id'),'rack96');
   assert.deepEqual(params.get('occupied_cells').split(',').sort(),['0:0','0:1']);
   assert.equal(params.get('fresh_cells'),'0:1');
   assert.equal(tbDraft.col,1,'The invalid spent anchor must snap to fresh A2');
@@ -438,7 +442,7 @@ assert.equal(corner.anchorKey,'15:23');
 assert.equal(corner.selected.size,96);
 assert.deepEqual(Array.from(corner.selected).sort(),Array.from(footprint).sort());
 (async()=>{
-  response={legal_anchors:[{row:1,col:1,row_count:8,column_count:12,row_stride:2,col_stride:2,head_anchor:'front_right'}]};
+  response={legal_anchors:[{row:1,col:1,row_count:8,column_count:12,row_stride:2,col_stride:2,head_anchor:'front_right'}],reachability:{assessed:true}};
   openTipboxPicker(1,all,1,1,()=>{}, {sourceNode:pickA1,purpose:'pickup'});
   await new Promise(resolve=>setImmediate(resolve));
   const params=requests.at(-1).searchParams;
@@ -452,4 +456,47 @@ assert.deepEqual(Array.from(corner.selected).sort(),Array.from(footprint).sort()
   assert.equal(grid.children[1*24+2].handlers.click,undefined);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 """, encoding="utf-8")
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_tip_picker_rejects_unreachable_and_typed_invalid_anchors(tmp_path):
+    html = (ROOT / 'frontend' / 'designer.html').read_text(encoding='utf-8')
+    script = tmp_path / 'tip-reachability.cjs'
+    script.write_text(_tipbox_inventory_harness(html) + r"""
+(async()=>{
+  const save=document.getElementById('hm-tipbox-save');
+  designerState.headType='HT_384_D_70';
+  designerState.labwareCatalog=[{id:'rack384',name:'384 ST rack',base_class:'tip_box',wells:384,rows:16,cols:24}];
+  designerState.deckConfig={'2':[{labware_id:'rack384',tipbox_fill_state:'full'}],'8':[{labware_id:'rack384',tipbox_fill_state:'full'}]};
+  response={legal_anchors:[],reachability:{assessed:true},unreachable_anchors:[{row:15,col:23,target_y_mm:293.22}]};
+  openTipboxPicker(8,mode,15,23,()=>{});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(requests.at(-1).searchParams.get('location'),'8');
+  assert.equal(requests.at(-1).searchParams.get('labware_id'),'rack384');
+  assert.equal(save.disabled,true);
+  assert.match(document.getElementById('hm-tipbox-summary').textContent,/No tip placement is reachable at position 8/);
+  response={legal_anchors:[{row:15,col:23,row_count:1,column_count:1}],reachability:{assessed:true}};
+  openTipboxPicker(2,mode,15,23,()=>{});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(save.disabled,false);
+  // Typing an explicit cell cannot bypass the offered legal anchors.
+  tbDraft.row=0;tbDraft.col=0;renderTipboxGrid();
+  assert.equal(save.disabled,true);
+  tbDraft.row=15;tbDraft.col=23;renderTipboxGrid();
+  assert.equal(save.disabled,false);
+  // A layout-only response must never masquerade as a reachability check.
+  response={legal_anchors:[{row:15,col:23,row_count:1,column_count:1}],reachability:{assessed:false}};
+  await refreshTipboxLegalAnchors();
+  assert.equal(save.disabled,true);
+  assert.equal(tbLegalAnchors.length,0);
+  assert.match(document.getElementById('hm-tipbox-summary').textContent,/reachability could not be checked/);
+  activeTab={protocolMetadata:{protocol_simulation_target:{machine_id:'fixture',head_type:'HT_96_D_70',tip_definition_id:'st_10ul'}}};
+  await refreshTipboxLegalAnchors();
+  assert.deepEqual(JSON.parse(requests.at(-1).searchParams.get('simulation_target')),activeTab.protocolMetadata.protocol_simulation_target);
+  response={legal_anchors:[{row:0,col:0,row_count:8,column_count:12}],reachability:{assessed:true}};
+  openTipboxPicker(2,{subset_type:'all_barrels'},0,0,()=>{});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.match(document.getElementById('hm-tipbox-summary').textContent,/Head footprint 8×12/);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+""", encoding='utf-8')
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)

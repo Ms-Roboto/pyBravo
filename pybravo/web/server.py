@@ -1429,6 +1429,9 @@ async def get_tipbox_legal_anchors(
     fresh_cells: str | None = None,
     row_stride: int = 1,
     col_stride: int = 1,
+    location: int | None = None,
+    labware_id: str | None = None,
+    simulation_target: str | None = None,
 ):
     """Return the design-time legal anchor positions for the given head mode
     over a tipbox of `tipbox_rows × tipbox_cols`. Used by the workflow
@@ -1456,6 +1459,38 @@ async def get_tipbox_legal_anchors(
         tipbox_selection,
     )
     bravo = get_bravo()
+    if simulation_target is not None:
+        try:
+            requested_target = json.loads(simulation_target)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, 'simulation_target must be a JSON object') from exc
+        profile = copy.deepcopy(bravo.profile)
+        _apply_generated_simulation_target(profile, requested_target)
+        virtual_bravo = Bravo(profile=profile, mode='simulation')
+        virtual_bravo._labware_catalog = bravo._labware_catalog
+        bravo = virtual_bravo
+    reachability = {
+        'assessed': False,
+        'scope': 'XY travel limits; collision rehearsal is still required',
+        'reason': 'Deck location and catalog labware identity were not supplied.',
+    }
+    rack = None
+    if location is not None or labware_id is not None:
+        if location not in range(1, 10) or not labware_id:
+            raise HTTPException(400, 'Supply both a deck location from 1 to 9 and a catalog labware_id')
+        from pybravo.deck.labware import Labware
+
+        definition = bravo._labware_catalog.get_definition(labware_id)
+        if definition is None:
+            raise HTTPException(400, f'Unknown catalog tip box: {labware_id}')
+        rack = Labware.from_definition(definition)
+        if bravo._labware_base_class(rack) != 'tip_box' and bravo._labware_kind(rack) != 'tip_box':
+            raise HTTPException(400, f'{labware_id} is not a catalog tip box')
+        if bravo._tipbox_dimensions(rack) != (tipbox_rows, tipbox_cols):
+            raise HTTPException(400, 'Tip grid dimensions do not match the selected catalog box')
+        reachability.update(assessed=True, location=location, labware_id=definition.id,
+                            head_type=bravo.profile.head.head_type.name,
+                            reason='Anchors use native head-to-rack coordinates and the active profile travel limits.')
     try:
         mode = normalize_head_mode(
             bravo.profile.head.head_type,
@@ -1527,6 +1562,19 @@ async def get_tipbox_legal_anchors(
             tipbox_rows, tipbox_cols, replace(tipbox_selection(0, anchor.row, anchor.col, mode),
                                             row_stride=row_stride, col_stride=col_stride)
         )).issubset(fresh)]
+    rejected_reachability = []
+    if rack is not None:
+        reachable = []
+        for anchor in anchors:
+            x, y = bravo._tip_xy_target(location, rack, mode, anchor.row, anchor.col)
+            if bravo._is_tip_anchor_reachable(location, rack, mode, anchor.row, anchor.col):
+                reachable.append(anchor)
+            else:
+                rejected_reachability.append({'row': anchor.row, 'col': anchor.col,
+                                              'target_x_mm': x, 'target_y_mm': y})
+        anchors = reachable
+        (x_min, x_max), (y_min, y_max) = bravo._axis_xy_range()
+        reachability['limits_mm'] = {'X': [x_min, x_max], 'Y': [y_min, y_max]}
     return {
         "head_mode": mode.to_dict(),
         "tipbox_rows": tipbox_rows,
@@ -1537,6 +1585,8 @@ async def get_tipbox_legal_anchors(
         "row_stride": row_stride,
         "col_stride": col_stride,
         "legal_anchors": [anchor.to_dict() for anchor in anchors],
+        "reachability": reachability,
+        "unreachable_anchors": rejected_reachability,
     }
 
 
