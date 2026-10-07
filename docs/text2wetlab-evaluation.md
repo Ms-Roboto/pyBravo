@@ -28,7 +28,7 @@ validation, strict simulation, and scientist review.
 | --- | --- | --- |
 | A1–A12 100 µL; split 200 µL | Pinned lint, simulator, runlog, and event-safety gates pass | Official rubric judge not run. |
 | AMPure cleanup | Same local gates pass; 96 matched wells and source-isolated tips observed | Task-specific comments record non-pipetting stages; generic judge wording creates uncertainty about comment-only actions. |
-| *E. coli* heat shock | Same mechanical gates pass | Candidate leaves block at 42 °C while eight SOC additions occur after the 30-second hold; timing requires correction. |
+| *E. coli* heat shock | Pinned lint/simulator/runlog pass; new process-order gate rejects | Candidate leaves block at 42 °C while eight SOC additions occur after the 30-second hold. |
 | Colony PCR | Rejected before an accepted simulation | Candidate reaction volume and 2× dilution were inconsistent; loaded deck has no separate water source. |
 | Golden Gate assembly | Rejected by static/simulator checks | Candidate assigns 4 µL to P300 and has tip/mix issues. |
 | RNA extraction | Rejected by simulator | Exact geometry fixed mapping, but candidate exhausts P1000 tips and has invalid multichannel locations. |
@@ -95,7 +95,10 @@ run for a complex case without changing the baseline setting.
 The adapter now verifies OT-2 GEN2 P20, P300, and P1000 working ranges from
 [Opentrons' pipette table](https://docs.opentrons.com/python-api/pipettes/loading/),
 effective loaded-tip capacity for literal strokes, and tip/held-volume state
-from the structured runlog. Its separate reaction-accounting helper can check
+from the structured runlog. For an instruction requiring on-deck thermocycler
+heat shock followed by recovery, it also rejects liquid handling while the
+block remains at the timed heat-shock temperature. Its separate
+reaction-accounting helper can check
 final volume and stock dilution when a caller supplies a structured recipe;
 it does not infer missing reagent identities from prose or certify a method.
 
@@ -184,6 +187,16 @@ serially to all eight wells after the stated 30-second heat shock, then sets
 37 °C. This local mechanical pass cannot be counted as a benchmark success.
 The evidence is in `/tmp/pybravo-text2wetlab-ecoli-repair2/report.json`; the
 official rubric judge was not run.
+One focused rerun after temperature-order guidance passed its then-current
+local lint, simulator, and event-accounting gates after three attempts. Its
+first 4 °C block command now precedes all DNA additions (event 1). However,
+the timed 42 °C pulse is event 36, SOC aspirations begin at event 39, and the
+first 37 °C block command is event 71, after all SOC additions. An independent
+check with the subsequently added heat-shock transition gate rejects event 39:
+the block remains at the high heat-shock temperature during serial liquid
+handling. The saved report predates that gate and therefore says local
+`simulator_passed`; this is **not** a semantic or official benchmark pass.
+Evidence is in `/tmp/pybravo-text2wetlab-ecoli-transition/report.json`.
 
 The first `golden-gate-assembly` run produced one AST-valid candidate, then
 repeated it twice. Opentrons rejected `p20.mix(5, 15)` because the liquid

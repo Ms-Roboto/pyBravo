@@ -161,7 +161,8 @@ def _cross_well_aspiration_risks(events: list[dict]) -> list[dict]:
 
 
 def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
-                     dataset_root: Path | None, labware_dir: Path | None = None) -> dict:
+                     dataset_root: Path | None, labware_dir: Path | None = None,
+                     instruction: str | None = None) -> dict:
     """Use the task's pinned runlog gate and preserve its action events for review."""
     from pybravo.evals.text2wetlab.adapter import EventLog, validate_event_safety
 
@@ -198,7 +199,7 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
     events_file.write_text(json.dumps(events, indent=2) + "\n", encoding="utf-8")
     counts = Counter(str(event.get("kind")) for event in events if isinstance(event, dict))
     risks = _cross_well_aspiration_risks(events)
-    semantic = validate_event_safety(EventLog(events, payload.get("labware") or {}))
+    semantic = validate_event_safety(EventLog(events, payload.get("labware") or {}), instruction=instruction)
     return {"status": "passed", "source_sha256": _digest(source),
             "events_path": str(events_file), "event_count": len(events),
             "event_kinds": dict(sorted(counts.items())),
@@ -303,7 +304,8 @@ def run_task(task: str, *, output_dir: Path, simulator: Path,
         record["status"] = "simulator_failed"
         return record
     record["official_runlog_gate"] = _official_runlog(task, protocol, task_dir, simulator,
-                                                     dataset_root, labware_dir)
+                                                     dataset_root, labware_dir,
+                                                     instruction.decode("utf-8"))
     if record["official_runlog_gate"]["status"] != "passed":
         record["status"] = "official_runlog_failed_or_unavailable"
     elif (record["official_runlog_gate"].get("adapter_event_validation") or {}).get("status") != "passed":

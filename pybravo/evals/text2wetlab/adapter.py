@@ -669,15 +669,65 @@ def validate_event_stroke_accounting(log: EventLog) -> EventValidationResult:
     return EventValidationResult("passed", "Tip and held-volume accounting is consistent.", len(log.events))
 
 
-def validate_event_safety(log: EventLog) -> EventValidationResult:
-    """Apply independent contamination, range, and stroke checks to a run log."""
+def validate_heat_shock_transition(log: EventLog, instruction: str) -> EventValidationResult:
+    """Keep samples out of a short heat-shock pulse during serial recovery work.
+
+    This rule applies only when the scientist's instruction calls for an
+    on-deck thermocycler heat shock followed by recovery. It does not infer a
+    temperature program for other protocols.
+    """
+    text = instruction.lower()
+    if not (re.search(r"heat[ -]shock", text) and "thermocycler" in text and "recover" in text):
+        return EventValidationResult("passed", "No on-deck heat-shock transition requested.", len(log.events))
+    pulse_index = None
+    for index, event in enumerate(log.events):
+        if event.get("kind") != "thermocycler":
+            continue
+        command = event.get("text")
+        if not isinstance(command, str):
+            continue
+        match = re.search(r"block temperature to (\d+(?:\.\d+)?)\s*°C", command)
+        if match and float(match.group(1)) >= 40 and "hold time" in command:
+            pulse_index = index
+            break
+    if pulse_index is None:
+        return EventValidationResult(
+            "failed", "Requested on-deck heat shock has no timed high-temperature block command.",
+            len(log.events),
+        )
+    for index in range(pulse_index + 1, len(log.events)):
+        event = log.events[index]
+        if event.get("kind") == "thermocycler" and isinstance(event.get("text"), str):
+            match = re.search(r"block temperature to (\d+(?:\.\d+)?)\s*°C", event["text"])
+            if match and float(match.group(1)) < 40:
+                return EventValidationResult(
+                    "passed", "Thermocycler left the heat-shock temperature before recovery work.",
+                    len(log.events),
+                )
+        if event.get("kind") in {"aspirate", "dispense", "pick", "drop"}:
+            return EventValidationResult(
+                "failed", f"Event {index + 1}: liquid handling occurs after a timed heat-shock pulse "
+                "while the block remains at the high temperature. Change the block to the "
+                "recovery temperature before serial additions.", len(log.events),
+            )
+    return EventValidationResult(
+        "failed", "Requested recovery has no lower-temperature block command after heat shock.",
+        len(log.events),
+    )
+
+
+def validate_event_safety(log: EventLog, *, instruction: str | None = None) -> EventValidationResult:
+    """Apply contamination, range, stroke, and supplied-process checks."""
     contamination = validate_event_contamination(log)
     if contamination.status != "passed":
         return contamination
     ranges = validate_event_pipette_ranges(log)
     if ranges.status != "passed":
         return ranges
-    return validate_event_stroke_accounting(log)
+    strokes = validate_event_stroke_accounting(log)
+    if strokes.status != "passed":
+        return strokes
+    return validate_heat_shock_transition(log, instruction) if instruction else strokes
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -855,7 +905,7 @@ async def generate_ot2_protocol(
                     attempt["event_detail"] = str(exc)
                     prior_code, prior_error = code, str(exc)
                     continue
-                event_validation = validate_event_safety(event_log)
+                event_validation = validate_event_safety(event_log, instruction=instruction)
                 attempt["event_validation"] = event_validation.status
                 attempt["event_count"] = event_validation.event_count
                 attempt["event_detail"] = event_validation.detail

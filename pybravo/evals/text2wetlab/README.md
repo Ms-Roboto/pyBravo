@@ -44,6 +44,8 @@ pass. A `simulated` trace also requires structured action-event validation:
 each tip may touch one specimen well before disposal, while a reservoir may
 feed multiple wells of an otherwise destination-only plate. A tip may not
 aspirate from two distinct reagent-stock wells, and P20/P300/P1000 liquid
-strokes must meet the documented OT-2 GEN2 working ranges. Simulation does
+strokes must meet the documented OT-2 GEN2 working ranges. For an on-deck
+heat-shock/recovery instruction, a timed hot-block pulse must end before
+serial recovery pipetting begins. Simulation does
 not establish that the protocol satisfies a scientific rubric or is safe to
 run on physical hardware.

@@ -419,6 +419,31 @@ def test_event_safety_rejects_dispense_larger_than_held_liquid():
     assert "only 40 µL held" in result.detail
 
 
+def test_heat_shock_gate_requires_transition_before_recovery_pipetting():
+    pulse = {"kind": "thermocycler", "instrument": "", "text": (
+        "Setting Thermocycler well block temperature to 42.0 °C "
+        "with a hold time of 30 seconds"
+    )}
+    recovery = {"kind": "thermocycler", "instrument": "", "text": (
+        "Setting Thermocycler well block temperature to 37.0 °C "
+        "with a hold time of 60.0 minutes"
+    )}
+    liquid_events = [
+        _event("pick"),
+        {**_event("aspirate", labware="soc on 2", well="A1"), "volume": 50.0},
+        {**_event("dispense", labware="cells on 1", well="A1"), "volume": 50.0},
+        _event("drop"),
+    ]
+    labware = {"soc on 2": "nest_12_reservoir_15ml", "cells on 1": "biorad_96_wellplate_200ul_pcr"}
+    instruction = "Perform heat-shock transformation on the thermocycler, then recovery with SOC."
+    late = adapter.EventLog([pulse, *liquid_events, recovery], labware)
+    early = adapter.EventLog([pulse, recovery, *liquid_events], labware)
+    result = adapter.validate_event_safety(late, instruction=instruction)
+    assert result.status == "failed"
+    assert "block remains at the high temperature" in result.detail
+    assert adapter.validate_event_safety(early, instruction=instruction).status == "passed"
+
+
 @pytest.mark.asyncio
 async def test_event_failure_enters_model_repair_loop(tmp_path, monkeypatch):
     prompts = []
