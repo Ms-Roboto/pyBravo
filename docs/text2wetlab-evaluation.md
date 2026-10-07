@@ -176,6 +176,26 @@ mismatch. The RNA runner supplies its pinned custom labware to both generation a
 simulation, and marks separate lint not_applicable rather than treating the missing lint
 file as a pass.
 
+To repeat the pinned container's pre-judge gates on an unchanged saved Qwen candidate, use
+the verifier runner with an exact Git checkout of the pinned dataset. It verifies the checkout
+and candidate provenance, builds that task's unchanged Dockerfile, runs `tests/test.sh` with
+fresh logs and no protocol network access, and writes a `summary.json` with separate lint,
+anti-hack, simulation, and judge fields. The default run supplies no judge key:
+
+~~~sh
+.venv/bin/python scripts/verify_text2wetlab_container.py \
+  --task split-200ul-two-wells \
+  --saved-run-root /tmp/pybravo-text2wetlab-split-baseline \
+  --candidate /tmp/pybravo-text2wetlab-split-baseline/split-200ul-two-wells/protocol.py \
+  --dataset-root /tmp/Text2WetLab-eval \
+  --output-dir /tmp/pybravo-text2wetlab-split-container-repeat
+~~~
+
+An explicit `--judge` uses `ANTHROPIC_API_KEY` from the environment, if configured; it
+records the returned local rubric separately and still leaves `official_score` null. The
+local Docker network policy in judge mode is not Harbor's allowlist, so this remains a
+reproduction aid rather than a Harbor-issued score.
+
 With pyBravo running locally, inspect one already saved Designer draft's review issues
 without creating a new protocol or calling Qwen:
 
