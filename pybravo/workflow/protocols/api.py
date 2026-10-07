@@ -7,11 +7,11 @@ import copy
 import logging
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pybravo.bravo import Bravo
 from pybravo.workflow.protocols.context import machine_context
@@ -147,6 +147,166 @@ class PublishRequest(Payload):
 class SetupRequest(PublishRequest):
     setup: ProtocolSetup
     materials: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class GeneratedDraftProvenance(Payload):
+    """Source identity for an unreviewed, local-model Designer diagram."""
+
+    source_kind: str = Field(min_length=1, max_length=80)
+    source_id: str = Field(min_length=1, max_length=200)
+    model: str = Field(min_length=1, max_length=120)
+    source_url: str | None = Field(default=None, max_length=1000)
+    model_url: str | None = Field(default=None, max_length=1000)
+    dataset_revision: str | None = Field(default=None, max_length=120)
+    source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    paper_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_paper_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    generation_trace_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+class GeneratedDraftIssue(Payload):
+    severity: Literal["warning", "error"]
+    code: str = Field(min_length=1, max_length=80)
+    message: str = Field(min_length=1, max_length=1000)
+    path: str | None = Field(default=None, max_length=300)
+
+
+class GeneratedDraftRequest(Payload):
+    workflow: dict[str, Any]
+    provenance: GeneratedDraftProvenance
+    issues: list[GeneratedDraftIssue] = Field(default_factory=list, max_length=100)
+
+
+def _prepare_generated_draft(raw: dict[str, Any], *, labware_ids: set[str]) -> tuple[dict, list[dict]]:
+    """Turn a model's allowlisted graph into loadable, unreviewed Designer JSON.
+
+    Link objects from the drafter schema and native LiteGraph six-tuples are
+    accepted. We validate topology and slot indices, but leave missing
+    scientific settings as review issues rather than inventing values.
+    """
+    from pybravo.workflow.drafter.schema import DraftedWorkflow, _NODE_SLOTS
+    from pybravo.workflow.drafter.validator import validate_drafted_workflow
+    from pybravo.workflow.storage import (
+        GENERATED_DRAFT_NODE_TYPES, MAX_GENERATED_DRAFT_NODES, assert_safe_generated_draft,
+    )
+
+    if not isinstance(raw, dict) or raw.get("id") or any(
+        key in raw for key in ("approval", "protocol_session_id", "protocol_compiled_preview",
+                            "protocol_chat_draft", "protocol_generated_draft")
+    ):
+        raise ValueError("Provide an unsaved workflow without approval, release, or preview markers.")
+    if not isinstance(raw.get("name"), str) or not raw["name"].strip():
+        raise ValueError("Generated workflow needs a descriptive name.")
+    if raw.get("library"):
+        raise ValueError("Generated workflows cannot contain Python library code.")
+    deck = raw.get("deck") or {}
+    if not isinstance(deck, dict):
+        raise ValueError("Generated workflow deck must map slots to labware stacks.")
+    for slot, stack in deck.items():
+        if not isinstance(stack, list):
+            raise ValueError("Generated workflow deck positions must contain labware stacks.")
+        for index, item in enumerate(stack):
+            labware_id = item.get("labware_id") if isinstance(item, dict) else None
+            if labware_id not in labware_ids:
+                raise ValueError(
+                    f"Deck slot {slot} item {index + 1} has unknown labware_id {labware_id!r}; "
+                    "select an active catalog entry or leave the slot empty for manual review."
+                )
+    candidate = copy.deepcopy(raw)
+    graph = candidate.get("graph")
+    if not isinstance(graph, dict) or not isinstance(graph.get("links"), list):
+        raise ValueError("Generated workflow needs a graph with links.")
+    links = []
+    for link in graph["links"]:
+        if isinstance(link, (list, tuple)) and len(link) == 6:
+            links.append(dict(zip(("id", "origin_id", "origin_slot", "target_id", "target_slot", "link_type"), link)))
+        elif isinstance(link, dict):
+            links.append(link)
+        else:
+            raise ValueError("Every generated graph link must be a link object or LiteGraph six-tuple.")
+    graph["links"] = links
+    try:
+        drafted = DraftedWorkflow.model_validate(candidate)
+    except ValidationError as exc:
+        raise ValueError(f"Generated workflow does not match the Designer graph schema: {exc.errors()[0]['msg']}") from exc
+    nodes = drafted.graph.nodes
+    if not 2 <= len(nodes) <= MAX_GENERATED_DRAFT_NODES:
+        raise ValueError(f"Generated workflow must have 2–{MAX_GENERATED_DRAFT_NODES} nodes.")
+    if any(node.type not in GENERATED_DRAFT_NODE_TYPES for node in nodes):
+        raise ValueError("Generated workflow contains a Script or unsupported hardware node.")
+    ids = [node.id for node in nodes]
+    link_ids = [link.id for link in drafted.graph.links]
+    if len(ids) != len(set(ids)) or len(link_ids) != len(set(link_ids)):
+        raise ValueError("Generated workflow has duplicate node or link IDs.")
+    starts = [node for node in nodes if node.type == "flow/Start"]
+    ends = [node for node in nodes if node.type == "flow/End"]
+    substantive = [node for node in nodes if node.type not in {"flow/Start", "flow/End", "flow/Frame"}]
+    if len(starts) != 1 or not ends or not substantive:
+        raise ValueError("Generated workflow needs one Start, an End, and at least one protocol step.")
+    by_id = {node.id: node for node in nodes}
+    adj: dict[int, list[int]] = {}
+    linked_inputs: set[tuple[int, int]] = set()
+    for link in drafted.graph.links:
+        origin, target = by_id.get(link.origin_id), by_id.get(link.target_id)
+        if origin is None or target is None or link.link_type != -1:
+            raise ValueError("Generated workflow has a dangling or non-flow graph link.")
+        outputs = _NODE_SLOTS[origin.type]["outputs"]
+        inputs = _NODE_SLOTS[target.type]["inputs"]
+        if (link.origin_slot >= len(outputs) or link.target_slot >= len(inputs)
+                or outputs[link.origin_slot][1] != -1 or inputs[link.target_slot][1] != -1):
+            raise ValueError("Generated workflow link uses a nonexistent or non-flow node slot.")
+        input_key = (link.target_id, link.target_slot)
+        if input_key in linked_inputs:
+            raise ValueError("Generated workflow connects multiple links to one flow input.")
+        linked_inputs.add(input_key)
+        adj.setdefault(link.origin_id, []).append(link.target_id)
+    reachable, pending = set(), [starts[0].id]
+    while pending:
+        identity = pending.pop()
+        if identity not in reachable:
+            reachable.add(identity)
+            pending.extend(adj.get(identity, []))
+    if not any(end.id in reachable for end in ends):
+        raise ValueError("Generated workflow End must be reachable from Start.")
+    if any(node.id not in reachable for node in nodes if node.type != "flow/Frame"):
+        raise ValueError("Generated workflow has disconnected protocol steps.")
+    workflow = drafted.to_designer_json()
+    # DraftedDeckItem covers catalog identity but not all saved tip inventory
+    # annotations; keep the caller's validated slot map for Designer review.
+    workflow["deck"] = copy.deepcopy(raw.get("deck") or {})
+    workflow["graph"]["config"] = {}
+    workflow["graph"]["extra"] = {}
+    workflow["graph"]["groups"] = []
+    for index, node in enumerate(workflow["graph"]["nodes"]):
+        if node["type"] not in {"flow/Start", "flow/End", "flow/Frame"}:
+            node["properties"]["_protocol_step_id"] = f"unreviewed-node-{node['id']}"
+            node["properties"]["_protocol_path"] = f"/graph/nodes/{index}"
+        if node.get("pos") == [0.0, 0.0]:
+            row, offset = divmod(index, 3)
+            column = offset if row % 2 == 0 else 2 - offset
+            node["pos"] = [80.0 + 360.0 * column, 80.0 + 190.0 * row]
+    assert_safe_generated_draft(workflow)
+    issues = [vars(issue) for issue in validate_drafted_workflow(drafted)]
+    return workflow, issues
+
+
+@router.post("/api/protocols/generated-drafts")
+async def save_generated_draft(request: GeneratedDraftRequest):
+    """Save a local-model DAG for Designer review, never for execution."""
+    try:
+        context = machine_context(_bravo())
+        labware_ids = {str(row["id"]) for row in context.get("labware", []) if row.get("id")}
+        workflow, issues = _prepare_generated_draft(request.workflow, labware_ids=labware_ids)
+        issues.extend({**item.model_dump(exclude_none=True), "origin": "submitted_with_draft"}
+                      for item in request.issues)
+        saved = _server()._get_workflow_storage().create_generated_draft(
+            workflow, provenance=request.provenance.model_dump(exclude_none=True), issues=issues,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"workflow_id": saved["id"], "name": saved["name"],
+            "url": f"/designer?workflow={saved['id']}", "status": "unreviewed",
+            "issue_count": len(issues)}
 
 
 @router.get("/protocol-assistant", response_class=HTMLResponse)

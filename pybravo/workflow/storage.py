@@ -6,6 +6,7 @@ Workflows are stored as individual JSON files in ~/.pybravo/workflows/.
 
 from __future__ import annotations
 
+import copy
 import json
 import uuid
 from datetime import datetime, timezone
@@ -17,6 +18,62 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 DEFAULT_WORKFLOWS_DIR = Path.home() / ".pybravo" / "workflows"
+
+# Model-generated protocols are editable diagrams, not execution grants. Keep
+# scripts and hardware-control nodes out of this import path; unsupported
+# scientific stages should be represented as explicit Manual checkpoints.
+GENERATED_DRAFT_NODE_TYPES = frozenset({
+    "flow/Start", "flow/End", "flow/Loop", "flow/IfElse", "flow/Frame",
+    "plate/PickPlace", "plate/Stack", "plate/Destack", "plate/Mount",
+    "plate/Unmount", "plate/Delid", "plate/Relid",
+    "liquid/Aspirate", "liquid/Dispense", "liquid/Mix",
+    "tips/TipsOn", "tips/TipsOff", "system/Manual", "system/Wait",
+})
+_GENERATED_DRAFT_FORBIDDEN_FIELDS = frozenset({
+    "approval", "protocol_session_id", "protocol_compiled_preview", "protocol_chat_draft",
+})
+MAX_GENERATED_DRAFT_NODES = 5000
+MAX_GENERATED_DRAFT_BYTES = 8_000_000
+
+
+def assert_safe_generated_draft(data: dict[str, Any]) -> None:
+    """Check a saved/generated draft cannot smuggle executable code or release metadata.
+
+    Scientific and deck completeness are reviewed later; an operator must be
+    able to save a partially edited draft. This gate only checks the import
+    boundary and the diagram shape needed for Designer to load it.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("Generated draft must be a workflow object.")
+    if any(key in data for key in _GENERATED_DRAFT_FORBIDDEN_FIELDS):
+        raise ValueError("Generated drafts cannot carry approval, release, or preview markers.")
+    if data.get("library"):
+        raise ValueError("Generated drafts cannot contain workflow-level Python code.")
+    graph = data.get("graph")
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list) or not isinstance(graph.get("links"), list):
+        raise ValueError("Generated draft needs a Designer graph with nodes and links.")
+    nodes = graph["nodes"]
+    if not 2 <= len(nodes) <= MAX_GENERATED_DRAFT_NODES:
+        raise ValueError(f"Generated draft must contain 2–{MAX_GENERATED_DRAFT_NODES} nodes.")
+    if len(graph["links"]) > MAX_GENERATED_DRAFT_NODES * 3:
+        raise ValueError("Generated draft has too many graph links.")
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("type") not in GENERATED_DRAFT_NODE_TYPES:
+            raise ValueError(f"Generated draft contains an unsupported or executable node: {node.get('type') if isinstance(node, dict) else node!r}.")
+        if not isinstance(node.get("properties", {}), dict):
+            raise ValueError("Generated draft node properties must be objects.")
+    deck = data.get("deck", {})
+    if not isinstance(deck, dict) or any(
+        str(slot) not in {str(index) for index in range(1, 10)} or not isinstance(stack, list)
+        for slot, stack in deck.items()
+    ):
+        raise ValueError("Generated draft deck positions must be stacks in slots 1–9.")
+    try:
+        size = len(json.dumps(data, allow_nan=False, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Generated draft must be finite JSON data.") from exc
+    if size > MAX_GENERATED_DRAFT_BYTES:
+        raise ValueError("Generated draft is too large for Designer.")
 
 
 class WorkflowStorage:
@@ -40,6 +97,7 @@ class WorkflowStorage:
                     "description": data.get("description", ""),
                     "modified": data.get("modified", ""),
                     "created": data.get("created", ""),
+                    "protocol_generated_draft": data.get("protocol_generated_draft") is True,
                 })
             except (json.JSONDecodeError, OSError) as exc:
                 logger.warning("Skipping malformed workflow file", path=str(path), error=str(exc))
@@ -69,6 +127,77 @@ class WorkflowStorage:
         self._write(data)
         logger.info("Workflow created", id=data["id"], name=data.get("name"))
         return data
+
+    def create_generated_draft(
+        self, workflow: dict[str, Any], *, provenance: dict[str, Any], issues: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Persist a model-produced, editable, non-executable Designer draft."""
+        data = copy.deepcopy(workflow)
+        assert_safe_generated_draft(data)
+        identity = str(uuid.uuid4())
+        data.pop("created", None)
+        data.pop("modified", None)
+        data["id"] = identity
+        data["protocol_generated_draft"] = True
+        data["protocol_draft_status"] = "unreviewed"
+        data["protocol_generated_root_id"] = identity
+        data["protocol_generated_provenance"] = copy.deepcopy(provenance)
+        data["protocol_draft_issues"] = copy.deepcopy(issues or [])
+        return self.create_workflow(data)
+
+    def create_generated_copy(self, workflow: dict[str, Any]) -> dict[str, Any]:
+        """Save As/Duplicate a generated draft without laundering its provenance."""
+        data = copy.deepcopy(workflow)
+        if data.pop("protocol_generated_draft", None) is not True:
+            raise ValueError("Only marked generated drafts can use this copy path.")
+        root_id = data.pop("protocol_generated_root_id", None)
+        root = self.get_workflow(root_id) if isinstance(root_id, str) else None
+        if not root or root.get("protocol_generated_draft") is not True or root.get("protocol_generated_root_id") != root_id:
+            raise ValueError("Generated draft origin is missing or invalid.")
+        if data.pop("protocol_generated_provenance", None) != root.get("protocol_generated_provenance"):
+            raise ValueError("Generated draft provenance cannot be changed.")
+        data.pop("protocol_draft_status", None)
+        data.pop("protocol_draft_issues", None)
+        data.pop("protocol_draft_validation_stale", None)
+        data.pop("id", None)
+        assert_safe_generated_draft(data)
+        identity = str(uuid.uuid4())
+        data.pop("created", None)
+        data.pop("modified", None)
+        data["id"] = identity
+        data["protocol_generated_draft"] = True
+        data["protocol_draft_status"] = "unreviewed"
+        data["protocol_generated_root_id"] = root_id
+        data["protocol_generated_provenance"] = copy.deepcopy(root["protocol_generated_provenance"])
+        data["protocol_draft_issues"] = []
+        data["protocol_draft_validation_stale"] = True
+        return self.create_workflow(data)
+
+    def update_generated_draft(self, workflow_id: str, workflow: dict[str, Any]) -> dict[str, Any] | None:
+        """Keep a generated draft's unreviewed status and original source on Save."""
+        existing = self.get_workflow(workflow_id)
+        if existing is None:
+            return None
+        if existing.get("protocol_generated_draft") is not True:
+            raise ValueError("This workflow is not a generated protocol draft.")
+        data = copy.deepcopy(workflow)
+        if data.pop("protocol_generated_draft", None) is not True:
+            raise ValueError("Generated draft status cannot be removed.")
+        if data.pop("protocol_generated_root_id", None) != existing.get("protocol_generated_root_id"):
+            raise ValueError("Generated draft origin cannot be changed.")
+        if data.pop("protocol_generated_provenance", None) != existing.get("protocol_generated_provenance"):
+            raise ValueError("Generated draft provenance cannot be changed.")
+        data.pop("protocol_draft_status", None)
+        data.pop("protocol_draft_issues", None)
+        data.pop("protocol_draft_validation_stale", None)
+        assert_safe_generated_draft(data)
+        data["protocol_generated_draft"] = True
+        data["protocol_draft_status"] = "unreviewed"
+        data["protocol_generated_root_id"] = existing["protocol_generated_root_id"]
+        data["protocol_generated_provenance"] = copy.deepcopy(existing["protocol_generated_provenance"])
+        data["protocol_draft_issues"] = []
+        data["protocol_draft_validation_stale"] = True
+        return self.update_workflow(workflow_id, data)
 
     # ── Update ────────────────────────────────────────────────────────
 
