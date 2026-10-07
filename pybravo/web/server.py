@@ -8,6 +8,7 @@ Provides:
 
 import asyncio
 import concurrent.futures
+import copy
 import ipaddress
 import json
 import logging
@@ -2677,13 +2678,16 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
     if data is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    # Chat builds a structural DAG so scientists can see and revise the plan
-    # before setup. Its review nodes are not robot tasks. Refuse both preview
-    # simulation and execution even if a saved copy loses its draft marker.
-    if data.get("protocol_generated_draft") or _has_unreviewed_protocol_nodes(data):
+    generated_rehearsal = bool(
+        data.get("protocol_generated_draft") or _has_unreviewed_protocol_nodes(data)
+    )
+    # Native generated tasks can be rehearsed on an isolated simulator before
+    # scientific review. That is not an execution grant, even if a saved copy
+    # loses its top-level draft marker but retains its unreviewed node IDs.
+    if generated_rehearsal and mode == "execute":
         raise HTTPException(
             status_code=409,
-            detail="This locally generated workflow is an unreviewed draft. Review and approve its exact revision before simulation or execution.",
+            detail="This locally generated workflow is an unreviewed draft. Software simulation is available; review and approve its exact revision before hardware execution.",
         )
     if data.get("protocol_compiled_preview"):
         raise HTTPException(status_code=409, detail="Compiled protocol previews are read-only and cannot run in Designer.")
@@ -2695,6 +2699,16 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
             status_code=409,
             detail="This chat graph is a draft. Review, validate, simulate, and approve it in Protocol Assistant before running.",
         )
+    if generated_rehearsal:
+        # Recheck the saved graph at launch, rather than trusting only its
+        # original import. Scripts, Python libraries, release metadata, and
+        # unsupported nodes must never enter the generated rehearsal path.
+        from pybravo.workflow.storage import assert_safe_generated_draft
+
+        try:
+            assert_safe_generated_draft(data)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=f"Generated draft cannot be simulated: {exc}") from exc
 
     release_run = None
     if mode == "execute":
@@ -2723,7 +2737,9 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
     else:
         runtime_snapshot = _designer_runtime_snapshot(_bravo)
         if _bravo is not None:
-            target_bravo = Bravo(profile=_bravo.profile, mode="simulation")
+            # Bravo's mode override mutates its profile. A deep copy keeps the
+            # active instrument configuration and controller untouched.
+            target_bravo = Bravo(profile=copy.deepcopy(_bravo.profile), mode="simulation")
         else:
             target_bravo = Bravo(mode="simulation")
 
@@ -2786,6 +2802,7 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
         runtime_state=runtime_snapshot,
         preview_animation=(mode != "execute"),
         library_src=data.get("library", "") or "",
+        **({"strict_validation": True} if generated_rehearsal else {}),
         **({"reviewed_protocol": True} if release_run else {}),
     )
     _active_workflow_executor = executor
@@ -2799,7 +2816,10 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
                 _active_workflow_executor = None
 
     asyncio.ensure_future(run())
-    return {"status": "started", "workflow_id": workflow_id, "mode": mode}
+    result = {"status": "started", "workflow_id": workflow_id, "mode": mode}
+    if generated_rehearsal:
+        result.update(simulation_kind="draft_rehearsal", qualification_granted=False)
+    return result
 
 
 @app.post("/api/workflows/{workflow_id}/simulate", tags=["Designer"])

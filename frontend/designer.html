@@ -4823,6 +4823,7 @@ function renderPropertiesPanel(node) {
 
         if (key === 'liquid_class') {
             const select = document.createElement('select');
+            select.setAttribute('aria-label', 'Liquid class');
             select.style.cssText = 'width: 100%; padding: 4px 8px; font-size: 11px; font-family: var(--sans); background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); outline: none;';
             const emptyOpt = document.createElement('option');
             emptyOpt.value = ''; emptyOpt.textContent = '(Default)';
@@ -4834,7 +4835,18 @@ function renderPropertiesPanel(node) {
                 if (opt.value === value) opt.selected = true;
                 select.appendChild(opt);
             }
-            select.addEventListener('change', () => { node.properties[key] = select.value; node.setDirtyCanvas(true); });
+            // Preserve an unresolved model reference visibly. Displaying
+            // Default while retaining a different saved class hides why
+            // simulation preflight refuses the task.
+            if (value && !Array.from(select.options).some(option => option.value === value)) {
+                const missingOpt = document.createElement('option');
+                missingOpt.value = value;
+                missingOpt.textContent = `Unavailable: ${value}`;
+                missingOpt.selected = true;
+                missingOpt.disabled = true;
+                select.appendChild(missingOpt);
+            }
+            select.addEventListener('change', () => { node.properties[key] = select.value; node.setDirtyCanvas(true); markActiveDirty(); });
             field.appendChild(select);
         } else if (key === 'pipette_technique') {
             const select = document.createElement('select');
@@ -6803,7 +6815,10 @@ async function runWorkflow() {
     const progress = document.getElementById('playback-progress');
     if (isCompiledProtocolPreviewTab()) { await replayCompiledSimulationPreview(); return; }
     if (isProtocolDraftTab()) { progress.textContent = 'This protocol preview cannot run in Designer. Review it in Protocol Assistant.'; return; }
-    if (isGeneratedProtocolDraftTab()) { progress.textContent = 'This locally generated protocol is an editable draft. Review and approve it before simulation or execution.'; return; }
+    if (isGeneratedProtocolDraftTab() && executionMode !== 'simulate') {
+        progress.textContent = 'This draft can be simulated in software. Hardware execution requires review and approval.';
+        return;
+    }
 
     // Validate first
     const errors = validateWorkflow();
@@ -6881,7 +6896,7 @@ async function runWorkflow() {
     const simResult = await runRes.json().catch(() => null);
     console.log(`${runEndpoint} response:`, simResult);
     if (simResult) {
-        progress.textContent = executionMode === 'execute' ? 'Executing on hardware...' : 'Simulating...';
+        progress.textContent = executionMode === 'execute' ? 'Executing on hardware...' : simResult.simulation_kind === 'draft_rehearsal' ? 'Rehearsing draft in software...' : 'Simulating...';
     } else {
         progress.textContent = executionMode === 'execute' ? 'Failed to start execution' : 'Failed to start simulation';
     }
@@ -6900,6 +6915,12 @@ function highlightInvalidNodes(invalidNodes) {
         node.color = '#ff6b6b';
         node.setDirtyCanvas(true, true);
     }
+    const first = designerState.graph.getNodeById(invalidNodes[0]?.node_id);
+    if (first) {
+        designerState.graphCanvas?.selectNode(first);
+        renderPropertiesPanel(first);
+        frameProtocolPreviewGraph(designerState.graphCanvas, [first]);
+    }
 }
 
 document.getElementById('btn-stop').addEventListener('click', async () => {
@@ -6916,6 +6937,8 @@ document.getElementById('btn-stop').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-play').addEventListener('click', () => {
+    // A generated draft never inherits hardware mode from another tab.
+    if (isGeneratedProtocolDraftTab()) executionMode = 'simulate';
     runWorkflow();
 });
 
@@ -7359,7 +7382,7 @@ function handleWorkflowEvent(data) {
             progress.textContent = `Branch: ${data.condition} \u2192 ${data.result}`;
             break;
         case 'workflow:complete':
-            progress.textContent = 'Simulation complete \u2014 use scrubber to review';
+            progress.textContent = isGeneratedProtocolDraftTab() ? 'Software rehearsal complete \u2014 review before hardware use' : 'Simulation complete \u2014 use scrubber to review';
             fill.style.width = '100%';
             timelineStopRecording();
             // Display final vars snapshot if backend included one.
@@ -7985,12 +8008,13 @@ function updateProtocolDraftControls() {
     document.body.classList.toggle('protocol-compiled-preview', compiledPreview);
     if (compiledPreview) requestAnimationFrame(() => designerState.robotScene?.resize());
     document.querySelector('#viewport-header span').textContent = compiledPreview ? 'Bravo 3D replay' : '3D Simulation';
-    document.getElementById('btn-simulate').title = compiledPreview ? 'Replay this revision’s saved strict simulation without starting a new run' : 'Simulate';
+    document.getElementById('btn-simulate').title = compiledPreview ? 'Replay this revision’s saved strict simulation without starting a new run' : generated ? 'Rehearse this draft in software; stops on task errors and does not approve hardware use' : 'Simulate';
+    document.getElementById('btn-execute').title = generated ? 'Hardware execution requires review and approval' : 'Execute';
     document.getElementById('protocol-draft-banner').hidden = !(draft || generated);
     for (const id of ['btn-save', 'btn-save-as', 'btn-library', 'btn-draft', 'btn-import', 'btn-export', 'btn-simulate', 'btn-execute', 'btn-play', 'btn-pause', 'btn-stop', 'btn-step']) {
         const button = document.getElementById(id);
         const replayControl = compiledPreview && ['btn-simulate', 'btn-play', 'btn-pause', 'btn-stop', 'btn-step'].includes(id);
-        const generatedRunControl = generated && ['btn-simulate', 'btn-execute', 'btn-play', 'btn-pause', 'btn-stop', 'btn-step'].includes(id);
+        const generatedRunControl = generated && id === 'btn-execute';
         if ((draft && !replayControl) || generatedRunControl) {
             if (!('protocolPreviousDisabled' in button.dataset)) button.dataset.protocolPreviousDisabled = String(button.disabled);
             button.disabled = true;
@@ -8016,7 +8040,7 @@ function updateProtocolDraftControls() {
         const operations = (tab.graph?._nodes || []).filter(node => !['flow/Start', 'flow/End', 'flow/Frame'].includes(node.type)).length;
         const issues = tab.protocolMetadata?.protocol_draft_issues || [];
         const summary = document.getElementById('protocol-draft-summary');
-        summary.textContent = `${operations} editable Bravo tasks and manual handoffs · ${issues.length} review checks. Check deck, labware, tips, liquids, mappings, and external stages before review; simulation and execution are disabled for this draft.`;
+        summary.textContent = `${operations} editable Bravo tasks and manual handoffs · ${issues.length} review checks. Simulate rehearses this draft in software and stops on task errors. Review deck, tips, liquids, mappings, and external stages before hardware use; execution remains unavailable.`;
         summary.title = issues.map(issue => issue.message).join('\n');
     } else if (draft) {
         document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;
