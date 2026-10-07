@@ -212,10 +212,13 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
 
 def run_task(task: str, *, output_dir: Path, simulator: Path,
              dataset_root: Path | None = None, generation_timeout: int = 1800,
-             paper_override: Path | None = None, repair_attempts: int = 2) -> dict:
+             paper_override: Path | None = None, repair_attempts: int = 2,
+             patch_attempts: int = 1) -> dict:
     """Generate a candidate and measure only the OT-2 simulator gate."""
     if not 0 <= repair_attempts <= 5:
         raise ValueError("repair_attempts must be between 0 and 5")
+    if not 0 <= patch_attempts <= 3:
+        raise ValueError("patch_attempts must be between 0 and 3")
     instruction = _source_bytes(task, "instruction.md", dataset_root)
     assert instruction is not None
     task_dir = output_dir / task
@@ -266,7 +269,8 @@ def run_task(task: str, *, output_dir: Path, simulator: Path,
     command = [sys.executable, "-m", "pybravo.evals.text2wetlab",
                "--task-dir", str(task_dir), "--instruction-file", str(task_dir / "instruction.md"),
                "--simulator-command", str(simulator), "--event-logger", str(event_logger),
-               "--repair-attempts", str(repair_attempts)]
+               "--repair-attempts", str(repair_attempts),
+               "--patch-attempts", str(patch_attempts)]
     if paper_file:
         command.extend(["--paper-file", str(paper_file)])
     if labware_dir:
@@ -331,6 +335,8 @@ def main() -> int:
     parser.add_argument("--generation-timeout", type=int, default=1800)
     parser.add_argument("--repair-attempts", type=int, default=2,
                         help="Additional model repairs after the initial candidate (0–5).")
+    parser.add_argument("--patch-attempts", type=int, default=1,
+                        help="Local line-edit repairs after an event-safety failure (0–3).")
     args = parser.parse_args()
     if not args.simulator.is_file() or args.generation_timeout < 1 or not 0 <= args.repair_attempts <= 5:
         parser.error("Provide a simulator file, a positive timeout, and 0–5 repair attempts")
@@ -346,7 +352,8 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     cases = [run_task(task, output_dir=args.output_dir, simulator=args.simulator,
                       dataset_root=args.dataset_root, generation_timeout=args.generation_timeout,
-                      paper_override=paper_overrides.get(task), repair_attempts=args.repair_attempts)
+                      paper_override=paper_overrides.get(task), repair_attempts=args.repair_attempts,
+                      patch_attempts=args.patch_attempts)
              for task in dict.fromkeys(args.task)]
     result = {"dataset": DATASET, "revision": REVISION,
               "metric": "local_static_simulator_runlog_and_event_safety_gates", "official_score": None,

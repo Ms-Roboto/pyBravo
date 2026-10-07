@@ -293,6 +293,35 @@ def test_event_gate_requires_fresh_tip_between_reagent_stocks():
     assert "A2 of stocks on 2" in result.detail
 
 
+def test_event_gate_allows_one_specimen_source_to_one_reaction_well_and_mix():
+    log = adapter.EventLog([
+        _event("pick"),
+        _event("aspirate", labware="plasmid on 1", well="A1"),
+        _event("dispense", labware="cells on 7", well="A1"),
+        _event("aspirate", labware="cells on 7", well="A1"),
+        _event("dispense", labware="cells on 7", well="A1"),
+        _event("drop"),
+    ], {"plasmid on 1": "biorad_96_wellplate_200ul_pcr",
+        "cells on 7": "biorad_96_wellplate_200ul_pcr"})
+    assert adapter.validate_event_contamination(log).status == "passed"
+
+
+def test_event_gate_rejects_second_specimen_destination_on_same_tip():
+    log = adapter.EventLog([
+        _event("pick"),
+        _event("aspirate", labware="plasmid on 1", well="A1"),
+        _event("dispense", labware="cells on 7", well="A1"),
+        _event("aspirate", labware="cells on 7", well="A1"),
+        _event("dispense", labware="cells on 7", well="B1"),
+        _event("drop"),
+    ], {"plasmid on 1": "biorad_96_wellplate_200ul_pcr",
+        "cells on 7": "biorad_96_wellplate_200ul_pcr"})
+    result = adapter.validate_event_contamination(log)
+    assert result.status == "failed"
+    assert "A1 of cells on 7" in result.detail
+    assert "B1 of cells on 7" in result.detail
+
+
 @pytest.mark.asyncio
 async def test_generation_uses_verbatim_methods_passage_with_source_digest(tmp_path, monkeypatch):
     import hashlib
@@ -480,6 +509,91 @@ async def test_event_failure_enters_model_repair_loop(tmp_path, monkeypatch):
     trace = json.loads(result.trace_path.read_text(encoding="utf-8"))
     assert [attempt["event_validation"] for attempt in trace["attempts"]] == ["failed", "passed"]
     assert trace["event_validation_passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_event_failure_accepts_local_line_patch_and_keeps_original(tmp_path, monkeypatch):
+    bad_log = adapter.EventLog([
+        _event("pick"),
+        _event("aspirate", labware="plate on 1", well="A1"),
+        _event("aspirate", labware="plate on 1", well="B1"),
+        _event("drop"),
+    ], {"plate on 1": "corning_96_wellplate_360ul_flat"})
+    good_log = adapter.EventLog([
+        _event("pick"),
+        _event("aspirate", labware="plate on 1", well="A1"),
+        _event("drop"),
+        _event("pick"),
+        _event("aspirate", labware="plate on 1", well="B1"),
+        _event("drop"),
+    ], bad_log.labware)
+    logs = iter([bad_log, good_log])
+    calls = []
+
+    async def completion(messages, schema, **kwargs):
+        calls.append("draft")
+        return StructuredResponse({"code": VALID_PROTOCOL}, {"model": "local-qwen"})
+
+    async def patch_completion(messages, schema, **kwargs):
+        calls.append("patch")
+        assert kwargs["schema_name"] == "ot2_line_repair"
+        return StructuredResponse({"edits": [
+            {"start_line": 1, "end_line": 0, "replacement": "# localized Qwen edit"},
+        ]}, {"model": "local-qwen", "elapsed_s": 0.1})
+
+    monkeypatch.setattr(adapter, "simulate_protocol", lambda *args, **kwargs: adapter.SimulationResult("passed", "ok"))
+    result = await adapter.generate_ot2_protocol(
+        "Transfer two sample wells with clean tips.", tmp_path,
+        completion=completion, patch_completion=patch_completion,
+        event_reader=lambda _: next(logs), repair_attempts=0, patch_attempts=1,
+    )
+    assert calls == ["draft", "patch"]
+    assert result.attempts == 1
+    assert (tmp_path / "candidate_attempt_1.py").read_text() == VALID_PROTOCOL
+    assert (tmp_path / "candidate_attempt_1_patch_1.py").is_file()
+    assert (tmp_path / "patch_attempt_1_1.json").is_file()
+    assert result.protocol_path.read_text().startswith("# localized Qwen edit\n")
+    trace = json.loads(result.trace_path.read_text())
+    assert trace["event_validation_passed"] is True
+    assert trace["attempts"][0]["accepted_via_patch"] is True
+    assert trace["attempts"][0]["patches"][0]["status"] == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_line_patch_cannot_change_existing_liquid_actions(tmp_path, monkeypatch):
+    baseline = adapter.EventLog([
+        _event("pick"),
+        _event("aspirate", labware="plate on 1", well="A1"),
+        _event("aspirate", labware="plate on 1", well="B1"),
+        _event("drop"),
+    ], {"plate on 1": "corning_96_wellplate_360ul_flat"})
+    changed = adapter.EventLog([
+        _event("pick"),
+        _event("aspirate", labware="plate on 1", well="A1"),
+        _event("drop"),
+    ], baseline.labware)
+    logs = iter([baseline, changed])
+
+    async def completion(messages, schema, **kwargs):
+        return StructuredResponse({"code": VALID_PROTOCOL}, {"model": "local-qwen"})
+
+    async def patch_completion(messages, schema, **kwargs):
+        return StructuredResponse({"edits": [
+            {"start_line": 1, "end_line": 0, "replacement": "# localized Qwen edit"},
+        ]}, {"model": "local-qwen"})
+
+    monkeypatch.setattr(adapter, "simulate_protocol", lambda *args, **kwargs: adapter.SimulationResult("passed", "ok"))
+    with pytest.raises(adapter.GenerationError):
+        await adapter.generate_ot2_protocol(
+            "Transfer two sample wells with clean tips.", tmp_path,
+            completion=completion, patch_completion=patch_completion,
+            event_reader=lambda _: next(logs), repair_attempts=0, patch_attempts=1,
+        )
+    trace = json.loads((tmp_path / "generation_trace.json").read_text())
+    assert trace["event_validation_passed"] is False
+    assert trace["attempts"][0]["patches"][0]["status"] == "task_facts_rejected"
+    assert (tmp_path / "candidate_attempt_1.py").is_file()
+    assert not (tmp_path / "protocol.py").exists()
 
 
 @pytest.mark.asyncio

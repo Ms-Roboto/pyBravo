@@ -92,6 +92,16 @@ before passing that paper to the model. A missing or mismatched paper blocks the
 task rather than allowing the model to guess the method. The runner defaults to two
 repair attempts after the first draft; `--repair-attempts 5` allows a bounded longer
 run for a complex case without changing the baseline setting.
+After a draft passes static validation and Opentrons simulation but fails a
+structured event-safety check, the adapter now attempts **one focused Qwen line
+patch** by default (`--patch-attempts 0` disables it; the maximum is three).
+It keeps the rejected candidate and saves each model patch and patched source
+in the trace directory. A patch can pass only when the original liquid-action
+sequence, deck/labware map, and timed module commands are unchanged, and when
+static validation, simulation, and event safety pass again. If the patch fails,
+the ordinary bounded full-draft repair loop remains available. This is a
+process-error repair strategy; it does not infer missing chemistry or make an
+invalid liquid volume valid by changing task facts.
 The adapter now verifies OT-2 GEN2 P20, P300, and P1000 working ranges from
 [Opentrons' pipette table](https://docs.opentrons.com/python-api/pipettes/loading/),
 effective loaded-tip capacity for literal strokes, and tip/held-volume state
@@ -197,6 +207,55 @@ the block remains at the high heat-shock temperature during serial liquid
 handling. The saved report predates that gate and therefore says local
 `simulator_passed`; this is **not** a semantic or official benchmark pass.
 Evidence is in `/tmp/pybravo-text2wetlab-ecoli-transition/report.json`.
+
+A focused repair experiment then used that saved, simulated candidate as its
+starting point. The local Qwen model returned a **line edit**, not a complete
+replacement protocol: insert an untimed 37 °C block command immediately after
+the 42 °C/30-second pulse, before opening the lid for SOC additions. The
+request took 7.1 seconds and produced 62 tokens, compared with 23.4 seconds
+and 1,120 tokens for the prior full-code regeneration attempt. A mechanical
+patcher applied the edit to a copy and required the original deck/labware map,
+liquid-action sequence, and timed holds to remain identical. Static validation,
+Opentrons 7.5 simulation, the task's standalone lint (zero violations), pinned
+runlog, and the current heat-shock event gate all passed. The runlog orders the
+4 °C block command before DNA, the 42 °C pulse at event 37, the untimed 37 °C
+transition at event 38, the first SOC aspiration at event 41, and the 37 °C/
+60-minute recovery hold at event 73. This is a **local gate pass for this one
+candidate**, not an official Harbor rubric grade or Bravo hardware release.
+The model patch, candidate, trace, and independent verification are in
+`/tmp/pybravo-text2wetlab-ecoli-patch/`.
+
+The first automatic CLI smoke test revealed a validator defect: it classified
+the required plasmid-source-to-cell-destination transfer as cross-sample tip
+reuse because both plates were aspirated somewhere in the protocol. The event
+gate now permits one specimen source to feed one reaction well with the same
+tip, including a mix in that destination; it still rejects another specimen
+well and shared-stock backflow. The already generated candidate was
+independently revalidated with this correction, but the earlier report remains
+a record of the old failed gate.
+
+A fresh end-to-end CLI run with the corrected gate then passed. Qwen produced
+three full drafts (20.8, 19.5, and 23.9 seconds); the third passed simulation
+but failed the heat-shock transition check. One Qwen line patch took 2.1 seconds
+and produced 43 tokens. The final source passed static validation, the pinned
+standalone lint with zero violations, an independent Opentrons 7.5 simulation,
+the pinned runlog, and the current event-safety gate (73 events). The original
+candidate, Qwen patch JSON, patched candidate, and nested trace are retained in
+`/tmp/pybravo-text2wetlab-ecoli-patch-integrated2/`. The report has
+`official_score: null`: this is local gate coverage, not an official 100% score.
+
+The bounded experiment can be reproduced without writing a protocol by hand:
+
+```sh
+.venv/bin/python scripts/experiment_text2wetlab_patch_repair.py \
+  --source /tmp/pybravo-text2wetlab-ecoli-transition/ecoli-heat-shock-transformation/protocol.py \
+  --instruction /tmp/pybravo-text2wetlab-ecoli-transition/ecoli-heat-shock-transformation/instruction.md \
+  --paper /private/tmp/pybravo-text2wetlab-ecoli-paper.txt \
+  --event-logger /tmp/pybravo-text2wetlab-ecoli-transition/ecoli-heat-shock-transformation/official_runlog.py \
+  --simulator /tmp/pybravo-text2wetlab-ot2-py310/bin/opentrons_simulate \
+  --output-dir /tmp/pybravo-text2wetlab-ecoli-patch \
+  --max-attempts 2 --model-timeout 120
+```
 
 The first `golden-gate-assembly` run produced one AST-valid candidate, then
 repeated it twice. Opentrons rejected `p20.mix(5, 15)` because the liquid

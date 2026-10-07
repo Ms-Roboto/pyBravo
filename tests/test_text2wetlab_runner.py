@@ -206,6 +206,30 @@ def test_runner_passes_bounded_repair_count_to_adapter(tmp_path, monkeypatch):
         raise AssertionError("Out-of-range repair count was accepted")
 
 
+def test_runner_passes_bounded_patch_count_to_adapter(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "_source_bytes", lambda task, name, root: (
+        b"Transfer 100 uL into A1." if name == "instruction.md"
+        else b"# pinned event logger" if name == "tests/runlog.py" else None))
+    calls = []
+
+    def fake_run(command, *, timeout):
+        calls.append(command)
+        return {"status": "failed", "returncode": 1}
+
+    monkeypatch.setattr(runner, "_run", fake_run)
+    result = runner.run_task("a1-a12-100ul", output_dir=tmp_path,
+                             simulator=Path("/tmp/opentrons_simulate"), patch_attempts=3)
+    assert result["status"] == "generation_failed"
+    assert calls[0][calls[0].index("--patch-attempts") + 1] == "3"
+    try:
+        runner.run_task("a1-a12-100ul", output_dir=tmp_path,
+                        simulator=Path("/tmp/opentrons_simulate"), patch_attempts=4)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Out-of-range patch count was accepted")
+
+
 def test_event_audit_flags_cross_sample_aspiration_but_not_stock_distribution():
     events = [
         {"kind": "pick", "instrument": "p300"},

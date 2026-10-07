@@ -26,6 +26,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Optional directory of task-supplied custom Opentrons labware definitions")
     parser.add_argument("--simulation-timeout", type=float, default=180)
     parser.add_argument("--repair-attempts", type=int, default=2)
+    parser.add_argument("--patch-attempts", type=int, default=1,
+                        help="Bounded local line-edit repairs after an event-safety failure (0–3)")
     parser.add_argument("--model-base-url", help="OpenAI-compatible local model server URL")
     parser.add_argument("--model", help="Model alias on the local server")
     parser.add_argument("--model-timeout", type=float, default=300,
@@ -56,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
             event_logger_path=args.event_logger,
             labware_dir=args.labware_dir,
             repair_attempts=args.repair_attempts,
+            patch_attempts=args.patch_attempts,
             simulation_timeout_s=args.simulation_timeout,
         ))
     except (OSError, RuntimeError, ValueError) as exc:

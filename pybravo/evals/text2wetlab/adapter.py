@@ -17,11 +17,18 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from pybravo.evals.text2wetlab.geometry import labware_geometry_context
+from pybravo.evals.text2wetlab.patch_repair import (
+    LINE_EDIT_SCHEMA,
+    PatchError,
+    apply_line_patch,
+    line_patch_messages,
+    preserve_existing_task_actions,
+)
 from pybravo.evals.text2wetlab.reaction import PipetteRange, Stroke, audit_strokes
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
 from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse, structured_json
@@ -521,11 +528,13 @@ def record_simulation_events(
 
 
 def validate_event_contamination(log: EventLog) -> EventValidationResult:
-    """Reject tip carryover between wells of a specimen-source labware.
+    """Reject tip carryover between unrelated specimen wells.
 
     A source is any non-reservoir labware that is aspirated somewhere in the
     simulated protocol. This distinguishes wells that contain samples from an
-    empty destination-only plate; one reservoir may feed many empty wells.
+    empty destination-only plate; one reservoir may feed many empty wells. A
+    tip may carry one specimen source to one destination and mix there, which
+    is the intended source-to-reaction transfer rather than cross-sample reuse.
     """
     aspirated_labware = {
         event.get("labware") for event in log.events if event.get("kind") == "aspirate"
@@ -538,6 +547,8 @@ def validate_event_contamination(log: EventLog) -> EventValidationResult:
     }
     active: dict[str, bool] = {}
     touched: dict[str, set[tuple[str, str]]] = {}
+    specimen_sources: dict[str, tuple[str, str]] = {}
+    specimen_targets: dict[str, tuple[str, str]] = {}
     reagent_sources: dict[str, set[tuple[str, str]]] = {}
     errors: list[str] = []
     backflow_error: str | None = None
@@ -549,11 +560,15 @@ def validate_event_contamination(log: EventLog) -> EventValidationResult:
         if kind == "pick":
             active[instrument] = True
             touched[instrument] = set()
+            specimen_sources.pop(instrument, None)
+            specimen_targets.pop(instrument, None)
             reagent_sources[instrument] = set()
             continue
         if kind == "drop":
             active[instrument] = False
             touched[instrument] = set()
+            specimen_sources.pop(instrument, None)
+            specimen_targets.pop(instrument, None)
             reagent_sources[instrument] = set()
             continue
         if kind not in {"aspirate", "dispense"}:
@@ -581,8 +596,29 @@ def validate_event_contamination(log: EventLog) -> EventValidationResult:
         if labware in specimen_labware:
             current = (labware, well)
             prior = touched.setdefault(instrument, set())
-            if current not in prior and prior:
-                first_labware, first_well = sorted(prior)[0]
+            source = specimen_sources.get(instrument)
+            target = specimen_targets.get(instrument)
+            invalid = False
+            if kind == "aspirate":
+                if source is None:
+                    if target is not None and current != target:
+                        invalid = True
+                    else:
+                        specimen_sources[instrument] = current
+                elif current not in {source, target}:
+                    invalid = True
+                elif target is not None and current == source and source != target:
+                    backflow_error = backflow_error or (
+                        f"Event {index}: {instrument} returned to {well} of {labware} "
+                        "after touching its destination with the same tip."
+                    )
+            elif target is None:
+                if source is None or current != source:
+                    specimen_targets[instrument] = current
+            elif current not in {source, target}:
+                invalid = True
+            if invalid:
+                first_labware, first_well = target or source or sorted(prior)[0]
                 errors.append(
                     f"Event {index}: one {instrument} tip touched {first_well} of {first_labware} and then "
                     f"{well} of {labware} before being dropped. Use a fresh tip between distinct "
@@ -742,6 +778,122 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
             os.unlink(temp_name)
 
 
+async def _repair_event_failure_with_line_edits(
+    *,
+    source: str,
+    diagnostic: str,
+    baseline_events: EventLog,
+    instruction: str,
+    scientific_source: str | None,
+    directory: Path,
+    draft_number: int,
+    draft_trace: dict[str, Any],
+    completion: Callable[..., Awaitable[StructuredResponse]],
+    config: LocalLLMConfig | None,
+    simulator_command: str | Path | None,
+    event_logger_path: str | Path | None,
+    labware_dir: Path | None,
+    simulation_timeout_s: float,
+    http_client: Any,
+    event_reader: Callable[[Path], EventLog] | None,
+    patch_attempts: int,
+) -> Path | None:
+    """Let the local model repair a process error without rewriting liquid work."""
+    draft_trace["patches"] = []
+    current_code = source
+    current_error = diagnostic
+    rejected_hashes = {hashlib.sha256(source.encode("utf-8")).hexdigest()}
+    base_config = config or LocalLLMConfig.from_env()
+    patch_config = replace(base_config, max_tokens=min(base_config.max_tokens, 2048),
+                           retries=0, enable_thinking=False)
+    for patch_number in range(1, patch_attempts + 1):
+        patch_record: dict[str, Any] = {
+            "number": patch_number,
+            "input_code_sha256": hashlib.sha256(current_code.encode("utf-8")).hexdigest(),
+            "input_diagnostic": current_error,
+        }
+        draft_trace["patches"].append(patch_record)
+        try:
+            response = await completion(
+                line_patch_messages(current_code, instruction=instruction,
+                                    diagnostic=current_error,
+                                    scientific_source=scientific_source),
+                LINE_EDIT_SCHEMA, config=patch_config,
+                schema_name="ot2_line_repair", http_client=http_client,
+            )
+        except Exception as exc:
+            patch_record["status"] = "model_failed"
+            patch_record["diagnostic"] = f"{type(exc).__name__}: {exc}"
+            break
+        patch_record["model"] = response.metadata.get("model")
+        patch_record["model_elapsed_s"] = response.metadata.get("elapsed_s")
+        patch_record["usage"] = response.metadata.get("usage")
+        patch_path = directory / f"patch_attempt_{draft_number}_{patch_number}.json"
+        patch_path.write_text(json.dumps(response.payload, indent=2, ensure_ascii=False) + "\n",
+                              encoding="utf-8")
+        patch_record["patch_path"] = str(patch_path)
+        try:
+            if not isinstance(response.payload, dict):
+                raise PatchError("The model did not return a JSON object.")
+            patched_code = apply_line_patch(current_code, response.payload)
+            patched_digest = hashlib.sha256(patched_code.encode("utf-8")).hexdigest()
+            if patched_digest in rejected_hashes:
+                raise PatchError("The patch repeats a previously rejected candidate.")
+            rejected_hashes.add(patched_digest)
+            validate_ot2_source(patched_code)
+        except (PatchError, ProtocolValidationError) as exc:
+            current_error = f"Proposed patch is invalid: {exc}"
+            patch_record["status"] = "static_rejected"
+            patch_record["diagnostic"] = current_error
+            continue
+        candidate_path = directory / f"candidate_attempt_{draft_number}_patch_{patch_number}.py"
+        candidate_path.write_text(patched_code, encoding="utf-8")
+        patch_record["candidate_path"] = str(candidate_path)
+        patch_record["code_sha256"] = patched_digest
+        simulation = await asyncio.to_thread(
+            simulate_protocol, candidate_path, simulator_command=simulator_command,
+            labware_dir=labware_dir, timeout_s=simulation_timeout_s,
+        )
+        patch_record["simulation"] = simulation.status
+        if simulation.status != "passed":
+            current_error = simulation.detail
+            patch_record["status"] = "simulation_rejected"
+            patch_record["diagnostic"] = current_error
+            continue
+        try:
+            if event_reader is not None:
+                patched_events = await asyncio.to_thread(event_reader, candidate_path)
+            else:
+                patched_events = await asyncio.to_thread(
+                    record_simulation_events, candidate_path,
+                    event_logger_path=event_logger_path,
+                    simulator_command=simulator_command,
+                    labware_dir=labware_dir, timeout_s=simulation_timeout_s,
+                )
+        except (EventSimulationError, GenerationError) as exc:
+            current_error = str(exc)
+            patch_record["status"] = "event_logger_rejected"
+            patch_record["diagnostic"] = current_error
+            continue
+        task_fact_error = preserve_existing_task_actions(baseline_events, patched_events)
+        if task_fact_error is not None:
+            current_error = task_fact_error
+            patch_record["status"] = "task_facts_rejected"
+            patch_record["diagnostic"] = task_fact_error
+            continue
+        event_validation = validate_event_safety(patched_events, instruction=instruction)
+        patch_record["event_validation"] = event_validation.status
+        patch_record["event_detail"] = event_validation.detail
+        patch_record["event_count"] = event_validation.event_count
+        if event_validation.status == "passed":
+            patch_record["status"] = "accepted"
+            return candidate_path
+        current_code = patched_code
+        current_error = event_validation.detail
+        patch_record["status"] = "event_rejected"
+    return None
+
+
 async def generate_ot2_protocol(
     instruction: str,
     task_dir: str | Path,
@@ -752,9 +904,11 @@ async def generate_ot2_protocol(
     event_logger_path: str | Path | None = None,
     labware_dir: str | Path | None = None,
     repair_attempts: int = 2,
+    patch_attempts: int = 1,
     simulation_timeout_s: float = 180.0,
     http_client: Any = None,
     completion: Callable[..., Awaitable[StructuredResponse]] | None = None,
+    patch_completion: Callable[..., Awaitable[StructuredResponse]] | None = None,
     event_reader: Callable[[Path], EventLog] | None = None,
 ) -> GenerationResult:
     """Generate, validate, and optionally simulate one benchmark protocol.
@@ -766,6 +920,8 @@ async def generate_ot2_protocol(
         raise ValueError("A nonempty benchmark instruction is required.")
     if not 0 <= repair_attempts <= 5:
         raise ValueError("repair_attempts must be between 0 and 5.")
+    if not 0 <= patch_attempts <= 3:
+        raise ValueError("patch_attempts must be between 0 and 3.")
     directory = Path(task_dir).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
     resolved_labware_dir = Path(labware_dir).expanduser().resolve() if labware_dir is not None else None
@@ -775,8 +931,11 @@ async def generate_ot2_protocol(
     trace_path = directory / "generation_trace.json"
     output_path.unlink(missing_ok=True)
     for prior_candidate in directory.glob("candidate_attempt_*.py"):
-        if re.fullmatch(r"candidate_attempt_\d+\.py", prior_candidate.name):
+        if re.fullmatch(r"candidate_attempt_\d+(?:_patch_\d+)?\.py", prior_candidate.name):
             prior_candidate.unlink()
+    for prior_patch in directory.glob("patch_attempt_*.json"):
+        if re.fullmatch(r"patch_attempt_\d+_\d+\.json", prior_patch.name):
+            prior_patch.unlink()
     trace: dict[str, Any] = {
         "task_sha256": hashlib.sha256(instruction.encode("utf-8")).hexdigest(),
         "attempts": [],
@@ -785,8 +944,10 @@ async def generate_ot2_protocol(
         "event_validation_passed": False,
     }
     task_text = "Benchmark task instruction:\n" + instruction.strip()
+    method_text: str | None = None
     if scientific_source and scientific_source.strip():
         source_context = prepare_scientific_source(scientific_source)
+        method_text = source_context.text
         trace["scientific_source"] = {
             "strategy": source_context.strategy,
             "source_sha256": source_context.source_sha256,
@@ -815,6 +976,7 @@ async def generate_ot2_protocol(
             ),
         })
     complete = completion or structured_json
+    patch_complete = patch_completion or (structured_json if completion is None else None)
     prior_code: str | None = None
     prior_error: str | None = None
     rejected_hashes: dict[str, int] = {}
@@ -913,6 +1075,34 @@ async def generate_ot2_protocol(
                 prior_code, prior_error = code, simulation.detail
                 continue
             if simulation.status == "passed" and event_validation.status == "failed":
+                if patch_complete is not None and patch_attempts:
+                    patched_candidate = await _repair_event_failure_with_line_edits(
+                        source=code,
+                        diagnostic=event_validation.detail,
+                        baseline_events=event_log,
+                        instruction=instruction,
+                        scientific_source=method_text,
+                        directory=directory,
+                        draft_number=index + 1,
+                        draft_trace=attempt,
+                        completion=patch_complete,
+                        config=config,
+                        simulator_command=simulator_command,
+                        event_logger_path=event_logger_path,
+                        labware_dir=resolved_labware_dir,
+                        simulation_timeout_s=simulation_timeout_s,
+                        http_client=http_client,
+                        event_reader=event_reader,
+                        patch_attempts=patch_attempts,
+                    )
+                    if patched_candidate is not None:
+                        shutil.copyfile(patched_candidate, output_path)
+                        attempt["accepted_via_patch"] = True
+                        trace["status"] = "simulated"
+                        trace["static_validation_passed"] = True
+                        trace["event_validation_passed"] = True
+                        _write_json_atomic(trace_path, trace)
+                        return GenerationResult(output_path, trace_path, index + 1, simulation)
                 prior_code, prior_error = code, event_validation.detail
                 continue
             # An unavailable simulator is stated explicitly in the trace and result.
