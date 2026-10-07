@@ -30,12 +30,19 @@ from pybravo.evals.text2wetlab.geometry import labware_geometry_context
 from pybravo.evals.text2wetlab.phased_action_ir import (
     PhasedSetup,
     StageDraft,
+    StageSpec,
     audit_prefix_material,
     material_handoff,
     merge_prefix,
     parse_setup,
     parse_stage,
     tip_handoff,
+)
+from pybravo.evals.text2wetlab.phased_reaction_math import (
+    ReactionMathContext,
+    ReactionMathPlan,
+    audit_observed_premix,
+    parse_and_audit_math,
 )
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
 from pybravo.evals.text2wetlab.trusted_catalog import (
@@ -91,13 +98,58 @@ _STAGE_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+_MATH_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "stage_id": {"type": "string"},
+        "reaction_count": {"type": "integer"},
+        "final_volume_ul": {"type": "number"},
+        "premix_labware": {"type": "string"},
+        "premix_well": {"type": "string"},
+        "premix_target_ul_per_reaction": {"type": "number"},
+        "components": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "phase": {"enum": ["premix", "later"]},
+                "volume_ul_per_reaction": {"type": ["number", "null"]},
+                "source_material_ids": {"type": "array", "items": {"type": "string"}},
+                "source_labware": {"type": ["string", "null"]},
+                "source_well": {"type": ["string", "null"]},
+                "delivery": {"enum": ["robot", "manual"]},
+                "basis": {"enum": ["direct", "calculated", "assumption"]},
+                "assumption_note": {"type": ["string", "null"]},
+                "stock_strength_x": {"type": ["number", "null"]},
+                "target_strength_x": {"type": ["number", "null"]},
+                "is_diluent": {"type": "boolean"},
+                "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["id", "phase", "volume_ul_per_reaction", "basis",
+                         "evidence_refs"],
+            "additionalProperties": False,
+        }},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["stage_id", "reaction_count", "final_volume_ul",
+                 "premix_labware", "premix_well", "premix_target_ul_per_reaction",
+                 "components", "evidence_refs"],
+    "additionalProperties": False,
+}
+
 _SETUP_SYSTEM = """You are the local OT-2 scientific planner. Author only the JSON setup and an ordered outline of bounded stages; do not write Python, protocol actions, or final code in this call. Use the pinned task and cited scientific source lines, plus the installed read-only OT-2 catalog. The setup must include every fixed deck item, compatible module and pipette, and installed tip rack. Preserve explicit deck labels. Stage IDs must be unique snake_case; each stage has id, a concise goal, and exact evidence_refs (line IDs) covering every scientific requirement of that stage. Put sample loading before any treatment, and split a long procedure into small complete stages. Avoid one enormous stage. The number and sequence of stages come from the source; no downstream code inserts missing work.
 
 Return keys labware, modules, pipettes, stages, initial_supplies. Labware: id, load_name, exactly one of integer slot or module_id, optional label. Module: id, exact catalog model, and slot for non-fixed modules only. Pipette: id, model, mount, tip_rack_ids. Stage: id, goal, evidence_refs. Optional initial-supply record: key `labware` (the loaded labware ID), selection ('all', 'wells_in_columns', or 'wells'), columns or wells as appropriate, volume_ul per selected well or null when unmeasured, material_id, source_material_name, evidence_refs. `source_material_name` must quote verbatim material words on the cited task line that also names the exact labware and each selected well. A positive initial volume needs the exact amount and units on that same line; a zero needs the same line to say that well starts empty. Split different materials into different records. Do not invent starting liquid. Unknown volume is null. Source claims are audited and remain model-authored, not a hardware reading. Return no unsupported labware, reagent, refill, or sample."""
 
-_STAGE_SYSTEM = """You are authoring exactly one bounded, ordered ActionPlan stage for a pinned OT-2 task. Return only JSON with stage_id, evidence_refs, actions. Every action, including every action in a loop, must cite exact source line IDs in evidence_refs. Process actions may cite only the current stage's evidence_refs. Pickup/drop/refill may also cite the separately listed fixed instrument/tip task lines. If the stage cites paper lines, every non-tip action must cite a stage-specific paper line. Do not invent experimental steps, wells, reagents, volumes, or refills. The completed prefix's state and inventory are authoritative observations. If an absolute source volume is unknown, do not claim it is sufficient. A stage must finish with no tip attached and no liquid held. Complete the stage goal before the next stage; do not repeat earlier actions.
+_MATH_SYSTEM = """You are authoring a cited reaction-math subplan, before any pipetting actions. Return only JSON matching the schema. Do not write Python or pipette steps. For the current preparation stage, identify the cited reaction count and final volume per reaction. List every per-reaction component, including components added later after the premix. Separate phase=premix from phase=later. Derive premix_target_ul_per_reaction as final volume minus all later additions. List each premix reagent from its exact fixed-setup material ID, labware ID, and physical source well; source_material_ids is a one-item array for each premix reagent. Later additions may group multiple source material IDs and leave source_labware/source_well null until their action stage. Use cited line IDs for every component and name the basis as direct, calculated, or assumption. For an assumed volume, include an explicit assumption_note; never disguise a choice as a cited fact. Supply both stock_strength_x and target_strength_x only when their comparable values are supported by source facts. For one diluent, calculate its volume as the arithmetic remainder and set is_diluent=true. All component volumes are per reaction; do not multiply them by reaction_count in the JSON. Unknown volumes stay null. No protocol action is allowed until the arithmetic and physical source audit passes."""
+
+_STAGE_SYSTEM = """You are authoring exactly one bounded, ordered ActionPlan stage for a pinned OT-2 task. Return only JSON with stage_id, evidence_refs, actions. Every action, including every action in a loop, must cite exact source line IDs in evidence_refs. Process actions may cite only the current stage's evidence_refs. Pickup/drop/refill may also cite the separately listed fixed instrument/tip task lines. If the stage cites paper lines, every non-tip action must cite a stage-specific paper line. Do not invent experimental steps, wells, reagents, volumes, or refills. The completed prefix's state and inventory are authoritative observations. If an absolute source volume is unknown, do not claim it is sufficient. A stage must finish with no tip attached and no liquid held. Complete the stage goal before the next stage; do not repeat earlier actions. When a validated model-authored reaction-math subplan is supplied, follow its per-reaction and batch component quantities exactly; do not revise its numbers in this action call.
 
 Action kinds: pickup/drop with pipette; aspirate/dispense with pipette, labware, well, volume_ul; mix with pipette, labware, well, cycles, volume_ul; delay seconds; pause message for real operator intervention; comment message for a non-pipetting instruction without a stop; refill_tips pipette and message only if the task permits a physical refill and existing racks are exhausted; set_temperature/set_block_temperature/set_lid_temperature with module and celsius (block may have hold_seconds); open_lid/close_lid with module; magnet_engage with module and height_from_base_mm; magnet_disengage with module. For repetition, for_each has either explicit bindings or a catalog_wells selector and a short ordered actions body. Selector series specify binding, labware, mode ('all', 'wells_in_columns', or 'column_anchors'), and explicit columns when narrowing. 'wells_in_columns' walks every physical well in named columns; 'column_anchors' walks one full eight-channel anchor per column. Use '$binding' as the entire well field. A multichannel pipette may touch only catalog-listed multichannel anchors, including a catalog-verified long trough. Never use an eight-channel head on individual sample wells. Give each distinct reagent stock its own fresh tip: pick up, aspirate from that stock, dispense into the intermediate, and drop before touching another stock. If mixing the intermediate after all additions, pick up another fresh tip for that mixing action; do not reuse the tip that transferred the last stock. Each stroke must be within the installed pipette's minimum and the effective tip capacity, and each dispense must be funded by liquid in that tip. For a reaction premix, derive the per-reaction premix target by subtracting every separately added component (such as primers or template) from the cited final reaction volume. Multiply that target by the cited reaction count, derive the other premix components from cited source facts, and calculate the diluent as the remainder of the premix. Check both per-reaction and total arithmetic before returning the stage; if the sources do not establish required inputs, do not guess. Plan the total tip inventory across all stages; do not assume a refill unless the source explicitly permits it. Return a complete coherent stage, not trial steps followed by corrections."""
+
+_STAGE_SYSTEM += (" A dispense may set location='top' only for a noncontact reagent "
+                  "addition at or above the rim of an empty or untouched destination; "
+                  "ordinary dispenses use the default well location. Aspirate and mix "
+                  "cannot use location='top'.")
 
 
 def _model_record(response: StructuredResponse, payload_path: Path) -> dict[str, Any]:
@@ -181,6 +233,49 @@ def _setup_digest(setup: PhasedSetup) -> str:
                            separators=(",", ":")))
 
 
+def _reaction_math_context(
+    setup: PhasedSetup, spec: StageSpec, *, spans: dict,
+    instruction: str, paper: str | None,
+) -> ReactionMathContext | None:
+    """Detect an unambiguous, source-cited preparation target and final size."""
+    targets: list[tuple[str, str, int, str]] = []
+    volumes: list[tuple[float, str]] = []
+    for ref in spec.evidence_refs:
+        span = spans.get(ref)
+        if span is None:
+            continue
+        quote = (instruction if span.source == "instruction" else paper or "")[
+            span.start:span.end
+        ]
+        if span.source == "instruction":
+            matched = _PREPARATION_WELL.search(quote)
+            if matched and re.search(r"\bempty\s+at\s+the\s+start\b", quote, re.I):
+                targets.append((matched["labware"], matched["well"],
+                                int(matched["count"]), ref))
+        else:
+            volumes.extend((float(matched["volume"]), ref)
+                           for matched in _REACTION_VOLUME.finditer(quote))
+    if len(targets) != 1 or len(volumes) != 1:
+        return None
+    labware_id, well, count, task_ref = targets[0]
+    if labware_id not in {item.id for item in setup.labware}:
+        return None
+    return ReactionMathContext(
+        spec.id, count, volumes[0][0], labware_id, well,
+        task_ref, volumes[0][1],
+    )
+
+
+def _math_feedback(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return fixed issue codes and numeric values, never candidate prose."""
+    allowed = {"code", "index", "expected", "observed", "material_id"}
+    return [{key: value for key, value in issue.items()
+             if key in allowed and (key == "code" or isinstance(value, (int, float))
+                                    or (key == "material_id" and isinstance(value, str)
+                                        and re.fullmatch(r"[A-Za-z0-9_]{1,48}", value)))}
+            for issue in issues[:12]]
+
+
 def _preparation_envelope_issues(
     setup: PhasedSetup, stage: StageDraft, *, spans: dict,
     instruction: str, paper: str | None, events: list[dict],
@@ -251,6 +346,7 @@ def _prefix_gate(
     paper: str | None, spans: dict, labware: dict, pipettes: dict,
     modules: dict, simulator: Path, task: str, task_dir: Path,
     dataset_root: Path | None, labware_dir: Path | None,
+    math_plan: ReactionMathPlan | None = None, prior_event_count: int = 0,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Stop on the first compile, static, simulator, event, or ledger error."""
     task_dir.mkdir(parents=True, exist_ok=True)
@@ -310,12 +406,22 @@ def _prefix_gate(
         setup, stages[-1], spans=spans, instruction=instruction, paper=paper,
         events=events, event_labware=runlog.get("labware") or {},
     )
+    math_action_issues = audit_observed_premix(
+        math_plan, setup=setup, events=events,
+        event_labware=runlog.get("labware") or {},
+        start_event_index=prior_event_count,
+    ) if math_plan is not None else []
     if safety.get("status") != "passed" or runlog.get("cross_well_aspiration_risk_count", 0):
         return {"status": "event_safety_rejected", "runlog": runlog,
-                "preparation_envelope_issues": envelope_issues}, None
+                "preparation_envelope_issues": envelope_issues,
+                "reaction_math_action_issues": math_action_issues}, None
     if envelope_issues:
         return {"status": "preparation_envelope_rejected",
-                "preparation_envelope_issues": envelope_issues}, None
+                "preparation_envelope_issues": envelope_issues,
+                "reaction_math_action_issues": math_action_issues}, None
+    if math_action_issues:
+        return {"status": "reaction_math_action_mismatch",
+                "reaction_math_action_issues": math_action_issues}, None
     try:
         ledger = audit_prefix_material(
             events, runlog.get("labware") or {}, setup, labware_catalog=labware,
@@ -345,6 +451,7 @@ def _prefix_gate(
         "material_status": "needs_review" if ledger_issues else "passed",
         "material_issues": ledger_issues[:24],
         "tip_state": tips,
+        "reaction_math_action_status": "passed" if math_plan else "not_applicable",
     }
     return result, handoff
 
@@ -384,10 +491,20 @@ def _retry_feedback(failure: dict[str, Any]) -> dict[str, Any]:
         feedback["preparation_envelope_issues"] = (
             failure.get("preparation_envelope_issues") or []
         )[:2]
+        feedback["reaction_math_action_issues"] = _math_feedback(
+            failure.get("reaction_math_action_issues") or []
+        )
     elif status == "preparation_envelope_rejected":
         feedback["preparation_envelope_issues"] = (
             failure.get("preparation_envelope_issues") or []
         )[:2]
+        feedback["reaction_math_action_issues"] = _math_feedback(
+            failure.get("reaction_math_action_issues") or []
+        )
+    elif status == "reaction_math_action_mismatch":
+        feedback["reaction_math_action_issues"] = _math_feedback(
+            failure.get("reaction_math_action_issues") or []
+        )
     elif status == "material_rejected":
         feedback["issues"] = (failure.get("issues") or [])[:8]
     return feedback
@@ -573,6 +690,110 @@ async def run_experiment(
             + "\n\nValidated state and inventory handoff:\n"
             + json.dumps(handoff, ensure_ascii=False)
         )
+        math_context = _reaction_math_context(
+            setup, spec, spans=spans, instruction=instruction,
+            paper=paper_for_model,
+        )
+        math_plan: ReactionMathPlan | None = None
+        if math_context is not None:
+            math_trace: dict[str, Any] = {
+                "context": {
+                    "stage_id": math_context.stage_id,
+                    "reaction_count": math_context.reaction_count,
+                    "final_volume_ul": math_context.final_volume_ul,
+                    "premix_labware": math_context.premix_labware,
+                    "premix_well": math_context.premix_well,
+                    "source_refs": [math_context.task_ref, math_context.paper_ref],
+                },
+                "attempts": [],
+            }
+            stage_trace["reaction_math"] = math_trace
+            all_task_lines = "\n".join(line for line in cited_lines.splitlines()
+                                       if line.startswith("[task."))
+            math_prompt = (
+                "Current preparation stage:\n" + json.dumps(
+                    spec.model_dump(), ensure_ascii=False,
+                ) + "\n\nPinned task lines:\n" + all_task_lines
+                + "\n\nStage-specific paper lines:\n" + paper_lines
+                + "\n\nFixed loaded materials and sources:\n" + json.dumps(
+                    [item.model_dump() for item in setup.initial_supplies],
+                    ensure_ascii=False,
+                )
+                + "\n\nPreparation target is identified by the cited source line. "
+                  "Derive the premix and later component quantities; do not copy "
+                  "a prior failed action plan."
+            )
+            prior_math_payload: dict[str, Any] | None = None
+            prior_math_issues: list[dict[str, Any]] = []
+            for math_attempt_index in range(getattr(args, "math_retries", 1) + 1):
+                math_attempt: dict[str, Any] = {"attempt": math_attempt_index + 1}
+                math_trace["attempts"].append(math_attempt)
+                messages = [
+                    {"role": "system", "content": _MATH_SYSTEM},
+                    {"role": "user", "content": math_prompt},
+                ]
+                if prior_math_payload is not None:
+                    messages.extend([
+                        {"role": "assistant", "content": json.dumps(
+                            prior_math_payload, ensure_ascii=False,
+                        )},
+                        {"role": "user", "content":
+                         "The math subplan failed its deterministic source or "
+                         "reaction audit. Return a complete corrected math JSON "
+                         "using only the cited source. Issues:\n" + json.dumps(
+                             _math_feedback(prior_math_issues), ensure_ascii=False,
+                         )},
+                    ])
+                try:
+                    math_response = await completion(
+                        messages, _MATH_SCHEMA, config=config,
+                        schema_name="ot2_phased_reaction_math",
+                    )
+                except Exception as exc:
+                    math_attempt.update(status="model_failed",
+                                        detail=f"{type(exc).__name__}: {exc}")
+                    math_trace["status"] = "model_failed"
+                    trace["status"] = "reaction_math_model_failed"
+                    return trace
+                math_payload = math_response.payload
+                math_path = stage_dir / (
+                    "qwen_math.json" if math_attempt_index == 0 else
+                    f"qwen_math_retry_{math_attempt_index}.json"
+                )
+                math_attempt["model"] = _model_record(math_response, math_path)
+                prior_math_payload = math_payload
+                math_plan, math_issues = parse_and_audit_math(
+                    math_payload, context=math_context, setup=setup,
+                    spans=spans, instruction=instruction, paper=paper_for_model,
+                    labware_catalog=labware,
+                    allowed_paper_refs=[ref for ref in spec.evidence_refs
+                                        if ref.startswith("paper.")],
+                )
+                math_attempt["issues"] = math_issues
+                math_attempt["status"] = "passed" if not math_issues else "rejected"
+                if not math_issues:
+                    break
+                prior_math_issues = math_issues
+            if math_issues or math_plan is None:
+                math_trace["status"] = "rejected"
+                trace["status"] = "reaction_math_rejected"
+                return trace
+            math_trace["status"] = "passed"
+            math_trace["validated_plan_path"] = str(stage_dir / "validated_math.json")
+            (stage_dir / "validated_math.json").write_text(
+                json.dumps(math_plan.model_dump(), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            math_trace["assumption_count"] = sum(
+                item.basis == "assumption" for item in math_plan.components
+            )
+            math_trace["scientific_completeness_verified"] = False
+            stage_prompt += (
+                "\n\nValidated model-authored reaction math (fixed for this "
+                "action stage):\n" + json.dumps(
+                    math_plan.model_dump(), ensure_ascii=False,
+                )
+            )
         attempts: list[dict[str, Any]] = []
         stage_trace["attempts"] = attempts
         previous_payload: dict[str, Any] | None = None
@@ -686,6 +907,7 @@ async def run_experiment(
                 task=args.task, task_dir=stage_dir / f"attempt_{attempt_index + 1}",
                 dataset_root=args.dataset_root,
                 labware_dir=labware_dir,
+                math_plan=math_plan, prior_event_count=handoff["event_count"],
             )
             attempt.update(prefix_result)
             if next_handoff is not None:
@@ -709,7 +931,23 @@ async def run_experiment(
                 json.dumps(prefix, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
-            trace["status"] = "partial_prefix_passed"
+            math_assumptions = any(
+                (stage.get("reaction_math") or {}).get("assumption_count", 0) > 0
+                for stage in trace["stages"]
+            )
+            material_review = any(
+                stage.get("material_status") == "needs_review"
+                for stage in trace["stages"]
+            )
+            trace["status"] = (
+                "partial_prefix_science_review_required"
+                if math_assumptions or material_review else "partial_prefix_passed"
+            )
+            trace["review_reasons"] = {
+                "model_assumptions": math_assumptions,
+                "material": material_review,
+                "source_coverage": trace["setup_source_coverage"]["status"] == "needs_review",
+            }
             trace["remaining_stage_ids"] = [item.id for item in setup.stages[len(accepted):]]
             return trace
     merged = merge_prefix(setup, accepted).model_dump()
@@ -730,17 +968,21 @@ async def run_experiment(
     material_review = any(
         stage.get("material_status") == "needs_review" for stage in trace["stages"]
     )
+    math_assumptions = any(
+        (stage.get("reaction_math") or {}).get("assumption_count", 0) > 0
+        for stage in trace["stages"]
+    )
     coverage_review = trace["setup_source_coverage"]["status"] == "needs_review"
     rubric_review = final.get("local_rubric_status") != "supported"
     trace["status"] = (
         "science_review_required"
         if final["status"] == "mechanical_gates_passed"
-        and (material_review or coverage_review or rubric_review)
+        and (material_review or math_assumptions or coverage_review or rubric_review)
         else final["status"]
     )
     trace["review_reasons"] = {
         "material": material_review, "source_coverage": coverage_review,
-        "local_rubric": rubric_review,
+        "local_rubric": rubric_review, "model_assumptions": math_assumptions,
     }
     return trace
 
@@ -764,11 +1006,14 @@ def main() -> int:
                         help="Stop after this many accepted stage calls and save the partial prefix")
     parser.add_argument("--stage-retries", type=int, default=0,
                         help="Maximum local-Qwen repairs after a formal failed stage gate")
+    parser.add_argument("--math-retries", type=int, default=1,
+                        help="Maximum local-Qwen repairs of a reaction-math preflight")
     args = parser.parse_args()
     if (not args.simulator.is_file() or not 1 <= args.model_timeout <= 300
             or not 512 <= args.max_output_tokens <= 16000
             or not 1 <= args.max_stages <= 16
             or not 0 <= args.stage_retries <= 2
+            or not 0 <= args.math_retries <= 2
             or (args.saved_failed_stage is not None and
                 (args.saved_setup is None or args.stage_retries == 0))
             or (args.max_new_stages is not None and
