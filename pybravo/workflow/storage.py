@@ -27,7 +27,7 @@ GENERATED_DRAFT_NODE_TYPES = frozenset({
     "plate/PickPlace", "plate/Stack", "plate/Destack", "plate/Mount",
     "plate/Unmount", "plate/Delid", "plate/Relid",
     "liquid/Aspirate", "liquid/Dispense", "liquid/Mix",
-    "tips/TipsOn", "tips/TipsOff", "system/Manual", "system/Wait",
+    "tips/TipsOn", "tips/TipsOff", "system/Initialize", "system/Manual", "system/Wait",
 })
 _GENERATED_DRAFT_FORBIDDEN_FIELDS = frozenset({
     "approval", "protocol_session_id", "protocol_compiled_preview", "protocol_chat_draft",

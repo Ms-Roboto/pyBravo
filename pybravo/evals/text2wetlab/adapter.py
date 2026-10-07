@@ -28,7 +28,10 @@ from pybravo.evals.text2wetlab.patch_repair import (
     apply_line_patch,
     line_patch_messages,
     preserve_existing_task_actions,
+    preserve_simulator_repair_facts,
 )
+from pybravo.evals.text2wetlab.planning import plan_to_prompt
+from pybravo.evals.text2wetlab.planning_runtime import run_grounded_plan
 from pybravo.evals.text2wetlab.reaction import PipetteRange, Stroke, audit_strokes
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
 from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse, structured_json
@@ -778,11 +781,12 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
             os.unlink(temp_name)
 
 
-async def _repair_event_failure_with_line_edits(
+async def _repair_failure_with_line_edits(
     *,
     source: str,
     diagnostic: str,
-    baseline_events: EventLog,
+    baseline_events: EventLog | None,
+    failure_stage: str,
     instruction: str,
     scientific_source: str | None,
     directory: Path,
@@ -797,8 +801,8 @@ async def _repair_event_failure_with_line_edits(
     http_client: Any,
     event_reader: Callable[[Path], EventLog] | None,
     patch_attempts: int,
-) -> Path | None:
-    """Let the local model repair a process error without rewriting liquid work."""
+) -> tuple[Path, SimulationResult] | None:
+    """Repair a simulator or event error while keeping its task facts intact."""
     draft_trace["patches"] = []
     current_code = source
     current_error = diagnostic
@@ -809,6 +813,7 @@ async def _repair_event_failure_with_line_edits(
     for patch_number in range(1, patch_attempts + 1):
         patch_record: dict[str, Any] = {
             "number": patch_number,
+            "failure_stage": failure_stage,
             "input_code_sha256": hashlib.sha256(current_code.encode("utf-8")).hexdigest(),
             "input_diagnostic": current_error,
         }
@@ -841,6 +846,13 @@ async def _repair_event_failure_with_line_edits(
                 raise PatchError("The patch repeats a previously rejected candidate.")
             rejected_hashes.add(patched_digest)
             validate_ot2_source(patched_code)
+            if failure_stage == "simulator":
+                task_fact_error = preserve_simulator_repair_facts(source, patched_code)
+                if task_fact_error is not None:
+                    patch_record["status"] = "task_facts_rejected"
+                    patch_record["diagnostic"] = task_fact_error
+                    current_error = task_fact_error
+                    continue
         except (PatchError, ProtocolValidationError) as exc:
             current_error = f"Proposed patch is invalid: {exc}"
             patch_record["status"] = "static_rejected"
@@ -856,6 +868,7 @@ async def _repair_event_failure_with_line_edits(
         )
         patch_record["simulation"] = simulation.status
         if simulation.status != "passed":
+            current_code = patched_code
             current_error = simulation.detail
             patch_record["status"] = "simulation_rejected"
             patch_record["diagnostic"] = current_error
@@ -875,19 +888,20 @@ async def _repair_event_failure_with_line_edits(
             patch_record["status"] = "event_logger_rejected"
             patch_record["diagnostic"] = current_error
             continue
-        task_fact_error = preserve_existing_task_actions(baseline_events, patched_events)
-        if task_fact_error is not None:
-            current_error = task_fact_error
-            patch_record["status"] = "task_facts_rejected"
-            patch_record["diagnostic"] = task_fact_error
-            continue
+        if baseline_events is not None:
+            task_fact_error = preserve_existing_task_actions(baseline_events, patched_events)
+            if task_fact_error is not None:
+                current_error = task_fact_error
+                patch_record["status"] = "task_facts_rejected"
+                patch_record["diagnostic"] = task_fact_error
+                continue
         event_validation = validate_event_safety(patched_events, instruction=instruction)
         patch_record["event_validation"] = event_validation.status
         patch_record["event_detail"] = event_validation.detail
         patch_record["event_count"] = event_validation.event_count
         if event_validation.status == "passed":
             patch_record["status"] = "accepted"
-            return candidate_path
+            return candidate_path, simulation
         current_code = patched_code
         current_error = event_validation.detail
         patch_record["status"] = "event_rejected"
@@ -905,6 +919,8 @@ async def generate_ot2_protocol(
     labware_dir: str | Path | None = None,
     repair_attempts: int = 2,
     patch_attempts: int = 1,
+    evidence_planning: bool = False,
+    planning_attempts: int = 2,
     simulation_timeout_s: float = 180.0,
     http_client: Any = None,
     completion: Callable[..., Awaitable[StructuredResponse]] | None = None,
@@ -922,6 +938,8 @@ async def generate_ot2_protocol(
         raise ValueError("repair_attempts must be between 0 and 5.")
     if not 0 <= patch_attempts <= 3:
         raise ValueError("patch_attempts must be between 0 and 3.")
+    if evidence_planning and not 1 <= planning_attempts <= 3:
+        raise ValueError("planning_attempts must be between 1 and 3.")
     directory = Path(task_dir).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
     resolved_labware_dir = Path(labware_dir).expanduser().resolve() if labware_dir is not None else None
@@ -977,6 +995,32 @@ async def generate_ot2_protocol(
         })
     complete = completion or structured_json
     patch_complete = patch_completion or (structured_json if completion is None else None)
+    if evidence_planning:
+        planned = await run_grounded_plan(
+            instruction=instruction,
+            scientific_source=method_text,
+            geometry=geometry,
+            directory=directory,
+            completion=complete,
+            config=config,
+            http_client=http_client,
+            max_attempts=planning_attempts,
+        )
+        trace["evidence_planning"] = {
+            "status": "accepted" if planned.plan is not None else "failed_fallback_to_source",
+            "attempts": list(planned.attempts),
+        }
+        if planned.plan is not None:
+            base_messages.append({
+                "role": "user",
+                "content": (
+                    "The same local model produced this cited plan, which passed the program's "
+                    "arithmetic, tip-budget, and module-state checks. Use it to organize your "
+                    "protocol while keeping the verbatim task and source authoritative. "
+                    "Do not add a reagent absent from the starting deck:\n"
+                    + plan_to_prompt(planned.plan)
+                ),
+            })
     prior_code: str | None = None
     prior_error: str | None = None
     rejected_hashes: dict[str, int] = {}
@@ -1072,14 +1116,12 @@ async def generate_ot2_protocol(
                 attempt["event_count"] = event_validation.event_count
                 attempt["event_detail"] = event_validation.detail
             if simulation.status == "failed":
-                prior_code, prior_error = code, simulation.detail
-                continue
-            if simulation.status == "passed" and event_validation.status == "failed":
                 if patch_complete is not None and patch_attempts:
-                    patched_candidate = await _repair_event_failure_with_line_edits(
+                    repaired = await _repair_failure_with_line_edits(
                         source=code,
-                        diagnostic=event_validation.detail,
-                        baseline_events=event_log,
+                        diagnostic=simulation.detail,
+                        baseline_events=None,
+                        failure_stage="simulator",
                         instruction=instruction,
                         scientific_source=method_text,
                         directory=directory,
@@ -1095,14 +1137,48 @@ async def generate_ot2_protocol(
                         event_reader=event_reader,
                         patch_attempts=patch_attempts,
                     )
-                    if patched_candidate is not None:
+                    if repaired is not None:
+                        patched_candidate, patched_simulation = repaired
                         shutil.copyfile(patched_candidate, output_path)
                         attempt["accepted_via_patch"] = True
                         trace["status"] = "simulated"
                         trace["static_validation_passed"] = True
                         trace["event_validation_passed"] = True
                         _write_json_atomic(trace_path, trace)
-                        return GenerationResult(output_path, trace_path, index + 1, simulation)
+                        return GenerationResult(output_path, trace_path, index + 1, patched_simulation)
+                prior_code, prior_error = code, simulation.detail
+                continue
+            if simulation.status == "passed" and event_validation.status == "failed":
+                if patch_complete is not None and patch_attempts:
+                    repaired = await _repair_failure_with_line_edits(
+                        source=code,
+                        diagnostic=event_validation.detail,
+                        baseline_events=event_log,
+                        failure_stage="event",
+                        instruction=instruction,
+                        scientific_source=method_text,
+                        directory=directory,
+                        draft_number=index + 1,
+                        draft_trace=attempt,
+                        completion=patch_complete,
+                        config=config,
+                        simulator_command=simulator_command,
+                        event_logger_path=event_logger_path,
+                        labware_dir=resolved_labware_dir,
+                        simulation_timeout_s=simulation_timeout_s,
+                        http_client=http_client,
+                        event_reader=event_reader,
+                        patch_attempts=patch_attempts,
+                    )
+                    if repaired is not None:
+                        patched_candidate, patched_simulation = repaired
+                        shutil.copyfile(patched_candidate, output_path)
+                        attempt["accepted_via_patch"] = True
+                        trace["status"] = "simulated"
+                        trace["static_validation_passed"] = True
+                        trace["event_validation_passed"] = True
+                        _write_json_atomic(trace_path, trace)
+                        return GenerationResult(output_path, trace_path, index + 1, patched_simulation)
                 prior_code, prior_error = code, event_validation.detail
                 continue
             # An unavailable simulator is stated explicitly in the trace and result.

@@ -28,6 +28,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repair-attempts", type=int, default=2)
     parser.add_argument("--patch-attempts", type=int, default=1,
                         help="Bounded local line-edit repairs after an event-safety failure (0–3)")
+    parser.add_argument("--evidence-planning", action="store_true",
+                        help="Ask the same local model for a cited plan and audit it before code generation")
+    parser.add_argument("--planning-attempts", type=int, default=2,
+                        help="Maximum local-model attempts to ground and audit the optional plan (1–3)")
     parser.add_argument("--model-base-url", help="OpenAI-compatible local model server URL")
     parser.add_argument("--model", help="Model alias on the local server")
     parser.add_argument("--model-timeout", type=float, default=300,
@@ -59,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
             labware_dir=args.labware_dir,
             repair_attempts=args.repair_attempts,
             patch_attempts=args.patch_attempts,
+            evidence_planning=args.evidence_planning,
+            planning_attempts=args.planning_attempts,
             simulation_timeout_s=args.simulation_timeout,
         ))
     except (OSError, RuntimeError, ValueError) as exc:

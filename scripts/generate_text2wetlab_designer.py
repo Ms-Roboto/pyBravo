@@ -30,7 +30,7 @@ ALLOWED_NODE_TYPES = frozenset({
     "plate/PickPlace", "plate/Stack", "plate/Destack", "plate/Mount",
     "plate/Unmount", "plate/Delid", "plate/Relid",
     "liquid/Aspirate", "liquid/Dispense", "liquid/Mix",
-    "tips/TipsOn", "tips/TipsOff", "system/Manual", "system/Wait",
+    "tips/TipsOn", "tips/TipsOff", "system/Initialize", "system/Manual", "system/Wait",
 })
 
 
@@ -284,7 +284,8 @@ def _post_draft(api_url: str, workflow: dict, provenance: dict, issues: list[dic
 
 
 async def _generate_one(task: str, *, output_dir: Path, api_url: str,
-                        paper_override: Path | None, max_tokens: int, timeout_s: int) -> dict:
+                        paper_override: Path | None, max_tokens: int, timeout_s: int,
+                        reuse_model_output: bool = False) -> dict:
     task_dir = output_dir / task
     task_dir.mkdir(parents=True, exist_ok=True)
     instruction_bytes = _source_bytes(task, "instruction.md", None)
@@ -301,22 +302,31 @@ async def _generate_one(task: str, *, output_dir: Path, api_url: str,
     if b"/data/paper.txt" in instruction_bytes and paper is None:
         raise RuntimeError("Task requires a source paper, but the pinned paper is unavailable.")
     methods = prepare_scientific_source(paper.decode("utf-8")).text if paper else None
-    os.environ["PYBRAVO_DRAFTER_BASE_URL"] = MODEL_URL
-    os.environ["PYBRAVO_DRAFTER_TIMEOUT"] = str(timeout_s)
-    os.environ["PYBRAVO_DRAFTER_HTTP_RETRIES"] = "0"
-    result = await draft_workflow(
-        _draft_prompt(instruction, methods),
-        config=DrafterConfig(provider="local", model="qwen", max_tokens=max_tokens,
-                             temperature=0, max_repair_attempts=1),
-        include_exemplars=False,
-    )
-    workflow = result.workflow.to_designer_json()
-    (task_dir / "local_model_workflow.json").write_text(json.dumps(workflow, indent=2) + "\n", encoding="utf-8")
-    issues = [
-        {"severity": issue.severity, "code": issue.code, "message": issue.message,
-         **({"path": f"/graph/nodes/{issue.node_id}"} if issue.node_id is not None else {})}
-        for issue in result.issues
-    ]
+    model_output_path = task_dir / "local_model_workflow.json"
+    if reuse_model_output:
+        if not model_output_path.is_file():
+            raise RuntimeError("No previously saved local-model output is available for this task.")
+        workflow = json.loads(model_output_path.read_text(encoding="utf-8"))
+        model_attempts = None
+        issues = []
+    else:
+        os.environ["PYBRAVO_DRAFTER_BASE_URL"] = MODEL_URL
+        os.environ["PYBRAVO_DRAFTER_TIMEOUT"] = str(timeout_s)
+        os.environ["PYBRAVO_DRAFTER_HTTP_RETRIES"] = "0"
+        result = await draft_workflow(
+            _draft_prompt(instruction, methods),
+            config=DrafterConfig(provider="local", model="qwen", max_tokens=max_tokens,
+                                 temperature=0, max_repair_attempts=1),
+            include_exemplars=False,
+        )
+        workflow = result.workflow.to_designer_json()
+        model_output_path.write_text(json.dumps(workflow, indent=2) + "\n", encoding="utf-8")
+        model_attempts = result.attempts
+        issues = [
+            {"severity": issue.severity, "code": issue.code, "message": issue.message,
+             **({"path": f"/graph/nodes/{issue.node_id}"} if issue.node_id is not None else {})}
+            for issue in result.issues
+        ]
     issues.extend(_normalize_loop_backedges(workflow))
     issues.extend(_sanitize_model_deck(workflow, {
         str(item["id"]) for item in context.get("labware") or [] if isinstance(item, dict) and item.get("id")
@@ -350,7 +360,9 @@ async def _generate_one(task: str, *, output_dir: Path, api_url: str,
         "issue_count": len(issues), "issues": issues,
         "instruction_sha256": provenance["source_sha256"],
         "source_paper_sha256": provenance["source_paper_sha256"],
-        "model": "qwen", "model_attempts": result.attempts,
+        "model": "qwen", "model_attempts": model_attempts,
+        "reused_local_model_output": reuse_model_output,
+        "model_output_sha256": _sha256(model_output_path.read_bytes()),
     }
     (task_dir / "generation_record.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     return record
@@ -363,7 +375,8 @@ async def _main(args: argparse.Namespace) -> int:
         try:
             record = await _generate_one(task, output_dir=args.output_dir, api_url=args.api_url,
                                          paper_override=args.ecoli_paper, max_tokens=args.max_tokens,
-                                         timeout_s=args.timeout)
+                                         timeout_s=args.timeout,
+                                         reuse_model_output=args.reuse_model_output)
         except Exception as exc:
             record = {"task": task, "status": "failed", "error": f"{type(exc).__name__}: {exc}"}
         report.append(record)
@@ -380,6 +393,8 @@ def main() -> int:
     parser.add_argument("--ecoli-paper", type=Path)
     parser.add_argument("--max-tokens", type=int, default=6500)
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--reuse-model-output", action="store_true",
+                        help="Validate and save local_model_workflow.json from a prior Qwen run without calling the model again")
     args = parser.parse_args()
     return asyncio.run(_main(args))
 
