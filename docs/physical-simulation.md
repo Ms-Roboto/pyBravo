@@ -126,7 +126,20 @@ closed. Passing checks does not authorize hardware execution or qualify a
 liquid method. The saved revision's method review and release remain required.
 
 Some deployed tip-box records have zero or missing hole diameters. Those records
-remain incomplete: return-tip entry fails with the missing geometry identified.
+remain incomplete: static Designer preflight identifies missing return-rack
+diameters before motion. It also rejects liquid tasks aimed at a known tip rack
+or tip-waste receptacle. Workflows with dynamic locations or deck-changing tasks
+retain native checks against the actual labware present at each step.
 The simulator does not replace unknown catalog measurements with guessed
 clearances. Native tip-cycle regressions use explicitly labeled synthetic
 mechanical fixtures; they do not qualify the deployment's rack dimensions.
+
+The deployed `lw-4914769d0af7` ST10 rack's previously missing aperture diameter
+was recovered as **3.3 mm** from its existing
+`labware/editor_assets/lw-4914769d0af7/ST_Tip_Box.gltf` CAD asset on 2026-10-07.
+All 384 circular apertures agree within 0.000003 mm in the exported mesh. Asset
+SHA256: `0a9dfef973ae4266042b73614536132d693dc592135c3eccb270d6aa2b082fb5`.
+The catalog description records this as model-derived geometry, not a physical
+measurement or hardware qualification. Rack height and teachpoint offsets were
+preserved. A separate same-plate test workflow uses rack 1 for pickup, CellVis
+plate 2 for aspiration and dispense, and empty rack 3 for spent-tip return.

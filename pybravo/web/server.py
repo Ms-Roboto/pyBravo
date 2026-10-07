@@ -2943,33 +2943,47 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
         "Running workflow pre-flight validation (mode=%s, bravo=%s)",
         mode, "present" if validation_bravo is not None else "absent",
     )
+    from pybravo.physics.planning import static_labware_issues
+
+    # Definite role mistakes on an unchanged saved deck apply to handmade
+    # graphs too. Unknown/dynamic layouts remain native runtime checks.
+    # Hole geometry is needed by SuperDex, not by hardware task dispatch.
+    invalid_nodes = []
+    if any(node.get("type") in _LIQUID_NODE_TYPES | {"tips/TipsOff"} for node in graph_data.get("nodes", [])):
+        catalog_bravo = validation_bravo if getattr(validation_bravo, "labware_catalog", None) is not None else target_bravo
+        labware_context = {"labware": [row.to_summary() for row in catalog_bravo.labware_catalog.list_definitions()]}
+        invalid_nodes.extend(static_labware_issues(data, catalog_context=labware_context,
+                                                  physical_geometry=(mode == "simulate")))
     if validation_bravo is not None:
-        invalid_nodes = _validate_workflow_liquid_classes(graph_data, validation_bravo)
+        invalid_nodes.extend(_validate_workflow_liquid_classes(graph_data, validation_bravo))
         if generated_rehearsal:
             invalid_nodes.extend(_missing_generated_liquid_methods(graph_data))
             from pybravo.physics.planning import mechanical_issues
             from pybravo.workflow.protocols.context import machine_context
 
             class_error_nodes = {item['node_id'] for item in invalid_nodes if item['field'] == 'liquid_class'}
-            invalid_nodes.extend(item for item in mechanical_issues(data, catalog_context=machine_context(validation_bravo))
-                                 if not (item['value'] == 'UNKNOWN_LIQUID_CLASS' and item['node_id'] in class_error_nodes))
-        logger.info("Pre-flight validation found %d catalog or mechanical errors", len(invalid_nodes))
-        if invalid_nodes:
-            summary = ", ".join(
-                f"{item['node_title']} ({item['field']}='{item['value']}')"
-                for item in invalid_nodes
-            )
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": (
-                        f"Workflow has {len(invalid_nodes)} catalog or mechanical error(s) "
-                        f"for the current tip/head context: {summary}. "
-                        "Review the highlighted tasks and their diagnostic reasons."
-                    ),
-                    "invalid_nodes": invalid_nodes,
-                },
-            )
+            for item in mechanical_issues(data, catalog_context=machine_context(validation_bravo)):
+                if item['value'] == 'UNKNOWN_LIQUID_CLASS' and item['node_id'] in class_error_nodes:
+                    continue
+                if item not in invalid_nodes:
+                    invalid_nodes.append(item)
+    logger.info("Pre-flight validation found %d catalog or mechanical errors", len(invalid_nodes))
+    if invalid_nodes:
+        summary = ", ".join(
+            f"{item['node_title']} ({item['field']}='{item['value']}')"
+            for item in invalid_nodes
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    f"Workflow has {len(invalid_nodes)} catalog or mechanical error(s) "
+                    f"for the current tip/head context: {summary}. "
+                    "Review the highlighted tasks and their diagnostic reasons."
+                ),
+                "invalid_nodes": invalid_nodes,
+            },
+        )
 
     if mode == "execute" and not getattr(target_bravo, "_initialized", False):
         try:

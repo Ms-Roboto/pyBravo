@@ -293,7 +293,11 @@ labware_types:
   kind: sbs_plate
   vendor: ''
   catalog_number: ''
-  description: ''
+  description: Tip-rack aperture diameter 3.3 mm derived from the existing Onshape/PTC
+    CAD model labware/editor_assets/lw-4914769d0af7/ST_Tip_Box.gltf (SHA256 0a9dfef973ae4266042b73614536132d693dc592135c3eccb270d6aa2b082fb5).
+    Circle fits across all 384 apertures on 2026-10-07; model-derived geometry, not
+    a physical measurement or hardware qualification. Existing catalog rack height
+    and teachpoint offsets are unchanged.
   base_class: tip_box
   wells: 384
   plate_dimensions_mm:
@@ -326,7 +330,7 @@ labware_types:
     cols: 24
     volume_ul: null
     depth_mm: null
-    diameter_mm: null
+    diameter_mm: 3.3
     offset_x_mm: 2.25
     offset_y_mm: 2.25
     spacing_x_mm: 4.5

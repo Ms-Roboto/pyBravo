@@ -138,7 +138,11 @@ labware:
   kind: sbs_plate
   vendor: ''
   catalog_number: ''
-  description: ''
+  description: Tip-rack aperture diameter 3.3 mm derived from the existing Onshape/PTC
+    CAD model labware/editor_assets/lw-4914769d0af7/ST_Tip_Box.gltf (SHA256 0a9dfef973ae4266042b73614536132d693dc592135c3eccb270d6aa2b082fb5).
+    Circle fits across all 384 apertures on 2026-10-07; model-derived geometry, not
+    a physical measurement or hardware qualification. Existing catalog rack height
+    and teachpoint offsets are unchanged.
   base_class: tip_box
   wells: 384
   length_mm: 127.76
@@ -166,7 +170,7 @@ labware:
   spacing_x_mm: 4.5
   spacing_y_mm: 4.5
   well_volume_ul: 0.0
-  well_diameter_mm: 0.0
+  well_diameter_mm: 3.3
   disposable_tip_capacity_ul: 10.0
   # The ST10 rack also accepts 70 uL ST tips (scientist-confirmed).
   # Rack naming/defaults do not select the consumable loaded by the scientist.

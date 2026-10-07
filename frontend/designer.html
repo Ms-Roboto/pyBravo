@@ -2165,6 +2165,87 @@ function getTipboxDetailAtLocation(location) {
     return merged;
 }
 
+function liquidLocationInfo(location, deck = designerState.deckConfig) {
+    const raw = String(location ?? '').trim();
+    if (/^(?:iter|var):/i.test(raw)) {
+        return { dynamic: true, eligible: false, label: 'Resolved during the workflow; the loaded labware is checked at each task.' };
+    }
+    const position = Number(raw);
+    if (!raw || !Number.isInteger(position) || position < 1 || position > 9) {
+        return { eligible: false, error: 'Choose a liquid location (position 1–9, iter:…, or var:…).', label: 'No liquid location selected' };
+    }
+    const stack = deck?.[String(position)] || [];
+    const top = stack[stack.length - 1];
+    if (!top) return { position, eligible: false, label: `Position ${position} · Empty` };
+    const definition = (designerState.labwareCatalog || []).find(item =>
+        item.id === (top.labware_id || top.id) || item.labware_id === (top.labware_id || top.id));
+    const detail = { ...(definition || {}), ...top };
+    // Catalog role tags take precedence over stale copies in saved deck entries.
+    // Form factor (sbs_plate) is not the role: a tip box has the same footprint.
+    const baseClass = String(definition?.base_class || detail.base_class || '').trim().toLowerCase();
+    const kind = String(definition?.kind || detail.kind || '').trim().toLowerCase();
+    const tipRoles = ['tip_box', 'tip_trash', 'tip_trash_bin', 'assaymap cartridge rack'];
+    const isTipReceptacle = tipRoles.includes(baseClass) || tipRoles.includes(kind);
+    const role = isTipReceptacle ? (tipRoles.includes(baseClass) ? baseClass : kind) : (baseClass || kind);
+    const type = role.replace(/_/g, ' ') || 'unknown labware type';
+    const name = detail.name || detail.labware_id || detail.id || 'Unnamed labware';
+    const label = `Position ${position} · ${name} (${type})`;
+    const liquidRoles = ['microplate', 'filter_plate', 'filter plate', 'reservoir', 'sbs_plate', 'plate'];
+    const eligible = !isTipReceptacle && liquidRoles.includes(role) && Number(detail.wells) > 0;
+    const error = isTipReceptacle
+        ? `${label}: liquid tasks require a plate or reservoir, not a tip rack or tip disposal location.`
+        : null;
+    return { position, eligible, label, error };
+}
+
+function setNewLiquidTaskLocation(node) {
+    if (!['liquid/Aspirate', 'liquid/Dispense', 'liquid/Mix'].includes(node.type)) return;
+    const choices = Object.keys(designerState.deckConfig || {})
+        .map(location => liquidLocationInfo(location)).filter(info => info.eligible);
+    if (choices.length === 1) node.properties.location = choices[0].position;
+    else if (!liquidLocationInfo(node.properties.location).eligible) node.properties.location = '';
+}
+
+function renderLiquidLocationField(field, node) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = String(node.properties.location ?? '');
+    input.setAttribute('aria-label', 'Liquid location');
+    input.setAttribute('placeholder', 'Choose a position, iter:…, or var:…');
+    input.style.cssText = 'width: 100%; padding: 4px 8px; font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--accent);';
+    const choices = document.createElement('select');
+    choices.setAttribute('aria-label', 'Loaded liquid labware');
+    choices.style.cssText = 'width: 100%; margin-top: 5px; font-size: 11px; background: var(--bg-input); color: var(--text);';
+    const prompt = document.createElement('option');
+    prompt.value = '';
+    prompt.textContent = 'Choose loaded plate or reservoir…';
+    choices.appendChild(prompt);
+    for (const location of Object.keys(designerState.deckConfig || {}).sort((a, b) => Number(a) - Number(b))) {
+        const info = liquidLocationInfo(location);
+        if (!info.eligible) continue;
+        const option = document.createElement('option');
+        option.value = String(info.position);
+        option.textContent = info.label;
+        choices.appendChild(option);
+    }
+    const info = liquidLocationInfo(node.properties.location);
+    choices.value = info.eligible ? String(info.position) : '';
+    const hint = document.createElement('div');
+    hint.style.cssText = `margin-top: 5px; font-size: 11px; color: ${info.error ? 'var(--red, #ff6b6b)' : 'var(--text-dimmer)'};`;
+    hint.textContent = info.error || (info.dynamic ? info.label : `Starting deck: ${info.label}. Labware is checked again in task order.`);
+    const apply = raw => {
+        const text = raw.trim();
+        node.properties.location = /^\d+$/.test(text) ? Number(text) : text;
+        node.setDirtyCanvas(true, true);
+        markActiveDirty();
+        renderPropertiesPanel(node);
+    };
+    input.addEventListener('change', () => apply(input.value));
+    choices.addEventListener('change', () => { if (choices.value) apply(choices.value); });
+    field.append(input, choices, hint);
+    appendVarHint(field, input.value);
+}
+
 function getTipboxGeometryFromDetail(detail) {
     const wells = Number(detail?.wells || 0);
     const rows = Number(detail?.rows || (wells === 96 ? 8 : (wells === 384 ? 16 : (wells === 1536 ? 32 : 0))));
@@ -3781,6 +3862,9 @@ function setupTaskChipClicks() {
             }
             const node = LiteGraph.createNode(nodeType);
             if (!node) { console.warn('Unknown node type:', nodeType); return; }
+            // Apply deck-aware defaults only to a newly clicked task. Saved and
+            // imported nodes keep their scientific source/destination choices.
+            setNewLiquidTaskLocation(node);
             // Chip-specific preset: "Ask Operator" etc. spawn a Script node
             // pre-filled with a ready-to-run snippet from the registry so
             // the capability is immediately obvious and useful.
@@ -5004,7 +5088,9 @@ function renderPropertiesPanel(node) {
         label.textContent = key.replace(/_/g, ' ');
         field.appendChild(label);
 
-        if (key === 'liquid_class') {
+        if (key === 'location' && ['liquid/Aspirate', 'liquid/Dispense', 'liquid/Mix'].includes(node.type)) {
+            renderLiquidLocationField(field, node);
+        } else if (key === 'liquid_class') {
             const select = document.createElement('select');
             select.setAttribute('aria-label', 'Liquid class');
             select.style.cssText = 'width: 100%; padding: 4px 8px; font-size: 11px; font-family: var(--sans); background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); outline: none;';
@@ -6806,6 +6892,11 @@ function validateWorkflow() {
     const nodes = designerState.graph._nodes || [];
     const startNodes = nodes.filter(n => n.type === 'flow/Start');
     const endNodes = nodes.filter(n => n.type === 'flow/End');
+    // Static location hints cannot predict a moved plate or operator/script
+    // deck change. The native task checks those workflows at execution time.
+    const hasWorkflowLibrary = Boolean(getActiveTab()?.library);
+    const staticDeck = !hasWorkflowLibrary && !nodes.some(node => node.type?.startsWith('plate/') ||
+        ['logic/Script', 'system/Manual'].includes(node.type));
 
     if (startNodes.length === 0) errors.push('Missing Start node');
     if (startNodes.length > 1) errors.push('Multiple Start nodes found');
@@ -6860,6 +6951,10 @@ function validateWorkflow() {
 
         const props = node.properties || {};
         if (node._tipAnchorResolution && node._tipAnchorResolution.status !== 'ready') errors.push(`${node.title}: ${node._tipAnchorResolution.message}`);
+        if (staticDeck && ['liquid/Aspirate', 'liquid/Dispense', 'liquid/Mix'].includes(node.type)) {
+            const info = liquidLocationInfo(props.location);
+            if (info.error) errors.push(`${node.title}: ${info.error}`);
+        }
 
         // Check required volume
         if (props.volume !== undefined && props.volume <= 0) {
