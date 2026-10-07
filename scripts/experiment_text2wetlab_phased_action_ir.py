@@ -280,6 +280,13 @@ async def run_experiment(
     except (ActionPlanError, ValueError) as exc:
         trace.update(status="setup_rejected", detail=str(exc))
         return trace
+    if len(setup.stages) > getattr(args, "max_stages", 8):
+        trace.update(
+            status="setup_stage_limit_exceeded",
+            detail=f"Model outlined {len(setup.stages)} stages; this run allows at most "
+                   f"{getattr(args, 'max_stages', 8)}.",
+        )
+        return trace
     (output / "compiler_setup.json").write_text(
         json.dumps(setup.model_dump(), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -386,10 +393,14 @@ def main() -> int:
     parser.add_argument("--paper-override", type=Path)
     parser.add_argument("--model-timeout", type=int, default=180)
     parser.add_argument("--max-output-tokens", type=int, default=8192)
+    parser.add_argument("--max-stages", type=int, default=8,
+                        help="Hard cap on model-authored stages and subsequent local calls")
     args = parser.parse_args()
     if (not args.simulator.is_file() or not 1 <= args.model_timeout <= 300
-            or not 512 <= args.max_output_tokens <= 16000):
-        parser.error("Provide a simulator, 1–300 s timeout, and 512–16000 output tokens")
+            or not 512 <= args.max_output_tokens <= 16000
+            or not 1 <= args.max_stages <= 16):
+        parser.error("Provide a simulator, 1–300 s timeout, 512–16000 output tokens, "
+                     "and 1–16 maximum stages")
     try:
         trace = asyncio.run(run_experiment(args))
     except (OSError, RuntimeError, ValueError) as exc:

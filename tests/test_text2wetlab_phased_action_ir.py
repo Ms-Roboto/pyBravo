@@ -336,3 +336,29 @@ async def test_failed_prefix_stops_before_next_model_call(tmp_path, monkeypatch)
     assert trace["status"] == "stage_rejected"
     assert calls == 2
     assert not (args.output_dir / "model_authored_action_plan.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_stage_call_limit_stops_after_setup(tmp_path, monkeypatch):
+    simulator = tmp_path / "simulator"
+    simulator.touch()
+    monkeypatch.setattr(phased.runner, "_source_bytes", lambda task, name, root:
+                        _INSTRUCTION.encode() if name == "instruction.md" else None)
+    monkeypatch.setattr(phased, "load_trusted_catalog", lambda *a, **k:
+                        (_LABWARE, _PIPETTES))
+    monkeypatch.setattr(phased, "load_trusted_module_catalog", lambda *a, **k: {})
+    monkeypatch.setattr(phased.LocalLLMConfig, "from_env", LocalLLMConfig)
+    calls = 0
+
+    async def mock_model(messages, schema, **kwargs):
+        nonlocal calls
+        calls += 1
+        return StructuredResponse(payload=_setup(), metadata={"model": "mock"})
+
+    args = argparse.Namespace(task="split-200ul-two-wells", simulator=simulator,
+                              output_dir=tmp_path / "limited", dataset_root=None,
+                              paper_override=None, model_timeout=30,
+                              max_output_tokens=1024, max_stages=1)
+    trace = await phased.run_experiment(args, completion=mock_model)
+    assert trace["status"] == "setup_stage_limit_exceeded"
+    assert calls == 1
