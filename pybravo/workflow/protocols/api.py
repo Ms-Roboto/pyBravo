@@ -177,17 +177,24 @@ class GeneratedDraftRequest(Payload):
     issues: list[GeneratedDraftIssue] = Field(default_factory=list, max_length=100)
 
 
-def _prepare_generated_draft(raw: dict[str, Any], *, labware_ids: set[str]) -> tuple[dict, list[dict]]:
+def _prepare_generated_draft(
+    raw: dict[str, Any], *, labware_ids: set[str], catalog_context: dict | None = None,
+) -> tuple[dict, list[dict]]:
     """Turn a model's allowlisted graph into loadable, unreviewed Designer JSON.
 
     Link objects from the drafter schema and native LiteGraph six-tuples are
     accepted. We validate topology and slot indices, but leave missing
     scientific settings as review issues rather than inventing values.
     """
-    from pybravo.workflow.drafter.schema import DraftedWorkflow, _NODE_SLOTS
-    from pybravo.workflow.drafter.validator import validate_drafted_workflow
+    from pybravo.workflow.drafter.schema import _NODE_SLOTS, DraftedWorkflow
+    from pybravo.workflow.drafter.validator import (
+        quarantine_unverified_liquid_classes,
+        validate_drafted_workflow,
+    )
     from pybravo.workflow.storage import (
-        GENERATED_DRAFT_NODE_TYPES, MAX_GENERATED_DRAFT_NODES, assert_safe_generated_draft,
+        GENERATED_DRAFT_NODE_TYPES,
+        MAX_GENERATED_DRAFT_NODES,
+        assert_safe_generated_draft,
     )
 
     if not isinstance(raw, dict) or raw.get("id") or any(
@@ -270,10 +277,16 @@ def _prepare_generated_draft(raw: dict[str, Any], *, labware_ids: set[str]) -> t
         raise ValueError("Generated workflow End must be reachable from Start.")
     if any(node.id not in reachable for node in nodes if node.type != "flow/Frame"):
         raise ValueError("Generated workflow has disconnected protocol steps.")
+    if catalog_context is not None:
+        quarantine_unverified_liquid_classes(drafted, context=catalog_context)
     workflow = drafted.to_designer_json()
     # DraftedDeckItem covers catalog identity but not all saved tip inventory
     # annotations; keep the caller's validated slot map for Designer review.
     workflow["deck"] = copy.deepcopy(raw.get("deck") or {})
+    if "protocol_simulation_target" in raw:
+        # Draft targets are planning metadata. Catalog/geometry validation is
+        # performed at strict launch against an isolated copy of the profile.
+        workflow["protocol_simulation_target"] = copy.deepcopy(raw["protocol_simulation_target"])
     workflow["graph"]["config"] = {}
     workflow["graph"]["extra"] = {}
     workflow["graph"]["groups"] = []
@@ -286,7 +299,9 @@ def _prepare_generated_draft(raw: dict[str, Any], *, labware_ids: set[str]) -> t
             column = offset if row % 2 == 0 else 2 - offset
             node["pos"] = [80.0 + 360.0 * column, 80.0 + 190.0 * row]
     assert_safe_generated_draft(workflow)
-    issues = [vars(issue) for issue in validate_drafted_workflow(drafted)]
+    issues = [vars(issue) for issue in validate_drafted_workflow(
+        drafted, catalog_context=catalog_context, require_catalog=catalog_context is not None,
+    )]
     return workflow, issues
 
 
@@ -296,7 +311,9 @@ async def save_generated_draft(request: GeneratedDraftRequest):
     try:
         context = machine_context(_bravo())
         labware_ids = {str(row["id"]) for row in context.get("labware", []) if row.get("id")}
-        workflow, issues = _prepare_generated_draft(request.workflow, labware_ids=labware_ids)
+        workflow, issues = _prepare_generated_draft(
+            request.workflow, labware_ids=labware_ids, catalog_context=context,
+        )
         issues.extend({**item.model_dump(exclude_none=True), "origin": "submitted_with_draft"}
                       for item in request.issues)
         saved = _server()._get_workflow_storage().create_generated_draft(

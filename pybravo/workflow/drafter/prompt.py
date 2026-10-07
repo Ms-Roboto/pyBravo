@@ -11,8 +11,9 @@ The prompt has seven sections, in this order:
 5. Library snippets — the pre-authored snippet registry so the LLM
    prefers the Ask-Operator / Barcode-fallback / Kaldor-send patterns
    over open-coding similar logic.
-6. Few-shot exemplars — 3 full workflows in the target JSON shape.
-7. The operator's natural-language description.
+6. The selected machine/head execution catalog, when supplied.
+7. Few-shot exemplars — full workflows showing the target JSON shape.
+8. The operator's natural-language description.
 
 Assembly is deterministic. The resulting prompt is ~3-4k tokens before
 exemplars, ~5-7k including them — well within the 200k window of
@@ -23,7 +24,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from pybravo.workflow.drafter.schema import SUPPORTED_NODE_TYPES
 
@@ -112,11 +113,13 @@ _NODE_CATALOG: tuple[tuple[str, dict[str, Any]], ...] = (
     ("liquid/Aspirate", {
         "desc": (
             "Aspirate `volume` uL from the plate at `location` using the "
-            "specified `liquid_class`. `anchor` selects the starting well "
+            "exact catalog `liquid_class`. Keep the source material words in "
+            "`reagent_text` separately. `anchor` selects the starting well "
             "(e.g. \"A1\"); optional `quadrant` selects a 1536 quadrant."
         ),
         "required": ("location", "volume", "liquid_class"),
         "optional": (
+            "liquid_class_id", "liquid_class_unresolved", "reagent_text", "reagent_family",
             "pipette_technique", "pre_aspirate_volume", "post_aspirate_volume",
             "distance_from_bottom", "dynamic_tip_extension", "tip_touch",
             "anchor", "quadrant", "wells",
@@ -126,6 +129,7 @@ _NODE_CATALOG: tuple[tuple[str, dict[str, Any]], ...] = (
         "desc": "Dispense `volume` uL at `location`. Same parameter shape as Aspirate.",
         "required": ("location", "volume", "liquid_class"),
         "optional": (
+            "liquid_class_id", "liquid_class_unresolved", "reagent_text", "reagent_family",
             "pipette_technique", "blowout_volume", "empty_tips",
             "distance_from_bottom", "dynamic_tip_retraction", "tip_touch",
             "anchor", "quadrant", "wells",
@@ -134,7 +138,8 @@ _NODE_CATALOG: tuple[tuple[str, dict[str, Any]], ...] = (
     ("liquid/Mix", {
         "desc": "Aspirate + dispense in place to mix.",
         "required": ("location", "volume", "liquid_class"),
-        "optional": ("cycles", "distance_from_bottom", "anchor"),
+        "optional": ("cycles", "distance_from_bottom", "anchor",
+                     "liquid_class_id", "liquid_class_unresolved", "reagent_text", "reagent_family"),
     }),
     ("tips/TipsOn", {
         "desc": (
@@ -299,6 +304,50 @@ def _format_labware_catalog(entries: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _format_execution_catalog(context: Mapping[str, Any] | None) -> str:
+    """Expose exact identities for the selected machine/head, never aliases."""
+    if context is None:
+        return (
+            "## Execution catalog\nNo selected machine/head catalog was supplied. "
+            "All liquid classes and tip choices remain unresolved."
+        )
+    machine = str(context.get("machine_id") or "")
+    head = str(context.get("head_type") or "")
+    lines = [f"## Execution catalog for machine `{machine}` / head `{head}`",
+             "Names here identify stored methods; they do not establish reagent "
+             "suitability or physical loading.", "",
+             "Exact liquid classes (name and id must identify the same row):"]
+    classes = [row for row in context.get("liquid_classes") or []
+               if isinstance(row, Mapping) and row.get("name") and row.get("liquid_class_id")
+               and row.get("machine_id") == machine and row.get("head_type") == head]
+    if classes:
+        for row in sorted(classes, key=lambda item: (str(item["name"]), str(item["liquid_class_id"]))):
+            lines.append(
+                f"- {row['name']!r} | id={row['liquid_class_id']} | "
+                f"tip_id={row.get('tip_id') or '(unbound)'} | "
+                f"tip_capacity_ul={row.get('tip_capacity_ul')}"
+            )
+    else:
+        lines.append("- none")
+    lines.extend(["", "Compatible catalog tip-box/tip pairs for this head:"])
+    choices = [row for row in context.get("tipbox_choices") or []
+               if isinstance(row, Mapping) and row.get("labware_id")
+               and row.get("tip_definition_id")]
+    if choices:
+        for row in sorted(choices, key=lambda item: (
+            str(item["labware_id"]), str(item["tip_definition_id"]),
+        )):
+            lines.append(
+                f"- labware_id={row['labware_id']} | tip_definition_id="
+                f"{row['tip_definition_id']} | tip_capacity_ul="
+                f"{row.get('tip_capacity_ul')} | execution_ready="
+                f"{bool(row.get('execution_ready'))}"
+            )
+    else:
+        lines.append("- none")
+    return "\n".join(lines)
+
+
 # ── Snippet-registry excerpt ──────────────────────────────────────────
 
 
@@ -354,8 +403,9 @@ def _format_exemplars(exemplars: list[dict[str, Any]]) -> str:
     lines = [
         "## Exemplar workflows (target JSON shape)",
         "Your output MUST match this JSON structure exactly. These are "
-        "real valid drafts — mimic field names, nesting, link tuple "
-        "ordering, node positioning style, etc.",
+        "format examples — mimic field names, nesting, link tuple "
+        "ordering, node positioning style, etc. Their catalog choices "
+        "are not evidence for the selected machine/head.",
         "",
     ]
     for ex in exemplars:
@@ -391,7 +441,8 @@ into a valid pyBravo workflow JSON.
    string `iter:v1,v2,...` (for loop iteration), OR `var:NAME` (for
    blackboard lookup). Never use 0, 10+, or arbitrary strings.
 4. Volumes are in microliters (uL), as numbers (int or float).
-   0 < volume <= 200 for single-channel heads. Never emit mL.
+   A liquid action must fit the selected head, tip and class limits.
+   Never emit mL or silently change a source quantity to fit a limit.
 5. `labware_id` values MUST come from the Labware catalog section. If
    the operator names a labware not in the catalog, omit its deck entry
    and describe the unresolved labware in `description`. Never substitute
@@ -417,10 +468,26 @@ into a valid pyBravo workflow JSON.
     or "tips already on" — otherwise always include them. If the
     operator doesn't name a tip-box location, leave `location` null and
     explain the missing setup in `description`. Never assume slot 1.
-12. Missing numeric quantities, locations, liquid classes, or well
-    mappings MUST remain null and be described as unresolved in
-    `description`. A scientifically meaningful missing value is not a
-    default. Preserve manual steps and external instrument handoffs.
+12. Missing numeric quantities, locations, or well mappings MUST remain
+    null and be described as unresolved in `description`. A scientifically
+    meaningful missing value is not a default. Preserve manual steps and
+    external instrument handoffs.
+13. `liquid_class` is an executable catalog method name, NOT a reagent or
+    material label. Use an exact name from the selected machine/head catalog
+    below, with its matching `liquid_class_id`; never copy liquid-class names
+    from examples unless they appear in that catalog. If no exact,
+    applicable class is established, set `liquid_class` to an empty string
+    and `liquid_class_unresolved` to an object with nonempty
+    `requested_reference` and `reason` strings. Preserve source wording in
+    `reagent_text` separately; set `reagent_family` only when the source states it.
+    Describe the unresolved choice in `description`. This is an unexecutable
+    draft that must fail strict preflight before robot dispatch. A matching
+    class name is not proof of reagent suitability.
+14. A proposed tip box must use a `labware_id` + `tip_definition_id` pair
+    listed for the selected head with `execution_ready=true`. Leave the tip
+    ID empty and explain the unresolved choice if no ready pair is
+    established. Do not infer a tip from the rack name, capacity, or an
+    exemplar.
 
 ## Output format
 
@@ -435,6 +502,7 @@ No prose, no code fences, no commentary outside the JSON.
 def build_system_prompt(
     *,
     current_deck: dict[str, Any] | None = None,
+    catalog_context: Mapping[str, Any] | None = None,
     include_exemplars: bool = True,
 ) -> str:
     """Assemble the full system prompt.
@@ -444,6 +512,9 @@ def build_system_prompt(
             designer (from the active tab). Forwarded to the LLM so it
             can reuse exact labware_ids already on the deck. Pass None
             to omit (the LLM gets only the catalog, not the live deck).
+        catalog_context: Selected machine/head catalog from
+            ``machine_context``. Omitting it leaves executable class and
+            tip identities unresolved.
         include_exemplars: Skip the few-shot JSON dumps for tiny tests.
 
     Returns:
@@ -452,8 +523,13 @@ def build_system_prompt(
     """
     sections: list[str] = [_ROLE_AND_RULES, _format_node_catalog()]
 
-    labware = _load_labware_catalog()
+    labware = ([{"id": row.get("id"), "name": row.get("name"),
+                 "base_class": row.get("base_class"), "wells": row.get("wells")}
+                for row in catalog_context.get("labware") or []
+                if isinstance(row, Mapping) and row.get("id")]
+               if catalog_context is not None else _load_labware_catalog())
     sections.append(_format_labware_catalog(labware))
+    sections.append(_format_execution_catalog(catalog_context))
 
     if current_deck:
         sections.append("## Current deck configuration")

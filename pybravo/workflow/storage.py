@@ -169,7 +169,7 @@ class WorkflowStorage:
         data["protocol_draft_status"] = "unreviewed"
         data["protocol_generated_root_id"] = root_id
         data["protocol_generated_provenance"] = copy.deepcopy(root["protocol_generated_provenance"])
-        data["protocol_draft_issues"] = []
+        data["protocol_draft_issues"] = copy.deepcopy(workflow.get("protocol_draft_issues") or [])
         data["protocol_draft_validation_stale"] = True
         return self.create_workflow(data)
 
@@ -195,7 +195,10 @@ class WorkflowStorage:
         data["protocol_draft_status"] = "unreviewed"
         data["protocol_generated_root_id"] = existing["protocol_generated_root_id"]
         data["protocol_generated_provenance"] = copy.deepcopy(existing["protocol_generated_provenance"])
-        data["protocol_draft_issues"] = []
+        # Saving is not validation. Keep the prior findings visible while
+        # marking them stale, rather than making an edited draft show zero
+        # unresolved checks before any check has actually run.
+        data["protocol_draft_issues"] = copy.deepcopy(existing.get("protocol_draft_issues") or [])
         data["protocol_draft_validation_stale"] = True
         return self.update_workflow(workflow_id, data)
 

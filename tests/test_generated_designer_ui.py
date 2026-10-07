@@ -29,7 +29,7 @@ const assert = require('node:assert/strict');
 const elements = new Map();
 for (const id of ['btn-save','btn-save-as','btn-library','btn-draft','btn-import',
   'btn-export','btn-simulate','btn-execute','btn-play','btn-pause','btn-stop',
-  'btn-step','protocol-draft-banner','protocol-draft-review','protocol-draft-summary']) {
+  'btn-step','btn-walkthrough','protocol-draft-banner','protocol-draft-review','protocol-draft-summary']) {
   elements.set(id,{disabled:false,hidden:false,dataset:{},textContent:'',title:''});
 }
 const label={textContent:''};
@@ -67,6 +67,7 @@ assert.equal(elements.get('btn-simulate').disabled,false);
 assert.equal(elements.get('btn-play').disabled,false);
 assert.equal(elements.get('btn-stop').disabled,false);
 assert.equal(elements.get('btn-execute').disabled,true);
+assert.equal(elements.get('btn-walkthrough').hidden,false);
 assert.equal(designerState.graphCanvas.read_only,false);
 assert.equal(label.textContent,'Locally generated protocol · unreviewed');
 const saved=serializeWorkflow();
@@ -78,6 +79,7 @@ tab.protocolMetadata = {};
 updateProtocolDraftControls();
 assert.equal(elements.get('btn-execute').disabled,false);
 assert.equal(elements.get('protocol-draft-banner').hidden,true);
+assert.equal(elements.get('btn-walkthrough').hidden,true);
 """,
         encoding="utf-8",
     )
@@ -88,7 +90,8 @@ def test_deserialize_preserves_generated_draft_metadata():
     html = (ROOT / "frontend" / "designer.html").read_text(encoding="utf-8")
     assert "'protocol_generated_draft', 'protocol_draft_status', 'protocol_generated_provenance', 'protocol_generated_root_id', 'protocol_draft_issues'" in html
     assert "if (!data.protocol_session_id && !data.protocol_generated_draft) return;" in html
-    assert "if (isGeneratedProtocolDraftTab() && executionMode !== 'simulate')" in html
+    assert "if (isGeneratedProtocolDraftTab() && executionMode !== 'simulate' && !walkthrough)" in html
+    assert "'protocol_simulation_target'" in html
     assert "if (isGeneratedProtocolDraftTab()) executionMode = 'simulate';" in html
 
 
@@ -101,6 +104,7 @@ const assert = require('node:assert/strict');
 const progress = {textContent:''};
 const document = {getElementById(id) {return id === 'playback-progress' ? progress : {style:{}};}};
 let executionMode = 'execute', currentWorkflowId = 'draft-1';
+let walkthroughResponse = false;
 const API_BASE = '';
 const calls = [];
 function isCompiledProtocolPreviewTab(){return false;}
@@ -114,7 +118,7 @@ function syncActiveTabMeta(){}
 function serializeWorkflow(){return {name:'Draft',protocol_generated_draft:true,
   protocol_generated_provenance:{model:'qwen'},graph:{nodes:[],links:[]}};}
 async function apiCall(path,method,body){calls.push({path,method,body});return {id:currentWorkflowId};}
-async function fetch(path,options){calls.push({path,method:options.method});return {ok:true,json:async()=>({status:'started',mode:'simulate',simulation_kind:'draft_rehearsal',qualification_granted:false})};}
+async function fetch(path,options){calls.push({path,method:options.method});return {ok:true,json:async()=>({status:'started',mode:walkthroughResponse?'walkthrough':'simulate',simulation_kind:walkthroughResponse?'visual_walkthrough':'draft_rehearsal',qualification_granted:false,validation_passed:false})};}
 """
         + _function(html, "runWorkflow")
         + """
@@ -129,6 +133,12 @@ async function fetch(path,options){calls.push({path,method:options.method});retu
   assert.equal(calls[0].body.protocol_generated_provenance.model,'qwen');
   assert.equal(calls[1].path,'/api/workflows/draft-1/simulate');
   assert.equal(progress.textContent,'Rehearsing draft in software...');
+  calls.length=0;
+  walkthroughResponse=true;
+  executionMode='execute';
+  await runWorkflow({walkthrough:true});
+  assert.equal(calls[1].path,'/api/workflows/draft-1/walkthrough');
+  assert.match(progress.textContent,/tasks are not executed or validated/);
 })().catch(error => {console.error(error);process.exitCode=1;});
 """,
         encoding="utf-8",
@@ -178,4 +188,30 @@ assert.equal(dirty,1);
 """,
         encoding="utf-8",
     )
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_liquid_class_options_are_scoped_to_the_selected_target(tmp_path):
+    html = (ROOT / "frontend" / "designer.html").read_text(encoding="utf-8")
+    script = tmp_path / "scoped-classes.cjs"
+    script.write_text("""
+const assert=require('node:assert/strict');
+const tab={protocolMetadata:{}};
+const getActiveTab=()=>tab;
+const designerState={liquidClasses:[],graphCanvas:{selected_nodes:{}}};
+const calls=[];
+async function apiCall(path){calls.push(path);return {liquid_classes:[{name:'Hardware class'}]};}
+""" + _function(html, "loadLiquidClasses") + """
+(async()=>{
+  await loadLiquidClasses();
+  assert.equal(calls[0],'/api/liquid_classes');
+  tab.protocolMetadata.protocol_simulation_target={machine_id:'machine',head_type:'HT_96_D_200',tip_definition_id:'lt_250ul'};
+  await loadLiquidClasses();
+  const url=new URL(calls[1],'http://test');
+  assert.equal(url.searchParams.get('machine_id'),'machine');
+  assert.equal(url.searchParams.get('head_type'),'HT_96_D_200');
+  assert.equal(url.searchParams.get('tip_id'),'lt_250ul');
+  assert.equal(url.searchParams.has('all'),false);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+""", encoding="utf-8")
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)

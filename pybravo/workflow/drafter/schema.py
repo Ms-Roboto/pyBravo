@@ -184,7 +184,9 @@ class DraftedNode(BaseModel):
             "Per-node-type parameters. Required keys vary by type — see the "
             "node catalog in the system prompt. Examples: "
             "PickPlace requires `pick_location` and `place_location` (ints 1-9); "
-            "Aspirate requires `location`, `volume`, `liquid_class`."
+            "Aspirate requires `location`, `volume`, `liquid_class`; use "
+            "`reagent_text` and an explicit unresolved marker when the "
+            "exact catalog class is unknown."
         ),
     )
     source_citation: SourceCitation | None = Field(

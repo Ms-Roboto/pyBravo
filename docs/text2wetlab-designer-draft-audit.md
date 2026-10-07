@@ -4,6 +4,22 @@ The seven saved Text2WetLab adaptations are local-Qwen-authored **native Designe
 
 This audit inspected the saved workflows under `~/.pybravo/workflows` against the active `/api/protocols/context` on 2026-10-07. The profile was `04-91-62-CF-7B-B0 / HT_384_D_70`. It offered one execution-ready rack/tip pair: 384-position `lw-4914769d0af7` with independent `st_10ul` tips. Five active classes used `st_10ul`. Two `st_30ul` classes existed, but the context did not offer an execution-ready matching rack. Catalog availability is still separate from confirmation of physical loading or liquid-method qualification.
 
+For unresolved drafts, Designer also offers **Walk through draft** through
+`POST /api/workflows/{id}/walkthrough`. This separate, nonexecuting viewer
+replays connected task order and retracted head hovers over taught deck
+locations. It does not pick tips, move plates, perform liquid strokes, or
+validate collision geometry, liquid methods, or scientific completeness.
+Every event and response reports `validation_passed=false` and
+`qualification_granted=false`. Unknown class references remain visible, and
+the strict `/simulate` and hardware `/execute` gates remain in force.
+
+Designer now scopes its class dropdown to the active machine/head (or an
+explicit persisted `protocol_simulation_target`). A proposed virtual target
+must use catalog head/tip compatibility, capacity, and a known tip length;
+it changes only a copied simulator profile. The installed instrument and
+hardware class records remain unchanged. Saving retains prior draft findings
+with a stale-validation marker instead of displaying a false zero-check result.
+
 | Task | Saved graph | Main blockers for this active Bravo profile |
 | --- | --- | --- |
 | A1–A12 transfer | [7 nodes](http://127.0.0.1:8000/designer?workflow=10c25e05-4f13-4da6-be02-45f8c233e957), including a 12-iteration Loop | Fixed tip-cell pickup inside the Loop; source and destination labware absent from the proposed deck; 100 µL transfer exceeds the ready ST10 tip capacity; proposed class/rack unavailable. |

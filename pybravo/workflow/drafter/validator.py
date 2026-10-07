@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from pybravo.workflow.drafter.schema import DraftedWorkflow
 
@@ -178,6 +178,9 @@ def _check_required_properties(wf: DraftedWorkflow) -> list[ValidationIssue]:
     for n in wf.graph.nodes:
         required = _REQUIRED_PROPERTIES.get(n.type, ())
         for key in required:
+            if key == "liquid_class" and n.properties.get("liquid_class_unresolved") is not None:
+                # The catalog check validates the structured unresolved marker.
+                continue
             if key not in n.properties or n.properties[key] is None or n.properties[key] == "":
                 issues.append(ValidationIssue(
                     severity="error", code="MISSING_PROPERTY",
@@ -298,6 +301,224 @@ def _check_volume_sanity(wf: DraftedWorkflow) -> list[ValidationIssue]:
 
 
 _LIQUID_TYPES = ("liquid/Aspirate", "liquid/Dispense", "liquid/Mix")
+
+
+def quarantine_unverified_liquid_classes(
+    wf: DraftedWorkflow, *, context: Mapping[str, Any] | None,
+) -> None:
+    """Keep an unverified drafted reference out of the executable field.
+
+    This does not select a replacement method. It only retains the model's
+    wording for review, making the draft visibly unresolved. Existing saved
+    workflows are unaffected; callers opt in on newly generated drafts.
+    """
+    machine = str(context.get("machine_id") or "") if context is not None else ""
+    head = str(context.get("head_type") or "") if context is not None else ""
+    identities = {
+        (row.get("name"), row.get("liquid_class_id"))
+        for row in context.get("liquid_classes") or []
+        if isinstance(row, Mapping) and isinstance(row.get("name"), str)
+        and isinstance(row.get("liquid_class_id"), str)
+        and row.get("machine_id") == machine and row.get("head_type") == head
+    } if context is not None else set()
+    for node in wf.graph.nodes:
+        if node.type not in _LIQUID_TYPES:
+            continue
+        props = node.properties
+        if props.get("liquid_class_unresolved") is not None:
+            continue
+        name = props.get("liquid_class")
+        class_id = props.get("liquid_class_id")
+        if isinstance(name, str) and isinstance(class_id, str) and (name, class_id) in identities:
+            continue
+        requested = str(name or class_id or props.get("reagent_text") or "").strip()
+        if not requested:
+            continue  # Missing-property validation will report this.
+        props["liquid_class"] = ""
+        props.pop("liquid_class_id", None)
+        props["liquid_class_unresolved"] = {
+            "requested_reference": requested,
+            "reason": (
+                f"No exact name/id identity for selected machine {machine} and head {head}; "
+                "the drafted reference needs operator review."
+                if context is not None else
+                "No selected machine/head catalog was supplied to verify the drafted reference."
+            ),
+        }
+        # Keep the model's original wording visible without claiming it was
+        # present in an external source passage.
+        if not props.get("reagent_text") and isinstance(name, str) and name.strip():
+            props["reagent_text"] = name
+
+
+def _check_catalog_references(
+    wf: DraftedWorkflow, *, context: Mapping[str, Any] | None,
+    require_catalog: bool,
+) -> list[ValidationIssue]:
+    """Keep reagent intent distinct from an executable class identity.
+
+    A missing catalog is an error only for generation paths that explicitly
+    require grounding. Legacy standalone validation remains usable offline.
+    """
+    issues: list[ValidationIssue] = []
+    machine = str(context.get("machine_id") or "") if context is not None else ""
+    head = str(context.get("head_type") or "") if context is not None else ""
+    catalog = [row for row in context.get("liquid_classes") or []
+               if isinstance(row, Mapping) and row.get("machine_id") == machine
+               and row.get("head_type") == head] if context is not None else []
+    by_name: dict[str, list[Mapping[str, Any]]] = {}
+    for row in catalog:
+        if isinstance(row.get("name"), str) and row["name"]:
+            by_name.setdefault(row["name"], []).append(row)
+
+    selected_tips = {item.tip_definition_id for stack in wf.deck.values()
+                     for item in stack if item.tip_definition_id}
+    if require_catalog and not selected_tips and any(
+        node.type in _LIQUID_TYPES for node in wf.graph.nodes
+    ):
+        issues.append(ValidationIssue(
+            "warning", "UNRESOLVED_TIP_SELECTION",
+            "Liquid actions have no selected catalog tip definition on the draft deck.",
+        ))
+    tips_by_id = (
+        {str(row.get("tip_id")): row for row in context.get("tip_definitions") or []
+         if isinstance(row, Mapping) and row.get("tip_id")}
+        if context is not None else {}
+    )
+    for node in wf.graph.nodes:
+        if node.type not in _LIQUID_TYPES:
+            continue
+        props = node.properties
+        name = props.get("liquid_class")
+        class_id = props.get("liquid_class_id")
+        unresolved = props.get("liquid_class_unresolved")
+        if unresolved is not None:
+            valid_marker = (isinstance(unresolved, Mapping)
+                            and isinstance(unresolved.get("requested_reference"), str)
+                            and unresolved["requested_reference"].strip()
+                            and isinstance(unresolved.get("reason"), str)
+                            and unresolved["reason"].strip())
+            if not valid_marker or name not in ("", None) or class_id not in ("", None):
+                issues.append(ValidationIssue(
+                    "error", "INVALID_UNRESOLVED_LIQUID_CLASS",
+                    "An unresolved liquid class needs an empty class/name ID and "
+                    "nonempty requested_reference and reason strings.", node.id,
+                ))
+                continue
+            if not isinstance(props.get("reagent_text"), str) or not props["reagent_text"].strip():
+                issues.append(ValidationIssue(
+                    "error", "MISSING_REAGENT_TEXT",
+                    "Preserve the reagent/material wording in reagent_text.", node.id,
+                ))
+                continue
+            issues.append(ValidationIssue(
+                "warning", "UNRESOLVED_LIQUID_CLASS",
+                f"Requested {unresolved['requested_reference']!r} has no selected "
+                f"executable class: {unresolved['reason']}", node.id,
+            ))
+            continue
+        if not isinstance(name, str) or not name:
+            continue  # The required-property check reports this omission.
+        if context is None:
+            if require_catalog:
+                issues.append(ValidationIssue(
+                    "error", "LIQUID_CATALOG_UNAVAILABLE",
+                    f"Liquid class {name!r} cannot be verified without a selected machine/head catalog; "
+                    "mark it unresolved and keep reagent_text.", node.id,
+                ))
+            continue
+        matches = by_name.get(name, [])
+        if not matches:
+            issues.append(ValidationIssue(
+                "error", "UNKNOWN_LIQUID_CLASS",
+                f"Liquid class {name!r} is absent for {machine} / {head}; "
+                "preserve these words as reagent_text and mark the class unresolved.", node.id,
+            ))
+            continue
+        if not isinstance(class_id, str) or not class_id:
+            issues.append(ValidationIssue(
+                "error", "MISSING_LIQUID_CLASS_ID",
+                f"Liquid class {name!r} needs its exact catalog liquid_class_id.", node.id,
+            ))
+            continue
+        matches = [row for row in matches if row.get("liquid_class_id") == class_id]
+        if len(matches) != 1:
+            issues.append(ValidationIssue(
+                "error", "AMBIGUOUS_LIQUID_CLASS",
+                f"Liquid class {name!r} needs the exact matching liquid_class_id "
+                "for this machine/head.", node.id,
+            ))
+            continue
+        selected = matches[0]
+        class_tip = selected.get("tip_id")
+        if class_tip and selected_tips and class_tip not in selected_tips:
+            issues.append(ValidationIssue(
+                "error", "LIQUID_CLASS_TIP_MISMATCH",
+                f"Liquid class {name!r} is bound to tip {class_tip!r}, absent "
+                "from this draft's selected tip boxes.", node.id,
+            ))
+        class_capacity = selected.get("tip_capacity_ul")
+        if selected_tips and isinstance(class_capacity, (int, float)) and not isinstance(class_capacity, bool):
+            capacities = {tips_by_id[tip].get("capacity_ul") for tip in selected_tips
+                          if tip in tips_by_id}
+            if capacities and class_capacity not in capacities:
+                issues.append(ValidationIssue(
+                    "error", "LIQUID_CLASS_TIP_CAPACITY_MISMATCH",
+                    f"Liquid class {name!r} records a {class_capacity:g} µL tip "
+                    "capacity, which does not match any selected tip.", node.id,
+                ))
+
+    if context is None:
+        if require_catalog and selected_tips:
+            issues.append(ValidationIssue(
+                "error", "TIP_CATALOG_UNAVAILABLE",
+                "Selected tip IDs cannot be verified without a machine/head catalog.",
+            ))
+        return issues
+    labware = {str(row.get("id")): row for row in context.get("labware") or []
+               if isinstance(row, Mapping) and row.get("id")}
+    pairs = {(str(row.get("labware_id")), str(row.get("tip_definition_id"))): row
+             for row in context.get("tipbox_choices") or []
+             if isinstance(row, Mapping) and row.get("labware_id")
+             and row.get("tip_definition_id")}
+    for slot, stack in wf.deck.items():
+        for item in stack:
+            row = labware.get(item.labware_id)
+            if row is None:
+                issues.append(ValidationIssue(
+                    "error", "UNKNOWN_CATALOG_LABWARE",
+                    f"Deck location {slot} names labware {item.labware_id!r} absent "
+                    "from the selected catalog.",
+                ))
+                continue
+            is_tip_box = "tip_box" in {row.get("base_class"), row.get("kind")}
+            if item.tip_definition_id and not is_tip_box:
+                issues.append(ValidationIssue(
+                    "error", "TIP_ID_ON_NON_TIPBOX",
+                    f"Deck location {slot} assigns a tip ID to non-tip-box labware.",
+                ))
+            elif is_tip_box and item.tip_definition_id and (
+                item.labware_id, item.tip_definition_id,
+            ) not in pairs:
+                issues.append(ValidationIssue(
+                    "error", "INCOMPATIBLE_TIPBOX_TIP_PAIR",
+                    f"Tip {item.tip_definition_id!r} is not a catalog-compatible "
+                    f"pair with rack {item.labware_id!r} for {head}.",
+                ))
+            elif is_tip_box and item.tip_definition_id and not pairs[
+                item.labware_id, item.tip_definition_id,
+            ].get("execution_ready"):
+                issues.append(ValidationIssue(
+                    "error", "TIPBOX_NOT_EXECUTION_READY",
+                    f"Tip {item.tip_definition_id!r} and rack {item.labware_id!r} "
+                    "are catalog-compatible but still lack required tip geometry.",
+                ))
+            elif is_tip_box and not item.tip_definition_id:
+                issues.append(ValidationIssue(
+                    "warning", "UNRESOLVED_TIP_SELECTION",
+                    f"Tip box at location {slot} has no selected catalog tip ID.",
+                ))
+    return issues
 
 
 def _check_tips_lifecycle(wf: DraftedWorkflow) -> list[ValidationIssue]:
@@ -515,6 +736,8 @@ def validate_drafted_workflow(
     strict_deck: bool = False,
     valid_fact_ids: set[str] | None = None,
     valid_paragraph_ids: set[str] | None = None,
+    catalog_context: Mapping[str, Any] | None = None,
+    require_catalog: bool = False,
 ) -> list[ValidationIssue]:
     """Run every check on a drafted workflow.
 
@@ -528,6 +751,11 @@ def validate_drafted_workflow(
             node must carry a source_citation whose ids reference these
             sets. When both are None, citation checking is skipped
             (NL-prompt drafts don't require citations).
+        catalog_context: selected machine/head catalog snapshot. Exact
+            class identities and compatible tip/rack pairs are checked
+            when provided.
+        require_catalog: reject executable class/tip selections when no
+            selected machine/head catalog was supplied.
     """
     issues: list[ValidationIssue] = []
     issues.extend(_check_start_end_counts(wf))
@@ -537,6 +765,9 @@ def validate_drafted_workflow(
     issues.extend(_check_manual_wait(wf))
     issues.extend(_check_location_sanity(wf, strict_deck=strict_deck))
     issues.extend(_check_volume_sanity(wf))
+    issues.extend(_check_catalog_references(
+        wf, context=catalog_context, require_catalog=require_catalog,
+    ))
     issues.extend(_check_tips_lifecycle(wf))
     issues.extend(_check_start_end_reachability(wf))
     issues.extend(_check_citations(

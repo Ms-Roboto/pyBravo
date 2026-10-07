@@ -12,6 +12,7 @@ import copy
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import socket
@@ -2580,7 +2581,72 @@ def _designer_runtime_snapshot(bravo: Bravo | None) -> dict[str, Any]:
     }
 
 
+def _apply_generated_simulation_target(profile, requested: Any) -> dict[str, Any]:
+    """Resolve a proposed virtual head/tip against the active hardware catalog.
+
+    ``profile`` belongs to the isolated simulator, never the active Bravo.
+    Numeric tip settings come from the catalog, rather than generated metadata.
+    A proposed target does not qualify a head swap or its liquid methods.
+    """
+    fields = {"machine_id", "head_type", "tip_definition_id"}
+    if not isinstance(requested, dict) or set(requested) != fields or any(
+        not isinstance(requested[field], str) or not requested[field].strip()
+        for field in fields
+    ):
+        raise HTTPException(status_code=409, detail="Simulation target requires exactly machine_id, head_type, and tip_definition_id.")
+    target = {field: requested[field].strip() for field in fields}
+    active_machine_id = str(profile.connection.machine_id or "").strip()
+    if target["machine_id"] != active_machine_id:
+        raise HTTPException(status_code=409, detail="Simulation target must use the active profile's machine ID and its hardware liquid-class catalog.")
+    try:
+        head = HeadType[target["head_type"]]
+    except KeyError as exc:
+        raise HTTPException(status_code=409, detail=f"Unknown simulation target head: {target['head_type']}") from exc
+    tip = get_tip_definition(head, target["tip_definition_id"])
+    if tip is None or tip.tip_id != target["tip_definition_id"] or head.name not in tip.compatible_heads:
+        raise HTTPException(status_code=409, detail="Simulation target tip must explicitly list the selected head as compatible in the tip catalog.")
+    if tip.kind != "tip" or not math.isfinite(tip.capacity_ul) or tip.capacity_ul <= 0:
+        raise HTTPException(status_code=409, detail="Simulation target needs a disposable pipetting tip with a positive catalog capacity.")
+    if tip.length_mm is None or not math.isfinite(tip.length_mm) or tip.length_mm <= 0:
+        raise HTTPException(status_code=409, detail=f"Simulation target tip {tip.tip_id} needs a positive measured or reviewed length in the tip catalog.")
+
+    previous_length = profile.head.teach_tip_length_mm
+    if previous_length is None:
+        previous_length = get_tip_length_mm(
+            profile.head.head_type, profile.head.teach_tip_id or profile.head.teach_tip_capacity,
+        )
+    if profile.teachpoints is not None and previous_length != tip.length_mm:
+        if previous_length is None or not math.isfinite(previous_length) or previous_length <= 0:
+            raise HTTPException(status_code=409, detail="Active profile needs a known teach-tip length before virtual target geometry can be compensated.")
+        # Preserve the same software deck plane when the virtual teach tip is
+        # longer or shorter. This is geometry compensation, not physical
+        # calibration for the proposed head swap.
+        for location in profile.teachpoints.locations:
+            profile.teachpoints.compensate_for_tip(location, previous_length, tip.length_mm)
+
+    profile.head.head_type = head
+    profile.head.default_tip_id = tip.tip_id
+    profile.head.teach_tip_id = tip.tip_id
+    profile.head.default_tip_capacity = tip.capacity_ul
+    profile.head.teach_tip_capacity = tip.capacity_ul
+    profile.head.teach_tip_length_mm = tip.length_mm
+    return {**target, "tip_capacity_ul": tip.capacity_ul, "tip_length_mm": tip.length_mm}
+
+
 _LIQUID_NODE_TYPES = {"liquid/Aspirate", "liquid/Dispense", "liquid/Mix"}
+
+
+def _missing_generated_liquid_methods(graph_data: dict) -> list[dict[str, Any]]:
+    """Generated liquid tasks never inherit an unspecified/default class."""
+    return [{
+        "node_id": node.get("id"), "node_type": node["type"],
+        "node_title": node.get("title") or node["type"],
+        "field": "liquid_class", "value": "unresolved",
+        "reason": "No explicit hardware liquid class is selected for this generated task.",
+    } for node in graph_data.get("nodes") or []
+        if node.get("type") in _LIQUID_NODE_TYPES
+        and not (node.get("properties") or {}).get("liquid_class")
+        and (node.get("properties") or {}).get("liquid_class_unresolved") is None]
 
 
 def _validate_workflow_liquid_classes(graph_data: dict, bravo: Bravo) -> list[dict[str, Any]]:
@@ -2618,6 +2684,17 @@ def _validate_workflow_liquid_classes(graph_data: dict, bravo: Bravo) -> list[di
         props = node.get("properties") or {}
         node_id = node.get("id")
         node_title = node.get("title") or node_type
+
+        unresolved = props.get("liquid_class_unresolved")
+        if unresolved is not None:
+            requested = unresolved.get("requested_reference", "") if isinstance(unresolved, dict) else str(unresolved)
+            errors.append({
+                "node_id": node_id, "node_type": node_type, "node_title": node_title,
+                "field": "liquid_class", "value": requested or "unresolved",
+                "reason": "This draft has no resolved hardware liquid class. Select and review an applicable catalog class before strict simulation.",
+            })
+            # A blank value must not fall through to an implicit default.
+            continue
 
         lc_name = props.get("liquid_class")
         if lc_name:
@@ -2681,6 +2758,9 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
     generated_rehearsal = bool(
         data.get("protocol_generated_draft") or _has_unreviewed_protocol_nodes(data)
     )
+    proposed_target = data.get("protocol_simulation_target")
+    if proposed_target is not None and not generated_rehearsal:
+        raise HTTPException(status_code=409, detail="A proposed simulation target is supported only for an unreviewed native generated draft.")
     # Native generated tasks can be rehearsed on an isolated simulator before
     # scientific review. That is not an execution grant, even if a saved copy
     # loses its top-level draft marker but retains its unreviewed node IDs.
@@ -2711,6 +2791,7 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
             raise HTTPException(status_code=409, detail=f"Generated draft cannot be simulated: {exc}") from exc
 
     release_run = None
+    simulation_target = None
     if mode == "execute":
         if _bravo is None:
             raise HTTPException(status_code=409, detail="No active Bravo — connect before executing")
@@ -2739,8 +2820,19 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
         if _bravo is not None:
             # Bravo's mode override mutates its profile. A deep copy keeps the
             # active instrument configuration and controller untouched.
-            target_bravo = Bravo(profile=copy.deepcopy(_bravo.profile), mode="simulation")
+            simulation_profile = copy.deepcopy(_bravo.profile)
+            if proposed_target is not None:
+                previous_head = simulation_profile.head.head_type.name
+                previous_tip = simulation_profile.head.teach_tip_id or simulation_profile.head.default_tip_id
+                simulation_target = _apply_generated_simulation_target(simulation_profile, proposed_target)
+                if simulation_target["head_type"] != previous_head or simulation_target["tip_definition_id"] != previous_tip:
+                    # The installed head's attached tips, anchors, subsets,
+                    # and capacities cannot describe a different virtual head.
+                    runtime_snapshot = {}
+            target_bravo = Bravo(profile=simulation_profile, mode="simulation")
         else:
+            if proposed_target is not None:
+                raise HTTPException(status_code=409, detail="Load an active hardware profile before choosing a proposed simulation target.")
             target_bravo = Bravo(mode="simulation")
 
     graph_data = data.get("graph", {})
@@ -2749,13 +2841,15 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
     # Pre-flight validation: catch stale liquid-class / pipette-technique
     # references before any motion. Validating in simulate mode too means
     # users get caught early in designer iteration.
-    validation_bravo = target_bravo if mode == "execute" else _bravo
+    validation_bravo = target_bravo if mode == "execute" or simulation_target or generated_rehearsal else _bravo
     logger.info(
         "Running workflow pre-flight validation (mode=%s, bravo=%s)",
         mode, "present" if validation_bravo is not None else "absent",
     )
     if validation_bravo is not None:
         invalid_nodes = _validate_workflow_liquid_classes(graph_data, validation_bravo)
+        if generated_rehearsal:
+            invalid_nodes.extend(_missing_generated_liquid_methods(graph_data))
         logger.info("Pre-flight validation found %d invalid liquid references", len(invalid_nodes))
         if invalid_nodes:
             summary = ", ".join(
@@ -2819,6 +2913,8 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
     result = {"status": "started", "workflow_id": workflow_id, "mode": mode}
     if generated_rehearsal:
         result.update(simulation_kind="draft_rehearsal", qualification_granted=False)
+        if simulation_target:
+            result["simulation_target"] = simulation_target
     return result
 
 
@@ -2826,6 +2922,59 @@ async def _start_designer_workflow(workflow_id: str, *, mode: str) -> dict:
 async def simulate_designer_workflow(workflow_id: str):
     """Run a workflow in simulation mode (no hardware)."""
     return await _run_designer_workflow(workflow_id, mode="simulate")
+
+
+@app.post("/api/workflows/{workflow_id}/walkthrough", tags=["Designer"])
+async def walkthrough_designer_draft(workflow_id: str):
+    """Visualize an unreviewed draft's order without dispatching Bravo tasks.
+
+    Unresolved catalog references remain diagnostics. This endpoint neither
+    runs the strict simulator nor creates validation or release records.
+    """
+    global _active_workflow_executor
+    from pybravo.profile.profile import BravoProfile
+    from pybravo.workflow.storage import assert_safe_generated_draft
+    from pybravo.workflow.walkthrough import WorkflowWalkthrough
+
+    if _workflow_start_lock.locked() or _active_workflow_executor is not None:
+        raise HTTPException(status_code=409, detail="A workflow is starting or running. Stop it before starting a walkthrough.")
+    async with _workflow_start_lock:
+        if _active_workflow_executor is not None:
+            raise HTTPException(status_code=409, detail="A workflow is already running.")
+        data = _get_workflow_storage().get_workflow(workflow_id)
+        if data is None:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        try:
+            assert_safe_generated_draft(data)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=f"Draft cannot be walked through: {exc}") from exc
+        diagnostics = copy.deepcopy(data.get("protocol_draft_issues") or [])
+        diagnostics.extend(_missing_generated_liquid_methods(data.get("graph") or {}))
+        if _bravo is not None:
+            diagnostics.extend(_validate_workflow_liquid_classes(data.get("graph") or {}, _bravo))
+        profile = copy.deepcopy(_bravo.profile) if _bravo is not None else BravoProfile.default()
+        try:
+            executor = WorkflowWalkthrough(
+                data, profile, on_event=ws_manager.broadcast,
+                diagnostics=diagnostics, step_delay_s=0.35,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=f"Draft cannot be walked through: {exc}") from exc
+        _active_workflow_executor = executor
+
+        async def run():
+            global _active_workflow_executor
+            try:
+                await executor.execute()
+            finally:
+                if _active_workflow_executor is executor:
+                    _active_workflow_executor = None
+
+        asyncio.ensure_future(run())
+        return {"status": "started", "workflow_id": workflow_id,
+                "mode": "walkthrough", "simulation_kind": "visual_walkthrough",
+                "qualification_granted": False, "validation_passed": False,
+                "diagnostics": diagnostics}
 
 
 @app.post("/api/workflows/{workflow_id}/execute", tags=["Designer"])
@@ -2932,7 +3081,12 @@ async def workflow_draft(req: WorkflowDraftRequest):
         raise HTTPException(status_code=400, detail="`prompt` must not be empty.")
 
     try:
-        result = await draft_workflow(req.prompt.strip(), current_deck=req.deck)
+        from pybravo.workflow.protocols.context import machine_context
+
+        result = await draft_workflow(
+            req.prompt.strip(), current_deck=req.deck,
+            catalog_context=machine_context(get_bravo()),
+        )
     except MissingLLMDependencyError as exc:
         # 501 — feature not installed on this server.
         raise HTTPException(status_code=501, detail=str(exc)) from exc
@@ -3171,7 +3325,11 @@ async def workflow_draft_from_pdf(
     _ = include_deck
 
     try:
-        facts, result = await draft_workflow_from_paper(parsed, current_deck=deck_ctx)
+        from pybravo.workflow.protocols.context import machine_context
+
+        facts, result = await draft_workflow_from_paper(
+            parsed, current_deck=deck_ctx, catalog_context=machine_context(get_bravo()),
+        )
     except MissingLLMDependencyError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
     except NoLLMCredentialsError as exc:
@@ -3528,7 +3686,11 @@ async def workflow_draft_from_analyzed(req: DraftFromAnalyzedRequest):
     )
 
     try:
-        facts, result = await draft_workflow_from_paper(parsed, current_deck=req.deck)
+        from pybravo.workflow.protocols.context import machine_context
+
+        facts, result = await draft_workflow_from_paper(
+            parsed, current_deck=req.deck, catalog_context=machine_context(get_bravo()),
+        )
     except MissingLLMDependencyError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
     except NoLLMCredentialsError as exc:

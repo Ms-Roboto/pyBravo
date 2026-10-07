@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Mapping
 
 import structlog
 
@@ -38,6 +38,7 @@ from pybravo.workflow.drafter.schema import DraftedWorkflow
 from pybravo.workflow.drafter.validator import (
     ValidationIssue,
     format_issues_for_repair,
+    quarantine_unverified_liquid_classes,
     validate_drafted_workflow,
 )
 
@@ -210,6 +211,7 @@ async def draft_workflow(
     prompt: str,
     *,
     current_deck: dict[str, Any] | None = None,
+    catalog_context: Mapping[str, Any] | None = None,
     config: DrafterConfig | None = None,
     include_exemplars: bool = True,
 ) -> DraftResult:
@@ -227,7 +229,10 @@ async def draft_workflow(
     """
     cfg = config or _resolve_config()
     client = _build_client(cfg.provider)
-    system_prompt = build_system_prompt(current_deck=current_deck, include_exemplars=include_exemplars)
+    system_prompt = build_system_prompt(
+        current_deck=current_deck, catalog_context=catalog_context,
+        include_exemplars=include_exemplars,
+    )
 
     messages: list[dict[str, str]] = [
         {"role": "user", "content": prompt},
@@ -257,8 +262,11 @@ async def draft_workflow(
                 f"LLM call failed on attempt {attempt + 1}: {exc}"
             ) from exc
 
+        quarantine_unverified_liquid_classes(wf, context=catalog_context)
         last_wf = wf
-        last_issues = validate_drafted_workflow(wf)
+        last_issues = validate_drafted_workflow(
+            wf, catalog_context=catalog_context, require_catalog=True,
+        )
         error_issues = [i for i in last_issues if i.severity == "error"]
         if not error_issues:
             logger.info("drafter_draft_ok", attempt=attempt + 1, warnings=len(last_issues))
@@ -511,6 +519,7 @@ async def draft_workflow_from_facts(
     facts: PaperFacts,
     *,
     current_deck: dict[str, Any] | None = None,
+    catalog_context: Mapping[str, Any] | None = None,
     config: DrafterConfig | None = None,
 ) -> DraftResult:
     """Pass 2: grounded facts → drafted workflow with citations.
@@ -523,7 +532,9 @@ async def draft_workflow_from_facts(
     cfg = config or _resolve_config()
     client = _build_client(cfg.provider)
 
-    system_prompt = build_system_prompt(current_deck=current_deck)
+    system_prompt = build_system_prompt(
+        current_deck=current_deck, catalog_context=catalog_context,
+    )
     user_prompt = _pass2_user_prompt(facts, current_deck)
 
     # Bolt the citation requirement onto the normal system prompt — the
@@ -551,6 +562,7 @@ async def draft_workflow_from_facts(
         except Exception as exc:
             raise LLMDrafterError(f"Pass 2 (workflow from facts) failed: {exc}") from exc
 
+        quarantine_unverified_liquid_classes(wf, context=catalog_context)
         last_wf = wf
         # Pass the facts' paragraph/fact IDs into the validator so it
         # can check citation sanity alongside the normal graph checks.
@@ -560,6 +572,8 @@ async def draft_workflow_from_facts(
             wf,
             valid_fact_ids=valid_fact_ids,
             valid_paragraph_ids=valid_paragraph_ids,
+            catalog_context=catalog_context,
+            require_catalog=True,
         )
         error_issues = [i for i in last_issues if i.severity == "error"]
         if not error_issues:
@@ -612,6 +626,7 @@ async def draft_workflow_from_paper(
     parsed: ParsedPaper,
     *,
     current_deck: dict[str, Any] | None = None,
+    catalog_context: Mapping[str, Any] | None = None,
     config: DrafterConfig | None = None,
 ) -> tuple[PaperFacts, DraftResult]:
     """End-to-end: parsed paper → facts (Pass 1) → drafted workflow (Pass 2).
@@ -648,6 +663,7 @@ async def draft_workflow_from_paper(
             model=cfg.model,
         )
     result = await draft_workflow_from_facts(
-        facts, current_deck=current_deck, config=cfg,
+        facts, current_deck=current_deck, catalog_context=catalog_context,
+        config=cfg,
     )
     return facts, result

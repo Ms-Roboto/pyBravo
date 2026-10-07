@@ -154,4 +154,15 @@ def test_generated_draft_edit_and_copy_preserve_immutable_provenance(tmp_path):
     assert duplicate["protocol_generated_provenance"] == source["protocol_generated_provenance"]
     assert duplicate["protocol_generated_draft"] is True
     assert duplicate["protocol_draft_status"] == "unreviewed"
+    assert updated["protocol_draft_issues"] == source["protocol_draft_issues"]
+    assert duplicate["protocol_draft_issues"] == source["protocol_draft_issues"]
     assert storage.get_workflow(source["id"])["name"] == edit["name"]
+
+
+def test_import_keeps_proposed_simulator_target_without_granting_approval():
+    workflow = _draft_workflow()
+    target = {"machine_id": "hardware-machine", "head_type": "HT_96_D_200", "tip_definition_id": "lt_250ul"}
+    workflow["protocol_simulation_target"] = target
+    normalized, _ = api._prepare_generated_draft(workflow, labware_ids={"source-plate"})
+    assert normalized["protocol_simulation_target"] == target
+    assert "approval" not in normalized

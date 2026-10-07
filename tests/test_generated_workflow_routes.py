@@ -13,6 +13,7 @@ import pytest
 from pybravo.bravo import Bravo
 from pybravo.controllers.simulation import SimulationController
 from pybravo.profile.profile import BravoProfile
+from pybravo.types import Axis, HeadType
 from pybravo.web import server
 from pybravo.workflow.storage import WorkflowStorage
 
@@ -56,10 +57,12 @@ async def test_generated_draft_load_save_copy_and_run_guards(tmp_path, monkeypat
         assert (await client.post("/api/workflows", json=stripped)).status_code == 409
 
         loaded["name"] = "Edited model protocol"
+        loaded["protocol_simulation_target"] = _virtual_target()
         updated = await client.put(f"/api/workflows/{identity}", json=loaded)
         assert updated.status_code == 200, updated.text
         assert updated.json()["protocol_generated_draft"] is True
         assert updated.json()["protocol_draft_status"] == "unreviewed"
+        assert updated.json()["protocol_simulation_target"] == _virtual_target()
         copy = {**updated.json(), "name": "Saved copy"}
         copy.pop("id")
         copied = await client.post("/api/workflows", json=copy)
@@ -67,6 +70,7 @@ async def test_generated_draft_load_save_copy_and_run_guards(tmp_path, monkeypat
         assert copied.json()["protocol_generated_root_id"] == identity
         assert copied.json()["protocol_generated_provenance"] == provenance
         assert copied.json()["protocol_generated_draft"] is True
+        assert copied.json()["protocol_simulation_target"] == _virtual_target()
 
 
 def _native_workflow():
@@ -204,3 +208,164 @@ async def test_generated_rehearsal_rechecks_saved_content_before_any_simulator(
             assert response.status_code == 409, response.text
     constructor.assert_not_called()
     assert server._active_workflow_executor is None
+
+
+def _virtual_target():
+    return {
+        "machine_id": "04-91-62-CF-7B-B0", "head_type": "HT_96_D_200", "tip_definition_id": "lt_250ul",
+    }
+
+
+def _active_384_profile():
+    profile = BravoProfile.default()
+    profile.connection.machine_id = "04-91-62-CF-7B-B0"
+    profile.connection.controller_type = "agile"
+    profile.head.head_type = HeadType.HT_384_D_70
+    profile.head.teach_tip_id = profile.head.default_tip_id = "st_30ul"
+    profile.head.teach_tip_capacity = profile.head.default_tip_capacity = 30.0
+    profile.head.teach_tip_length_mm = 26.1
+    profile.teachpoints.set_default_teachpoints(profile.head.head_type)
+    return profile
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("class_name", ["96 disposable tip 5 - 200ul Water", "384 disposable tip 0.5 - 10ul"])
+async def test_virtual_target_uses_its_catalog_and_leaves_installed_384_head_unchanged(
+    tmp_path, monkeypatch, class_name,
+):
+    workflow = _native_workflow()
+    workflow["protocol_simulation_target"] = _virtual_target()
+    workflow["graph"]["nodes"][1].update(type="liquid/Aspirate")
+    workflow["graph"]["nodes"][1]["properties"]["liquid_class"] = class_name
+    storage = WorkflowStorage(tmp_path)
+    saved = storage.create_generated_draft(workflow, provenance={"model": "qwen"})
+    before = storage.get_workflow(saved["id"])
+    live = Bravo(profile=_active_384_profile())
+    original_profile = live.profile._to_dict()
+    live_controller = Mock(name="active_physical_controller")
+    live._controller = live_controller
+    monkeypatch.setattr(live, "initialize", AsyncMock())
+    inherited = {
+        "head_mode": {"subset_type": "all_barrels", "row_count": 16, "column_count": 24},
+        "tip_selection": {"location": 2, "row": 0, "col": 0},
+        "plate_selection": {"1": {"row": 0, "col": 0}},
+        "tips_on_head": True, "tip_definition_id": "st_30ul", "attached_tip_length_mm": 26.1,
+    }
+    monkeypatch.setattr(live, "get_state", Mock(return_value=inherited))
+    monkeypatch.setattr(server, "_bravo", live)
+    monkeypatch.setattr(server, "_get_workflow_storage", lambda: storage)
+    monkeypatch.setattr(server, "_active_workflow_executor", None)
+    monkeypatch.setattr(server, "_workflow_start_lock", asyncio.Lock())
+    executors, tasks = [], []
+
+    class FakeExecutor:
+        def __init__(self, bravo, graph, **kwargs):
+            self.bravo = bravo
+            self.kwargs = kwargs
+            executors.append(self)
+
+        async def execute(self):
+            pass
+
+    def schedule(coro):
+        task = asyncio.create_task(coro)
+        tasks.append(task)
+        return task
+
+    monkeypatch.setattr("pybravo.workflow.executor.WorkflowExecutor", FakeExecutor)
+    monkeypatch.setattr(server.asyncio, "ensure_future", schedule)
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(f"/api/workflows/{saved['id']}/simulate")
+        if class_name.startswith("384"):
+            assert response.status_code == 400, response.text
+            assert "HT_96_D_200" in response.json()["detail"]["invalid_nodes"][0]["reason"]
+            assert executors == []
+        else:
+            assert response.status_code == 200, response.text
+            assert response.json()["simulation_target"] == {
+                **_virtual_target(), "tip_capacity_ul": 250.0, "tip_length_mm": 55.2,
+            }
+            await asyncio.gather(*tasks)
+            virtual = executors[0].bravo
+            assert virtual.profile.head.head_type is HeadType.HT_96_D_200
+            assert virtual.profile.connection.controller_type == "simulation"
+            assert virtual.active_tip_id() == "lt_250ul"
+            assert virtual.active_tip_capacity_ul() == 250.0
+            assert virtual.profile.head.teach_tip_length_mm == 55.2
+            assert executors[0].kwargs["runtime_state"] == {}
+            assert executors[0].kwargs["strict_validation"] is True
+            for location in live.teachpoints.locations:
+                old_plane = live.teachpoints.get_teachpoint(location, Axis.Z) + 26.1
+                new_plane = virtual.teachpoints.get_teachpoint(location, Axis.Z) + 55.2
+                assert new_plane == pytest.approx(old_plane)
+            # A head-compatible class still cannot be used with another tip's
+            # calibration merely because its name passes preflight.
+            with pytest.raises(RuntimeError, match="Unknown liquid class"):
+                virtual._resolve_liquid_class(class_name)
+        assert (await client.post(f"/api/workflows/{saved['id']}/execute")).status_code == 409
+    assert live.profile._to_dict() == original_profile
+    assert live_controller.mock_calls == []
+    live.initialize.assert_not_awaited()
+    assert storage.get_workflow(saved["id"]) == before
+    assert server._active_workflow_executor is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variant", ["wrong_machine", "unknown_head", "wrong_tip", "unknown_tip", "missing_length", "extra_field", "missing_field", "no_profile"])
+async def test_virtual_target_rejects_incomplete_or_incompatible_catalog_choices(
+    tmp_path, monkeypatch, variant,
+):
+    target = _virtual_target()
+    if variant == "wrong_machine":
+        target["machine_id"] = "SIM_OPPORTUNITY"
+    elif variant == "unknown_head":
+        target["head_type"] = "NOT_A_HEAD"
+    elif variant == "wrong_tip":
+        target["tip_definition_id"] = "st_10ul"
+    elif variant == "unknown_tip":
+        target["tip_definition_id"] = "unlisted_tip"
+    elif variant == "missing_length":
+        target["tip_definition_id"] = "lt_200ul"
+    elif variant == "extra_field":
+        target["tip_capacity_ul"] = 1000
+    elif variant == "missing_field":
+        target.pop("machine_id")
+    workflow = _native_workflow()
+    workflow["protocol_simulation_target"] = target
+    storage = WorkflowStorage(tmp_path)
+    saved = storage.create_generated_draft(workflow, provenance={"model": "qwen"})
+    live = SimpleNamespace(profile=_active_384_profile(), get_state=Mock(return_value={}))
+    monkeypatch.setattr(server, "_bravo", None if variant == "no_profile" else live)
+    monkeypatch.setattr(server, "_get_workflow_storage", lambda: storage)
+    monkeypatch.setattr(server, "_active_workflow_executor", None)
+    monkeypatch.setattr(server, "_workflow_start_lock", asyncio.Lock())
+    constructor = Mock()
+    monkeypatch.setattr(server, "Bravo", constructor)
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(f"/api/workflows/{saved['id']}/simulate")
+        assert response.status_code == 409, response.text
+    constructor.assert_not_called()
+    assert server._active_workflow_executor is None
+
+
+@pytest.mark.asyncio
+async def test_proposed_virtual_target_cannot_be_laundered_into_an_ordinary_workflow(tmp_path, monkeypatch):
+    workflow = _native_workflow()
+    workflow["protocol_simulation_target"] = _virtual_target()
+    workflow["graph"]["nodes"][1]["properties"].clear()
+    storage = WorkflowStorage(tmp_path)
+    saved = storage.create_workflow(workflow)
+    monkeypatch.setattr(server, "_get_workflow_storage", lambda: storage)
+    monkeypatch.setattr(server, "_active_workflow_executor", None)
+    monkeypatch.setattr(server, "_workflow_start_lock", asyncio.Lock())
+    constructor = Mock()
+    monkeypatch.setattr(server, "Bravo", constructor)
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for mode in ("simulate", "execute"):
+            response = await client.post(f"/api/workflows/{saved['id']}/{mode}")
+            assert response.status_code == 409
+            assert "only for an unreviewed native generated draft" in response.json()["detail"]
+    constructor.assert_not_called()

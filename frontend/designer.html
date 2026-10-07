@@ -672,7 +672,7 @@ body {
 
 /* Protocol chat owns a separate, non-executable review tab. */
 .protocol-chat-panel { width: 350px; min-width: 300px; max-width: 42vw; flex-shrink: 0; display: flex; flex-direction: column; background: var(--bg-panel); border-right: 1px solid var(--border); }
-.protocol-chat-panel[hidden], .protocol-chat-panel [hidden], .protocol-draft-banner[hidden] { display: none !important; }
+.protocol-chat-panel[hidden], .protocol-chat-panel [hidden], .protocol-draft-banner[hidden], #btn-walkthrough[hidden] { display: none !important; }
 .protocol-chat-header { display:flex; align-items:center; gap:8px; padding:12px; border-bottom:1px solid var(--border); }
 .protocol-chat-header strong { font-size:13px; margin-right:auto; }
 .protocol-chat-intro { padding:12px 14px; font-size:12px; line-height:1.5; color:var(--text-dim); }
@@ -752,6 +752,7 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
     <button class="toolbar-btn" id="btn-export">Export</button>
     <div class="toolbar-sep"></div>
     <button class="toolbar-btn primary" id="btn-simulate">Simulate</button>
+    <button class="toolbar-btn" id="btn-walkthrough" hidden title="Preview task order and deck visits without executing tasks or validating liquid settings">Walk through draft</button>
     <button class="toolbar-btn" id="btn-execute">Execute</button>
     <div class="toolbar-spacer"></div>
     <button class="toolbar-btn" id="btn-theme-toggle" title="Toggle light and dark mode">Theme: Dark</button>
@@ -1984,10 +1985,23 @@ function populateTipSelector() {
 
 // ── Load Liquid Classes & Pipette Techniques ────────────────────────
 async function loadLiquidClasses() {
+    const tab = getActiveTab();
+    const requestId = (designerState.liquidClassRequestId || 0) + 1;
+    designerState.liquidClassRequestId = requestId;
+    const target = tab?.protocolMetadata?.protocol_simulation_target;
+    const params = new URLSearchParams();
+    if (target) {
+        params.set('machine_id', target.machine_id);
+        params.set('head_type', target.head_type);
+        params.set('tip_id', target.tip_definition_id);
+    }
+    designerState.liquidClasses = [];
     try {
-        const data = await apiCall('/api/liquid_classes?all=true');
-        if (data?.liquid_classes) {
+        const data = await apiCall('/api/liquid_classes' + (params.size ? '?' + params.toString() : ''));
+        if (getActiveTab() === tab && designerState.liquidClassRequestId === requestId && data?.liquid_classes) {
             designerState.liquidClasses = data.liquid_classes;
+            const selected = Object.values(designerState.graphCanvas?.selected_nodes || {});
+            if (selected.length === 1) renderPropertiesPanel(selected[0]);
         }
     } catch (e) { console.warn('Failed to load liquid classes:', e); }
 }
@@ -4806,6 +4820,7 @@ function renderPropertiesPanel(node) {
         'member_ids', 'expanded_bbox',
         'tip_anchor_col',
         'subset_config',
+        'liquid_class_unresolved', 'liquid_class_id',
     ]);
     if (isTipsOff) {
         HIDDEN_PROPS.add('head_mode');
@@ -4826,7 +4841,10 @@ function renderPropertiesPanel(node) {
             select.setAttribute('aria-label', 'Liquid class');
             select.style.cssText = 'width: 100%; padding: 4px 8px; font-size: 11px; font-family: var(--sans); background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); outline: none;';
             const emptyOpt = document.createElement('option');
-            emptyOpt.value = ''; emptyOpt.textContent = '(Default)';
+            emptyOpt.value = '';
+            const unresolved = node.properties.liquid_class_unresolved;
+            emptyOpt.textContent = unresolved ? `Unresolved: ${unresolved.requested_reference || 'select a hardware class'}` : '(Default)';
+            if (unresolved && !value) emptyOpt.selected = true;
             select.appendChild(emptyOpt);
             for (const lc of designerState.liquidClasses) {
                 const opt = document.createElement('option');
@@ -4846,8 +4864,24 @@ function renderPropertiesPanel(node) {
                 missingOpt.disabled = true;
                 select.appendChild(missingOpt);
             }
-            select.addEventListener('change', () => { node.properties[key] = select.value; node.setDirtyCanvas(true); markActiveDirty(); });
+            select.addEventListener('change', () => {
+                node.properties[key] = select.value;
+                const chosen = designerState.liquidClasses.find(item => item.name === select.value);
+                if (chosen) {
+                    delete node.properties.liquid_class_unresolved;
+                    if (chosen.liquid_class_id) node.properties.liquid_class_id = chosen.liquid_class_id;
+                    else delete node.properties.liquid_class_id;
+                } else {
+                    delete node.properties.liquid_class_id;
+                }
+                node.setDirtyCanvas(true); markActiveDirty();
+            });
             field.appendChild(select);
+            if (unresolved) {
+                const reason = document.createElement('small');
+                reason.textContent = unresolved.reason || 'No hardware liquid class has been selected. Visual walkthrough is available; strict simulation requires an applicable class.';
+                field.appendChild(reason);
+            }
         } else if (key === 'pipette_technique') {
             const select = document.createElement('select');
             select.style.cssText = 'width: 100%; padding: 4px 8px; font-size: 11px; font-family: var(--sans); background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); outline: none;';
@@ -5330,6 +5364,7 @@ function switchToTab(idx) {
     for (let i = 1; i <= 9; i++) updateDeckCell(i);
     syncDeckTo3D();
     renderPropertiesPanel(null);
+    loadLiquidClasses();
     renderTabStrip();
     if (t.protocolChatEnvelope) adoptProtocolChat(t.protocolChatEnvelope);
 }
@@ -5474,7 +5509,7 @@ function deserializeWorkflow(data) {
     const sessionId = (data && typeof data.drafter_session_id === 'string') ? data.drafter_session_id : '';
     const desc = (data && typeof data.description === 'string') ? data.description : '';
     const protocolMetadata = {};
-    for (const key of ['protocol_session_id', 'protocol_revision', 'protocol', 'protocol_chat_draft', 'protocol_chat_session_id', 'protocol_materials', 'protocol_generated_draft', 'protocol_draft_status', 'protocol_generated_provenance', 'protocol_generated_root_id', 'protocol_draft_issues']) {
+    for (const key of ['protocol_session_id', 'protocol_revision', 'protocol', 'protocol_chat_draft', 'protocol_chat_session_id', 'protocol_materials', 'protocol_generated_draft', 'protocol_draft_status', 'protocol_generated_provenance', 'protocol_generated_root_id', 'protocol_draft_issues', 'protocol_simulation_target', 'protocol_draft_validation_stale']) {
         if (data && data[key] !== undefined) protocolMetadata[key] = JSON.parse(JSON.stringify(data[key]));
     }
     if (wfId) {
@@ -5495,6 +5530,7 @@ function deserializeWorkflow(data) {
             tab.dirty = false;
             for (let i = 1; i <= 9; i++) updateDeckCell(i);
             syncDeckTo3D();
+            loadLiquidClasses();
             renderTabStrip();
             return;
         }
@@ -5519,6 +5555,7 @@ function deserializeWorkflow(data) {
         configureWorkflowGraph(cur.graph, data);
         for (let i = 1; i <= 9; i++) updateDeckCell(i);
         syncDeckTo3D();
+        loadLiquidClasses();
         renderTabStrip();
         return;
     }
@@ -6811,11 +6848,12 @@ document.getElementById('btn-execute').addEventListener('click', () => {
 });
 
 // ── Simulation Controls ─────────────────────────────────────────────
-async function runWorkflow() {
+async function runWorkflow({ walkthrough = false } = {}) {
     const progress = document.getElementById('playback-progress');
+    if (walkthrough && !isGeneratedProtocolDraftTab()) return;
     if (isCompiledProtocolPreviewTab()) { await replayCompiledSimulationPreview(); return; }
     if (isProtocolDraftTab()) { progress.textContent = 'This protocol preview cannot run in Designer. Review it in Protocol Assistant.'; return; }
-    if (isGeneratedProtocolDraftTab() && executionMode !== 'simulate') {
+    if (isGeneratedProtocolDraftTab() && executionMode !== 'simulate' && !walkthrough) {
         progress.textContent = 'This draft can be simulated in software. Hardware execution requires review and approval.';
         return;
     }
@@ -6858,15 +6896,15 @@ async function runWorkflow() {
     console.log('Workflow saved:', currentWorkflowId);
     // Record the user-edited workflow against the as-drafted snapshot
     // (no-op if this tab wasn't drafted via the LLM).
-    recordDrafterPatch(workflow, executionMode === 'execute' ? 'execute' : 'simulate', result.id);
+    recordDrafterPatch(workflow, walkthrough ? 'walkthrough' : executionMode === 'execute' ? 'execute' : 'simulate', result.id);
     syncActiveTabMeta();
 
     // Start workflow — hardware execution routes to /execute, simulation to /simulate.
     // Use a raw fetch (not apiCall) so we can surface 400 validation errors
     // coming from the pre-flight liquid-class check and highlight the
     // offending nodes in the canvas.
-    const runEndpoint = executionMode === 'execute' ? 'execute' : 'simulate';
-    progress.textContent = executionMode === 'execute' ? 'Starting hardware execution...' : 'Starting simulation...';
+    const runEndpoint = walkthrough ? 'walkthrough' : executionMode === 'execute' ? 'execute' : 'simulate';
+    progress.textContent = walkthrough ? 'Starting visual walkthrough...' : executionMode === 'execute' ? 'Starting hardware execution...' : 'Starting simulation...';
     let runRes;
     try {
         runRes = await fetch(`${API_BASE}/api/workflows/${currentWorkflowId}/${runEndpoint}`, { method: 'POST' });
@@ -6884,7 +6922,12 @@ async function runWorkflow() {
             const lines = body.invalid_nodes.map(n => ` • ${n.node_title}: ${n.field}='${n.value}' — ${n.reason}`).join('\n');
             progress.textContent = `${body.message}`;
             console.error('Workflow validation failed:\n' + lines);
-            alert(`Workflow cannot run:\n\n${body.message}\n\n${lines}`);
+            if (isGeneratedProtocolDraftTab()) {
+                progress.textContent = `Strict simulation blocked: ${body.invalid_nodes.length} unresolved catalog references. Use Walk through draft to inspect task order and deck visits, or select the highlighted task to correct its settings.`;
+                progress.title = lines;
+            } else {
+                alert(`Workflow cannot run:\n\n${body.message}\n\n${lines}`);
+            }
         } else {
             const msg = (typeof body === 'string' ? body : body?.message) || runRes.statusText;
             progress.textContent = `Failed: ${msg}`;
@@ -6896,12 +6939,22 @@ async function runWorkflow() {
     const simResult = await runRes.json().catch(() => null);
     console.log(`${runEndpoint} response:`, simResult);
     if (simResult) {
-        progress.textContent = executionMode === 'execute' ? 'Executing on hardware...' : simResult.simulation_kind === 'draft_rehearsal' ? 'Rehearsing draft in software...' : 'Simulating...';
+        if (simResult.simulation_kind === 'visual_walkthrough') {
+            progress.textContent = 'Walking through draft · tasks are not executed or validated';
+            progress.title = (simResult.diagnostics || []).map(item => item.reason || item.message).join('\n');
+        } else {
+            progress.textContent = executionMode === 'execute' ? 'Executing on hardware...' : simResult.simulation_kind === 'draft_rehearsal' ? 'Rehearsing draft in software...' : 'Simulating...';
+        }
     } else {
         progress.textContent = executionMode === 'execute' ? 'Failed to start execution' : 'Failed to start simulation';
     }
     document.getElementById('progress-fill').style.width = '0%';
 }
+
+document.getElementById('btn-walkthrough').addEventListener('click', () => {
+    executionMode = 'simulate';
+    runWorkflow({ walkthrough: true });
+});
 
 // Highlight nodes returned by the /execute pre-flight validator. Each node's
 // bgcolor is temporarily tinted red; the canvas is then zoomed so the
@@ -7255,6 +7308,7 @@ function handleWorkflowEvent(data) {
 
     switch (data.type) {
         case 'workflow:start':
+            document.querySelector('#viewport-header span').textContent = data.simulation_kind === 'visual_walkthrough' ? '3D visual walkthrough' : '3D Simulation';
             timelineStartRecording();
             // Reset the live blackboard display — a new run starts empty.
             designerState.vars = {};
@@ -7315,7 +7369,7 @@ function handleWorkflowEvent(data) {
             break;
         case 'workflow:node_start':
             highlightNode(data.node_id);
-            progress.textContent = `Running: ${data.task_name || 'node'}`;
+            progress.textContent = `${data.simulation_kind === 'visual_walkthrough' ? 'Previewing' : 'Running'}: ${data.task_name || 'node'}`;
             timeline._lastNodeId = data.node_id;
             timeline._lastStepName = data.task_name || '';
             // A new node is starting — any prior-task operator-prompt modal
@@ -7356,7 +7410,7 @@ function handleWorkflowEvent(data) {
             }
             break;
         case 'workflow:node_complete':
-            highlightNode(data.node_id, '#4ade80');
+            highlightNode(data.node_id, data.status === 'visualized' || data.status === 'not_executed' ? '#a78bfa' : '#4ade80');
             // Node finished — guarantee modals are hidden so nothing
             // lingers into the next node's execution. Only dismiss the
             // script-error modal on success — an "error" status node_complete
@@ -7382,7 +7436,7 @@ function handleWorkflowEvent(data) {
             progress.textContent = `Branch: ${data.condition} \u2192 ${data.result}`;
             break;
         case 'workflow:complete':
-            progress.textContent = isGeneratedProtocolDraftTab() ? 'Software rehearsal complete \u2014 review before hardware use' : 'Simulation complete \u2014 use scrubber to review';
+            progress.textContent = data.simulation_kind === 'visual_walkthrough' ? `${data.status === 'aborted' ? 'Visual walkthrough stopped' : 'Visual walkthrough complete'} · tasks were not executed; strict simulation is still required` : isGeneratedProtocolDraftTab() ? 'Software rehearsal complete \u2014 review before hardware use' : 'Simulation complete \u2014 use scrubber to review';
             fill.style.width = '100%';
             timelineStopRecording();
             // Display final vars snapshot if backend included one.
@@ -8010,6 +8064,7 @@ function updateProtocolDraftControls() {
     document.querySelector('#viewport-header span').textContent = compiledPreview ? 'Bravo 3D replay' : '3D Simulation';
     document.getElementById('btn-simulate').title = compiledPreview ? 'Replay this revision’s saved strict simulation without starting a new run' : generated ? 'Rehearse this draft in software; stops on task errors and does not approve hardware use' : 'Simulate';
     document.getElementById('btn-execute').title = generated ? 'Hardware execution requires review and approval' : 'Execute';
+    document.getElementById('btn-walkthrough').hidden = !generated;
     document.getElementById('protocol-draft-banner').hidden = !(draft || generated);
     for (const id of ['btn-save', 'btn-save-as', 'btn-library', 'btn-draft', 'btn-import', 'btn-export', 'btn-simulate', 'btn-execute', 'btn-play', 'btn-pause', 'btn-stop', 'btn-step']) {
         const button = document.getElementById(id);
@@ -8040,7 +8095,10 @@ function updateProtocolDraftControls() {
         const operations = (tab.graph?._nodes || []).filter(node => !['flow/Start', 'flow/End', 'flow/Frame'].includes(node.type)).length;
         const issues = tab.protocolMetadata?.protocol_draft_issues || [];
         const summary = document.getElementById('protocol-draft-summary');
-        summary.textContent = `${operations} editable Bravo tasks and manual handoffs · ${issues.length} review checks. Simulate rehearses this draft in software and stops on task errors. Review deck, tips, liquids, mappings, and external stages before hardware use; execution remains unavailable.`;
+        const target = tab.protocolMetadata?.protocol_simulation_target;
+        const targetNote = target ? ` Proposed simulation target: ${target.head_type} / ${target.tip_definition_id}; the active instrument is unchanged.` : '';
+        const checks = tab.protocolMetadata?.protocol_draft_validation_stale ? `${issues.length ? issues.length + ' prior review checks · ' : ''}checks need to run again` : `${issues.length} review checks`;
+        summary.textContent = `${operations} editable Bravo tasks and manual handoffs · ${checks}. Simulate rehearses this draft in software and stops on task errors. Walk through draft previews task order and deck visits while settings are unresolved; it does not execute or validate tasks.${targetNote} Hardware execution remains unavailable.`;
         summary.title = issues.map(issue => issue.message).join('\n');
     } else if (draft) {
         document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;
