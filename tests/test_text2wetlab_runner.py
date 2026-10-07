@@ -13,8 +13,11 @@ def test_runner_reports_simulator_gate_separately_from_official_score(tmp_path, 
         b"Move 200 uL from a reservoir into two wells." if name == "instruction.md"
         else b"# pinned event logger" if name == "tests/runlog.py" else None))
 
+    generation_commands = []
+
     def fake_run(command, *, timeout):
         if command[1:3] == ["-m", "pybravo.evals.text2wetlab"]:
+            generation_commands.append(command)
             (tmp_path / "split-200ul-two-wells" / "protocol.py").write_text("metadata = {}\n")
             (tmp_path / "split-200ul-two-wells" / "generation_trace.json").write_text(
                 json.dumps({"static_validation_passed": True, "event_validation_passed": True,
@@ -27,12 +30,15 @@ def test_runner_reports_simulator_gate_separately_from_official_score(tmp_path, 
         "status": "passed", "event_count": 5, "adapter_event_validation": {"status": "passed"},
     })
     result = runner.run_task("split-200ul-two-wells", output_dir=tmp_path,
-                             simulator=Path("/tmp/opentrons_simulate"))
+                             simulator=Path("/tmp/opentrons_simulate"),
+                             model_timeout=123, max_output_tokens=4096)
     assert result["status"] == "simulator_passed"
     assert result["ot2_simulator_gate"]["status"] == "passed"
     assert result["official_runlog_gate"]["status"] == "passed"
     assert result["official_score"] is None
     assert result["protocol_sha256"]
+    assert generation_commands[0][generation_commands[0].index("--model-timeout") + 1] == "123"
+    assert generation_commands[0][generation_commands[0].index("--max-output-tokens") + 1] == "4096"
 
 
 def test_runner_never_executes_candidate_when_static_gate_is_unconfirmed(tmp_path, monkeypatch):
