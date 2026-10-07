@@ -68,7 +68,17 @@ class SimulationController(BravoController):
         self._last_error: BravoError | None = None
         self._lights: LightCommandData | None = None
         self._go_button_pressed = False
+        self._move_timing_enabled = True
         logger.info("SimulationController created (head_type=%s)", head_type.name)
+
+    def set_move_timing_enabled(self, enabled: bool) -> None:
+        """Control wall-clock motion delays without changing simulated positions.
+
+        Strict protocol validation checks task behavior and bookkeeping, not
+        elapsed run time, so it can disable these delays. Interactive previews
+        retain the velocity-based timing by default.
+        """
+        self._move_timing_enabled = enabled
 
     # -- Connection --
 
@@ -112,7 +122,7 @@ class SimulationController(BravoController):
             # This makes W-axis moves (aspirate/dispense/mix) take the
             # correct wall-clock time in simulation, so liquid class
             # velocity parameters produce observable differences.
-            if m.velocity > 0 and wait:
+            if self._move_timing_enabled and m.velocity > 0 and wait:
                 distance = abs(ax.position - old_pos)
                 duration = distance / m.velocity
                 max_duration = max(max_duration, duration)

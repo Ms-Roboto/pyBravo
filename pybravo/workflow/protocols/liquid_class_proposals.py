@@ -34,6 +34,10 @@ class LiquidClassProposalQuery(BaseModel):
     reagent_family: str | None = None
     source_labware_id: str | None = None
     destination_labware_id: str | None = None
+    source_initial_volume_ul: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    source_dead_volume_ul: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    total_source_withdrawal_ul: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    destination_initial_volume_ul: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 def _explicit_motion(raw: Mapping[str, Any], active: Mapping[str, Any]) -> bool:
@@ -101,6 +105,42 @@ def _contextual_references(head_type: str, tip_id: str, reagent_family: str | No
     return sorted(references, key=lambda row: (row["method_id"], row["source_url"]))
 
 
+def _scientist_class_statement(
+    *, class_id: str, class_digest: str, machine_id: str, head_type: str,
+    query: LiquidClassProposalQuery,
+) -> dict[str, str] | None:
+    """Find a statement pinned to this exact class revision, without granting readiness."""
+    if not (query.reagent_family and query.source_labware_id and query.destination_labware_id):
+        return None
+    for method in _authored_methods():
+        if method.status != "reference_candidate" or not any(
+            evidence.source_type == "scientist_statement" for evidence in method.evidence
+        ):
+            continue
+        applies = method.applicability
+        if not (
+            method.aspirate.liquid_class_ref and method.aspirate.liquid_class_ref.id == class_id
+            and method.aspirate.liquid_class_ref.digest == class_digest
+            and method.dispense.liquid_class_ref and method.dispense.liquid_class_ref.id == class_id
+            and method.dispense.liquid_class_ref.digest == class_digest
+            and machine_id in applies.machine_ids
+            and head_type in applies.head_types
+            and query.tip_id in applies.tip_ids
+            and query.source_labware_id in applies.source_labware_ids
+            and query.destination_labware_id in applies.destination_labware_ids
+            and (not applies.reagent_ids or (query.reagent_id is not None and any(
+                query.reagent_id.casefold() == identity.casefold() for identity in applies.reagent_ids
+            )))
+            and any(query.reagent_family.casefold() == family.casefold() for family in applies.reagent_families)
+            and (applies.min_volume_ul is None or query.volume_ul >= applies.min_volume_ul)
+            and (applies.max_volume_ul is None or query.volume_ul <= applies.max_volume_ul)
+        ):
+            continue
+        return {"method_id": method.method_id, "title": method.title,
+                "status": method.status, "evidence_type": "scientist_statement"}
+    return None
+
+
 def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposalQuery) -> dict[str, Any]:
     """Show explicit class settings without claiming method qualification.
 
@@ -145,6 +185,16 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
     cross_profile = not active_classes and context.get("controller_type") == "simulation"
     source_classes = (liquid_classes.list_liquid_classes(head_type=head_type, tip_id=query.tip_id)
                       if cross_profile else active_classes)
+    labware = {str(row.get("id")): row for row in context.get("labware", []) if isinstance(row, Mapping)}
+    source_plate = labware.get(query.source_labware_id or "")
+    destination_plate = labware.get(query.destination_labware_id or "")
+    have_geometry_inputs = (
+        source_plate is not None and destination_plate is not None
+        and query.source_initial_volume_ul is not None
+        and query.source_dead_volume_ul is not None
+        and query.total_source_withdrawal_ul is not None
+        and query.destination_initial_volume_ul is not None
+    )
     candidates = []
     for active in source_classes:
         class_id = str(active.get("liquid_class_id") or "")
@@ -162,8 +212,15 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
             or not _explicit_calibration(raw, active, query.volume_ul)
         ):
             continue
+        statement = _scientist_class_statement(
+            class_id=class_id, class_digest=_digest(raw), machine_id=source_machine,
+            head_type=head_type, query=query,
+        )
         reagent = (query.reagent_id or query.reagent_family or "").strip()
         reagent_note = (
+            f"A scientist reported this class for {reagent} and the selected plates; "
+            "the archive does not record the validation run or pipetting heights."
+            if statement else
             f"This class has no recorded suitability for {reagent}; liquid-specific suitability is unverified."
             if reagent else
             "The source liquid is unspecified; liquid-specific suitability is unverified."
@@ -172,6 +229,13 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
             f"Recorded for {source_machine}, not active machine {machine_id}; these values cannot be executed here.",
         ]) + [reagent_note,
               "No reviewed method links these settings to the selected source/destination plates or pipetting heights."]
+        archive = raw.get("source_archive")
+        archive = archive if isinstance(archive, Mapping) else None
+        if archive and archive.get("roi_state") not in {None, "APPROVED", "QUALIFIED"}:
+            caveats.append(
+                f"The original VWorks archive is marked {archive['roi_state']}; its embedded status "
+                "does not document local method qualification."
+            )
         if result["references"]:
             caveats.append("Related publications provide context only; they do not qualify this class's numeric settings.")
         desired_points = [float(point["desired_ul"]) for point in active["equation"]["control_points"]]
@@ -195,11 +259,15 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
             "status": "imported_unverified",
             "execution_ready": False,
             "can_apply_to_plan": False,
-            "score": proximity_score,
-            "score_scope": "calibration_control_point_proximity_only",
+            "score": 100.0 if statement else proximity_score,
+            "score_scope": "scientist_statement_match_only" if statement else "calibration_control_point_proximity_only",
+            **({"application_statement": statement} if statement else {}),
             "nearest_control_point_ul": nearest_point,
             "calibration_control_point_distance_ul": point_distance,
             "ranking_reason": (
+                "A scientist identified this class for the requested reagent and plate pair; "
+                "the method still lacks recorded heights and qualification details."
+                if statement else
                 f"Nearest recorded desired-volume control point is {nearest_point:g} µL, "
                 f"{point_distance:.4g} µL from the requested {query.volume_ul:g} µL. "
                 "This ordering does not establish reagent or plate suitability."
@@ -212,6 +280,7 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
                 "source_type": "local_config",
                 "source_path": source_path,
                 "source_digest": _digest(raw),
+                **({"source_archive": deepcopy(archive)} if archive else {}),
                 "note": ("Locally configured for this hardware; not a reagent- or plate-qualified method."
                          if is_active else
                          "Locally configured for another machine; not a reagent- or plate-qualified method."),
@@ -229,8 +298,21 @@ def propose_liquid_classes(context: Mapping[str, Any], query: LiquidClassProposa
                 "local_method_review",
             ],
         }
+        if have_geometry_inputs:
+            from .height_proposals import propose_transfer_heights
+
+            candidate["geometry_proposal"] = propose_transfer_heights(
+                source_plate, destination_plate,
+                source_initial_volume_ul=query.source_initial_volume_ul,
+                total_source_withdrawal_ul=query.total_source_withdrawal_ul,
+                source_dead_volume_ul=query.source_dead_volume_ul,
+                destination_initial_volume_ul=query.destination_initial_volume_ul,
+                dispense_volume_ul=query.volume_ul,
+                liquid_class=active,
+            )
         candidates.append(candidate)
     candidates.sort(key=lambda row: (
+        -int(bool(row.get("application_statement"))),
         row["calibration_control_point_distance_ul"], row["name"].lower(), row["liquid_class_id"]
     ))
     result["candidates"] = candidates

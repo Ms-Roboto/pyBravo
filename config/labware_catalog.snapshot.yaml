@@ -40,6 +40,7 @@ labware:
   dead_volume_ul: 0.3
   dead_volume_status: placeholder
   well_diameter_mm: 1.7
+  well_geometry: square
   disposable_tip_capacity_ul: 10.0
   tip_definition_id: ''
   supported_tip_ids: []
@@ -125,6 +126,7 @@ labware:
   dead_volume_ul: 6.5
   dead_volume_status: placeholder
   well_diameter_mm: 3.5
+  well_geometry: square
   disposable_tip_capacity_ul: 10.0
   tip_definition_id: ''
   supported_tip_ids: []

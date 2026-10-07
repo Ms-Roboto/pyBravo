@@ -99,6 +99,18 @@
           "default": null,
           "title": "Destination Labware Id"
         },
+        "reagent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reagent Id"
+        },
         "reagent_family": {
           "anyOf": [
             {
@@ -469,6 +481,13 @@
           "title": "Destination Labware Ids",
           "type": "array"
         },
+        "reagent_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reagent Ids",
+          "type": "array"
+        },
         "reagent_families": {
           "items": {
             "type": "string"
@@ -523,6 +542,7 @@
             "local_config",
             "local_review",
             "local_qualification",
+            "scientist_statement",
             "publication",
             "synthetic_example"
           ],

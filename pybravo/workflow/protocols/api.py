@@ -547,6 +547,11 @@ async def _simulate(identity: str, record: dict, capabilities: dict, workflow: d
         simulation._labware_catalog = InMemoryLabwareCatalog([
             LabwareDefinition(**row) for row in capabilities["labware"]
         ])
+        # Strict validation needs every real task and state transition, but
+        # waiting for simulated travel time can exceed the request budget on
+        # an otherwise valid plate-transfer workflow.
+        simulation.connect()
+        simulation.controller.set_move_timing_enabled(False)
         executor = WorkflowExecutor(simulation, workflow["graph"], deck_config=workflow["deck"],
                                     preview_animation=False, strict_validation=True, on_event=event)
         await asyncio.wait_for(executor.execute(), timeout=180)

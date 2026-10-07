@@ -217,6 +217,64 @@ function sharedProposalTipRack(){
 function liquidClassProposalQueries(){
     const plan=state.session?.plan,queries=new Map(),rackId=sharedProposalTipRack();
     if(!rackId)return [];
+    const materials=new Map(list(plan?.materials).map(item=>[item.id,item]));
+    const sourceWithdrawals=new Map(),unsafeSources=new Set(),unsafeDestinations=new Set();
+    const incomingMaterials=new Set(),destinationWrites=new Map();
+    function collectVolumeUse(steps,multiplier=1){
+        for(const step of list(steps)){
+            if(step.kind==='repeat'){
+                const count=Number(step.repeat);
+                if(Number.isSafeInteger(count)&&count>0)collectVolumeUse(step.steps,multiplier*count);
+                else for(const material of materials.keys()){
+                    unsafeSources.add(material);unsafeDestinations.add(material);
+                }
+                continue;
+            }
+            if(step.kind==='distribute'){
+                if(step.source)unsafeSources.add(step.source);
+                for(const dispense of list(step.dispenses))if(dispense.destination)
+                    unsafeDestinations.add(dispense.destination);
+                continue;
+            }
+            if(step.kind==='mix'){
+                if(step.material)unsafeSources.add(step.material);
+                continue;
+            }
+            if(step.kind!=='transfer')continue;
+            if(step.destination)incomingMaterials.add(step.destination);
+            const volume=Number(step.volume_ul);
+            if(!Number.isFinite(volume)||volume<=0||!Number.isSafeInteger(multiplier)){
+                if(step.source)unsafeSources.add(step.source);
+                if(step.destination)unsafeDestinations.add(step.destination);
+                continue;
+            }
+            if(step.source&&step.source_anchor){
+                const key=JSON.stringify([step.source,step.source_anchor]);
+                sourceWithdrawals.set(key,(sourceWithdrawals.get(key)||0)+volume*multiplier);
+            }else if(step.source)unsafeSources.add(step.source);
+            if(step.destination){
+                const writes=destinationWrites.get(step.destination)||[];
+                writes.push({anchor:step.destination_anchor,count:multiplier});
+                destinationWrites.set(step.destination,writes);
+            }
+        }
+    }
+    collectVolumeUse(plan?.steps);
+    function destinationWritesAreDisjoint(material){
+        if(!material||unsafeDestinations.has(material.id))return false;
+        const writes=destinationWrites.get(material.id)||[];
+        if(writes.length===1)return writes[0].count===1;
+        const plate=list(state.context?.labware).find(row=>row.id===material.labware_id);
+        const quadrants=new Set(['A1','A2','B1','B2']);
+        // Only the four parity offsets of a full 384 head on a 1536 plate
+        // establish disjoint footprints from anchors alone.
+        return writes.length>1&&plate?.wells===1536&&plate.rows===32&&plate.cols===48&&
+            Number(plate.spacing_x_mm)===2.25&&Number(plate.spacing_y_mm)===2.25&&
+            state.context?.head_type?.startsWith('HT_384_')&&
+            state.session?.setup?.head_mode?.subset_type==='all_barrels'&&
+            writes.every(write=>write.count===1&&quadrants.has(write.anchor))&&
+            new Set(writes.map(write=>write.anchor)).size===writes.length;
+    }
     function visit(steps){
         for(const step of list(steps)){
             if(step.kind==='repeat'){visit(step.steps);continue;}
@@ -228,6 +286,21 @@ function liquidClassProposalQueries(){
                 reagent_family:method.reagent_family,
                 source_labware_id:method.source_labware_id,
                 destination_labware_id:method.destination_labware_id};
+            if(step.kind==='transfer'){
+                const source=materials.get(step.source),destination=materials.get(step.destination);
+                const total=sourceWithdrawals.get(JSON.stringify([step.source,step.source_anchor]));
+                if(source&&destination&&!unsafeSources.has(step.source)&&
+                    !incomingMaterials.has(step.source)&&destinationWritesAreDisjoint(destination)&&
+                    !Object.keys(source.well_volumes_ul||{}).length&&
+                    !Object.keys(destination.well_volumes_ul||{}).length&&
+                    [source.initial_volume_ul,source.dead_volume_ul,
+                    destination.initial_volume_ul,total].every(value=>typeof value==='number'&&Number.isFinite(value)&&value>=0)){
+                    query.source_initial_volume_ul=source.initial_volume_ul;
+                    query.source_dead_volume_ul=source.dead_volume_ul;
+                    query.total_source_withdrawal_ul=total;
+                    query.destination_initial_volume_ul=destination.initial_volume_ul;
+                }
+            }
             const key=JSON.stringify(query),entry=queries.get(key);
             if(entry)entry.step_count++;
             else queries.set(key,{query,step_count:1});
@@ -341,6 +414,17 @@ function renderLiquidClassProposals(){
                 el('p',{class:'muted',style:'margin:5px 0'},
                     `Recorded provenance: ${provenance.source_type||'unknown'} · ${provenance.source_path||'source path unrecorded'}.`));
             if(candidate.ranking_reason)card.append(el('p',{class:'muted',style:'margin:5px 0'},candidate.ranking_reason));
+            const geometry=candidate.geometry_proposal;
+            if(geometry){
+                const aspiration=geometry.aspirate||{},dispense=geometry.dispense||{};
+                card.append(el('p',{class:'muted',style:'margin:5px 0'},
+                    `Geometry estimate: aspiration ${aspiration.distance_from_bottom_mm==null?'unresolved':`${aspiration.distance_from_bottom_mm} mm for review`}; `+
+                    `noncontact dispense ${dispense.distance_from_bottom_mm==null?'unresolved':`${dispense.distance_from_bottom_mm} mm for review`}. `+
+                    `Z-entry speed comes from this class (${candidate.aspirate?.z_in_velocity_mm_s??'?'} mm/s aspirate, `+
+                    `${candidate.dispense?.z_in_velocity_mm_s??'?'} mm/s dispense), not from plate geometry.`));
+                if(dispense.status==='unresolved')card.append(el('p',{class:'issue warn',style:'margin:5px 0'},
+                    `Dispense height needs method review: ${list(dispense.reasons).join(' ')} This estimate cannot establish a noncontact path.`));
+            }
             const caveats=list(candidate.caveats);
             if(/DMSO/i.test(query.reagent_family||'')&&!caveats.some(value=>/DMSO/i.test(value)))
                 caveats.unshift(`DMSO suitability for this ${query.volume_ul} µL transfer from ${sourceName} to ${destinationName} has not been established by this catalog record.`);
@@ -365,6 +449,10 @@ function renderLiquidClassProposals(){
                 `Calibration points (desired → commanded µL): ${points.length?points.map(point=>`${point.desired_ul} → ${point.commanded_ul}`).join(', '):'not recorded'}. Origin: ${candidate.source_field_origins?.['equation.control_points']||'unrecorded'}.`));
             details.append(el('p',{class:'muted'},
                 `Provenance: ${provenance.source_type||'unknown'} · ${provenance.source_path||'source path unrecorded'} · digest ${provenance.source_digest||'unrecorded'}. ${provenance.note||''}`));
+            if(provenance.source_archive)details.append(el('p',{class:'muted'},
+                `Original VWorks archive: ${provenance.source_archive.filename||'unnamed'} · `+
+                `SHA-256 ${provenance.source_archive.sha256||'unrecorded'} · `+
+                `embedded state ${provenance.source_archive.roi_state||'unrecorded'}.`));
             if(list(candidate.missing_fields).length)details.append(el('p',{class:'muted'},
                 'Still needed: '+candidate.missing_fields.join('; ')+'.'));
             card.append(details);
@@ -1255,12 +1343,14 @@ function guidedSimulationSetup(model,layout){
             row.status==='imported_unverified'&&row.machine_id===context.machine_id&&
             row.head_type===context.head_type&&row.tip_id==='st_10ul'&&
             local?.machine_id===context.machine_id&&local?.head_type===context.head_type&&
-            local?.tip_id==='st_10ul'&&row.score_scope==='calibration_control_point_proximity_only'&&
+            local?.tip_id==='st_10ul'&&
+            ['calibration_control_point_proximity_only','scientist_statement_match_only'].includes(row.score_scope)&&
             Number.isFinite(row.calibration_control_point_distance_ul)&&
             Number.isFinite(row.nearest_control_point_ul)&&
             points.length>=2&&points.every(Number.isFinite)&&Math.min(...points)<=5&&Math.max(...points)>=5&&
             row.provenance?.source_type==='local_config'&&row.provenance?.source_digest;
-    }).sort((left,right)=>left.calibration_control_point_distance_ul-right.calibration_control_point_distance_ul||
+    }).sort((left,right)=>Number(Boolean(right.application_statement))-Number(Boolean(left.application_statement))||
+        left.calibration_control_point_distance_ul-right.calibration_control_point_distance_ul||
         left.name.localeCompare(right.name)||left.liquid_class_id.localeCompare(right.liquid_class_id));
     const candidate=candidates[0];
     if(!candidate)return {reason:'No active, explicitly calibrated ST10 class is available for a provisional 5 µL simulation.'};

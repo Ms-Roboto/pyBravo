@@ -335,7 +335,7 @@ def _normalize_liquid_class_payload(payload: dict[str, Any], *, liquid_class_id:
         tip_capacity_ul=tip_capacity_ul,
         legacy_coefficients=equation.get("coefficients"),
     )
-    return {
+    item = {
         "liquid_class_id": liquid_class_id,
         "name": name,
         "description": str(payload.get("description") or ""),
@@ -365,6 +365,14 @@ def _normalize_liquid_class_payload(payload: dict[str, Any], *, liquid_class_id:
             "control_points": control_points,
         },
     }
+    # Keep source evidence attached to the numeric settings when a class is
+    # read, edited, or mirrored to MongoDB. A VWorks archive records motion
+    # values, but its provenance does not itself qualify a reagent or labware.
+    for key in ("source_archive", "field_origins"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            item[key] = deepcopy(value)
+    return item
 
 
 def _normalize_control_points(

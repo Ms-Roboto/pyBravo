@@ -60,6 +60,7 @@ class MethodQuery(BaseModel):
     tipbox_id: str | None = None
     source_labware_id: str | None = None
     destination_labware_id: str | None = None
+    reagent_id: str | None = None
     reagent_family: str | None = None
     volume_ul: float | None = None
     dispense_volumes_ul: list[float] | None = None
@@ -74,6 +75,7 @@ class MethodApplicability(BaseModel):
     tipbox_ids: list[str] = Field(default_factory=list)
     source_labware_ids: list[str] = Field(default_factory=list)
     destination_labware_ids: list[str] = Field(default_factory=list)
+    reagent_ids: list[str] = Field(default_factory=list)
     reagent_families: list[str] = Field(default_factory=list)
     operations: list[Literal["transfer", "mix", "distribute"]] = Field(default_factory=lambda: ["transfer"])
     min_volume_ul: float | None = None
@@ -118,7 +120,10 @@ class DispenseSettings(BaseModel):
 
 
 class MethodProvenance(BaseModel):
-    source_type: Literal["local_config", "local_review", "local_qualification", "publication", "synthetic_example"]
+    source_type: Literal[
+        "local_config", "local_review", "local_qualification", "scientist_statement",
+        "publication", "synthetic_example",
+    ]
     source_path: str | None = None
     source_url: str | None = None
     source_digest: str | None = None
@@ -865,6 +870,18 @@ def _mismatches(method: Mapping[str, Any], query: MethodQuery) -> list[dict[str,
                     ),
                 }
             )
+    # Exact formulations are optional in the library. When a record names
+    # one, a broad reagent-family match must not stand in for that identity.
+    reagent_ids = applies.get("reagent_ids") or []
+    if reagent_ids and (not query.reagent_id or not any(
+        query.reagent_id.casefold() == str(identity).casefold() for identity in reagent_ids
+    )):
+        result.append({
+            "field": "reagent_ids",
+            "requested": query.reagent_id,
+            "method": reagent_ids,
+            "reason": "request_unspecified" if query.reagent_id is None else "different",
+        })
     volumes = (
         query.dispense_volumes_ul
         if query.operation == "distribute" and query.dispense_volumes_ul

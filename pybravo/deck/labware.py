@@ -68,6 +68,23 @@ def _coerce_dead_volume_ul(raw: Any, label: str) -> float | None:
     return value
 
 
+def _coerce_well_geometry(raw: Any, label: str) -> str | None:
+    """Normalize the editor's 1=round, 2=square codes without guessing shape."""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, bool):
+        shape = None
+    elif raw == 1 or isinstance(raw, str) and raw.strip().casefold() in {"1", "round", "circular"}:
+        shape = "round"
+    elif raw == 2 or isinstance(raw, str) and raw.strip().casefold() in {"2", "square"}:
+        shape = "square"
+    else:
+        shape = None
+    if shape is None:
+        logger.warning("Ignoring unknown well_geometry for %s: %r", label, raw)
+    return shape
+
+
 def _recorded_or_placeholder_dead_volume(
     wells: dict[str, Any], *, base_class: str, well_count: int, capacity_ul: float,
     label: str = "labware",
@@ -129,6 +146,7 @@ class LabwareDefinition:
     dead_volume_ul: float | None = None
     dead_volume_status: str = "placeholder"
     well_diameter_mm: float = 0.0
+    well_geometry: str | None = None
     disposable_tip_capacity_ul: float = 0.0
     tip_definition_id: str = ""
     supported_tip_ids: list[str] = field(default_factory=list)
@@ -149,6 +167,7 @@ class LabwareDefinition:
     can_be_mounted: bool = False
 
     def __post_init__(self) -> None:
+        self.well_geometry = _coerce_well_geometry(self.well_geometry, self.name or self.id)
         self.dead_volume_ul = _coerce_dead_volume_ul(self.dead_volume_ul, self.name or self.id)
         status = str(self.dead_volume_status or "placeholder").strip().lower()
         if status not in {"placeholder", "reviewed"}:
@@ -216,6 +235,7 @@ class LabwareDefinition:
             dead_volume_ul=dead_volume_ul,
             dead_volume_status=dead_volume_status,
             well_diameter_mm=float(wells.get("diameter_mm") or 0.0),
+            well_geometry=wells.get("well_geometry"),
             disposable_tip_capacity_ul=float(wells.get("disposable_tip_capacity_ul") or 0.0),
             tip_definition_id=str(doc.get("tip_definition_id") or ""),
             supported_tip_ids=list(doc.get("supported_tip_ids") or []),
@@ -1013,6 +1033,7 @@ def _apply_mirrored_motion_fields(definition: LabwareDefinition) -> LabwareDefin
         dead_volume_ul=definition.dead_volume_ul,
         dead_volume_status=definition.dead_volume_status,
         well_diameter_mm=definition.well_diameter_mm or mirrored.well_diameter_mm,
+        well_geometry=definition.well_geometry or mirrored.well_geometry,
         disposable_tip_capacity_ul=(
             definition.disposable_tip_capacity_ul or mirrored.disposable_tip_capacity_ul
         ),

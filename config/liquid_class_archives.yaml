@@ -1,0 +1,1949 @@
+version: 1
+machine_id: 04-91-62-CF-7B-B0
+archives:
+- name: 10ul/sec
+  source_archive:
+    filename: 10ul-sec.xml.roiZip
+    sha256: ec41b27b4aca870952fe103413b83b3bc4a599c8bc60a500862a704a3890f88b
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 63755d623042422669bc9134602f0a94
+    sidecar_md5: 6bf3bc30e84d66692b583a0e0f811a72
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 10.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 10.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: 2ul/sec
+  source_archive:
+    filename: 2ul-sec.xml.roiZip
+    sha256: a812307b3746fcbf81bb9d7fa9d4802ac8171c8605e3b486af793c983cda3eed
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: cc7113eac2e977aeb852d7fa4d888bb3
+    sidecar_md5: 072059ffb80a7173dfc148d02159ad94
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 2.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 2.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: 384 disposable tip 0.5 - 10ul
+  source_archive:
+    filename: 384 disposable tip 0.5 - 10ul.xml.roiZip
+    sha256: 6535613db0d5b6fbab1362f1af9a92a6842c8b05462536399b63d597662c4067
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 9016a37f461623a3522a9aa9fc35ccff
+    sidecar_md5: 8e77e16885d28e2486def3ac83847a7b
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 1.0
+      w_acceleration_ul_s2: 2.0
+      post_delay_ms: 1000
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 10.0
+    dispense:
+      w_velocity_ul_s: 1.0
+      w_acceleration_ul_s2: 5.0
+      post_delay_ms: 1000
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 5.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  catalog_id: liq_89aeface22
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_384_D_70
+    tip_id: st_10ul
+    tip_capacity_ul: 10.0
+  differences: []
+- name: 384 disposable tip 10 - 50ul
+  source_archive:
+    filename: 384 disposable tip 10 - 50ul.xml.roiZip
+    sha256: f478bb4a2f7da792db5eb228bc3587be8c7bd67d82b12da99782accba58400e1
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 38dd7627662874b3dbbee3597aad0794
+    sidecar_md5: 653e3c03257e85048c5a8358d33f935a
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 20.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 250.0
+      z_out_velocity_mm_s: 20.0
+      z_out_acceleration_mm_s2: 10.0
+    dispense:
+      w_velocity_ul_s: 10.0
+      w_acceleration_ul_s2: 8.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 250.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 5.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_cf4e01f34b
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_384_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: 96 disposable tip 1 - 2ul
+  source_archive:
+    filename: 96 disposable tip 1 - 2ul.xml.roiZip
+    sha256: d595a3f169f50b882cebc48c065c7560eb32c7250266a5d3215b846097c80c3a
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 08f35825fc2708fa9665b43f2e9369fe
+    sidecar_md5: 01d81bc635939eac8134a684749df340
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 2.0
+      w_acceleration_ul_s2: 4.0
+      post_delay_ms: 1000
+      z_in_velocity_mm_s: 10.0
+      z_in_acceleration_mm_s2: 5.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 5.0
+    dispense:
+      w_velocity_ul_s: 2.0
+      w_acceleration_ul_s2: 4.0
+      post_delay_ms: 1000
+      z_in_velocity_mm_s: 10.0
+      z_in_acceleration_mm_s2: 5.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 5.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_2183f6c67c
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 2.0
+  differences: []
+- name: 96 disposable tip 2 - 50ul
+  source_archive:
+    filename: 96 disposable tip 2 - 50ul.xml.roiZip
+    sha256: 541573cc16316aaa405f6f53acf5aabf042147a5e0a51d1509f91c87b3a35757
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: b5fa7084ef2b7d562410cb001f4f10b3
+    sidecar_md5: eaad4a09d3584d6a530673e37b3785f3
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 30.0
+      z_in_acceleration_mm_s2: 75.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 30.0
+    dispense:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 1200
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 15.0
+  status: matched_values_differ
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_20df69c756
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences:
+  - field: aspirate.w_velocity_ul_s
+    catalog: 30.0
+    archive: 5.0
+  - field: aspirate.w_acceleration_ul_s2
+    catalog: 100.0
+    archive: 10.0
+  - field: aspirate.post_delay_ms
+    catalog: 200
+    archive: 500
+- name: 96 disposable tip 51 - 200ul
+  source_archive:
+    filename: 96 disposable tip 51 - 200ul.xml.roiZip
+    sha256: 0d53906c84344be29e95d283071f581bbaff2ba487007ade30996332e5082717
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: ec15dcd69471e832f7437ef0b379a9ef
+    sidecar_md5: 3c2310a8765583579c86d9d762917a9d
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 300.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 125.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 100.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_9d14a7a1e0
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_200
+    tip_id: ''
+    tip_capacity_ul: 200.0
+  differences: []
+- name: AM_100uLperSec
+  source_archive:
+    filename: AM_100uLperSec.xml.roiZip
+    sha256: 09ab5217ee27845ebe30460f4b5d4e7e29726900b6c31f21ecb7e411ac6843bc
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 656c19902599e58939ef0a17e91e7fbe
+    sidecar_md5: de24ea9973fe469e5fe89ce82ab376eb
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_10uLperSec
+  source_archive:
+    filename: AM_10uLperSec.xml.roiZip
+    sha256: c8c37d1068d4f4163b01945c290b52e61f65a1dc1e32dbd87764ebcb3de86b4d
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: aea5017e07f2173258ed8ab46d430dd4
+    sidecar_md5: 3043c40882b49531672e71810d44dad7
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 10.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 10.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_250uLTipsHighVol
+  source_archive:
+    filename: AM_250uLTipsHighVol.xml.roiZip
+    sha256: 6d432a2da76279acfc86d1abd5274697e8dbee7489da828df2bda339ca911558
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.0
+    - 1.03
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.030000'
+    embedded_md5: f432ed901116764935119ed4addef96a
+    sidecar_md5: f704f48288a023eb77edd82b3bc85f65
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 300.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 125.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 100.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_250uLTipsLowVol
+  source_archive:
+    filename: AM_250uLTipsLowVol.xml.roiZip
+    sha256: 9beef24b2c7c5c6a74e6be991a0707fbd9a26c08efa2522553a278e063982b90
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.0
+    - 1.1
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.100000'
+    embedded_md5: 4bbf00160382d7ea18ec94a12f9d7c90
+    sidecar_md5: bafbe2917008d4d00c95fddec81ef0cb
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 30.0
+      z_in_acceleration_mm_s2: 75.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 30.0
+    dispense:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 1200
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 15.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_25uLperSec
+  source_archive:
+    filename: AM_25uLperSec.xml.roiZip
+    sha256: 5775815ca61438b3ce4b630068866009bd4c237b0953cc1ae612e700a54bd24a
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: a2f8299f68bfef5578dce74d13e8b63b
+    sidecar_md5: b4e7979b9569453d62e3127ff384d7ae
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 25.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 25.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_2_5sec Delay
+  source_archive:
+    filename: AM_2_5sec Delay.xml.roiZip
+    sha256: 3c418750fcc5eb950fc8badd0d45f4757c3af2b9174191fa19afaed88d1cbbaf
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: b09ba413b691fb8854089a785f0eaa87
+    sidecar_md5: 3a9b96cc0b2ed7f3c0c35bf593e70cfe
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 2500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 2500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_50uLperSec
+  source_archive:
+    filename: AM_50uLperSec.xml.roiZip
+    sha256: 77f9396016ce3cdab6794986c72a9bc614a99e7b72148f1d18a95e90725f4e77
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 94efe8458c32060309738e48466277c1
+    sidecar_md5: 18239812623e6dd0b215a5bfd8b29bb8
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_5min Delay
+  source_archive:
+    filename: AM_5min Delay.xml.roiZip
+    sha256: 27d26344004a275af0446635d1ac7d619020951656632325d855a135a0d4738b
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: c83a3bb9b8110050d146f2c971840caf
+    sidecar_md5: b2c6c7b6a62cc6c0d4e277c95349fdad
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 300000
+      z_in_velocity_mm_s: 10.0
+      z_in_acceleration_mm_s2: 50.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 50.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 300000
+      z_in_velocity_mm_s: 10.0
+      z_in_acceleration_mm_s2: 50.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 50.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_5sec Delay
+  source_archive:
+    filename: AM_5sec Delay.xml.roiZip
+    sha256: bb2a00e3e41da605b905deaa6870bd116e4286f496c5233ff62b85d572d613d0
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: cf6b3745183fec1b79118e13dd340f0b
+    sidecar_md5: 901afad626406d7308bddf63e2169ce3
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 5000
+      z_in_velocity_mm_s: 10.0
+      z_in_acceleration_mm_s2: 5.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 5.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 5000
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_External Wash
+  source_archive:
+    filename: AM_External Wash.xml.roiZip
+    sha256: 8091afe249e80aa0105bfa5322dedb9503f26b9a585ae986294ec4a5c4f099f9
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '7'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 7f961d7b3a8632a6395451e25dc7f479
+    sidecar_md5: 0a6b24f0dc1dd6b54df83c8abd61708b
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 2500
+      z_in_velocity_mm_s: 10.0
+      z_in_acceleration_mm_s2: 5.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 5.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 2500
+      z_in_velocity_mm_s: 10.0
+      z_in_acceleration_mm_s2: 5.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 5.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_Mix_300uLperSec
+  source_archive:
+    filename: AM_Mix_300uLperSec.xml.roiZip
+    sha256: b211b70a957d26687c4ff5094f75f2a550a8302cbee8b711b27c771a81daee80
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: ec3faec9c268cb68880b6740cf86437e
+    sidecar_md5: f5afa8aefc5503cf6dcd2df8b049e357
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 300.0
+      w_acceleration_ul_s2: 200.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 300.0
+      w_acceleration_ul_s2: 200.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_Normalization_diluent_20-150ul
+  source_archive:
+    filename: AM_Normalization_diluent_20-150ul.xml.roiZip
+    sha256: 31c541745b0cb70b4d2c86ff2571dec7f3b42cf7c0e4272785b8196bb37b7fee
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.2771
+    - 1.0077
+    - 0.0001
+    raw_coefficient_values:
+    - '0.277100'
+    - '1.007700'
+    - '0.000100'
+    embedded_md5: 72226abcb5f509489e601f3992ccd4ab
+    sidecar_md5: 675fc11c62062c08aa6dd0be31fb69aa
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 75.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 375.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 375.0
+    dispense:
+      w_velocity_ul_s: 75.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 375.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 375.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_Normalization_diluent_5-20ul
+  source_archive:
+    filename: AM_Normalization_diluent_5-20ul.xml.roiZip
+    sha256: 595dba93035d10e551431d38562bbdd50211e4ca8a2f59b98eca01b248477498
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.4512
+    - 0.8427
+    - 0.0277
+    - -0.0011
+    raw_coefficient_values:
+    - '0.451200'
+    - '0.842700'
+    - '0.027700'
+    - '-0.001100'
+    embedded_md5: f45c79bf5a6c5c97140eed237caf520d
+    sidecar_md5: 2a676e972ddf49071a7c6e59c44ac190
+  archive_note: Uses disposable 250ul tip on AssayMap head
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 75.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 375.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 375.0
+    dispense:
+      w_velocity_ul_s: 75.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 375.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 375.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_Normalization_sample_20-150ul
+  source_archive:
+    filename: AM_Normalization_sample_20-150ul.xml.roiZip
+    sha256: 1366bb67eb5f2481c9a20e5db81b1c524892c7ee206d696491ea8867c7c77238
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.2771
+    - 1.0077
+    - 0.0001
+    raw_coefficient_values:
+    - '0.277100'
+    - '1.007700'
+    - '0.000100'
+    embedded_md5: 8ebfbda605939ae10c0f4e36dc5b546b
+    sidecar_md5: e8b47b41380fe527188f6790d8b44097
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 75.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 375.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 375.0
+    dispense:
+      w_velocity_ul_s: 75.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 375.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 375.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_Normalization_sample_5-20ul
+  source_archive:
+    filename: AM_Normalization_sample_5-20ul.xml.roiZip
+    sha256: a9408a8aa0f25db60d8461788bfe560a66bd46dd862e1c93375771dd20eb679a
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.4512
+    - 0.8427
+    - 0.0277
+    - -0.0011
+    raw_coefficient_values:
+    - '0.451200'
+    - '0.842700'
+    - '0.027700'
+    - '-0.001100'
+    embedded_md5: 56f8125d58f1d0291e6b10cfcf8c40b7
+    sidecar_md5: e5b778c68dc2f26bb5317ca62595ca23
+  archive_note: Uses disposable 250ul tip on AssayMap head
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 75.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 375.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 375.0
+    dispense:
+      w_velocity_ul_s: 75.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 375.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 375.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_ProbesHighVol
+  source_archive:
+    filename: AM_ProbesHighVol.xml.roiZip
+    sha256: ef0e48489b18ec6a86338cee604cb725c9831ecf2c82df8b0c7b7d45fbe681cc
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 7b593bf11aafc323cbab9c7ddbe5e7ac
+    sidecar_md5: 4418a1c01e5441aa0b2c962c6a1890f7
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 300.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 125.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 100.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_ProbesLowVol
+  source_archive:
+    filename: AM_ProbesLowVol.xml.roiZip
+    sha256: bc5a6be66669baf9e1e3863b976a8ec68a08991538b0e460da7177de279bce86
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 4aa0c5c71cd166c5620bfc09d9de44ca
+    sidecar_md5: 9b1273cefab3d8bf6dd6fbe7998b48b1
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 30.0
+      z_in_acceleration_mm_s2: 75.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 30.0
+    dispense:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 1200
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 15.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_ReagentTransfer_FastFlow
+  source_archive:
+    filename: AM_ReagentTransfer_FastFlow.xml.roiZip
+    sha256: b354ac318fff475b11200010976efb1f194cdc972cc53d8521b5e4c4534526f1
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '9'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: bd5653a70f84e0b0b2647f1159f7f4da
+    sidecar_md5: b62088373cc13a744e05a45b9f33e88d
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 300.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 125.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 100.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_ReagentTransfer_SlowFlow
+  source_archive:
+    filename: AM_ReagentTransfer_SlowFlow.xml.roiZip
+    sha256: 5a42ef62e9d4d1a5f398281d8d6e5ad4b2763e2be0e2c4282be892bb65d73cf4
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '9'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: c439e1f9c50db6e8e21bd56b66115af2
+    sidecar_md5: 8d20b65fac874f5d07754b8104523737
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 30.0
+      z_in_acceleration_mm_s2: 75.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 30.0
+    dispense:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 1200
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 15.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: AM_TipTouch
+  source_archive:
+    filename: AM_TipTouch.xml.roiZip
+    sha256: 48867240f774e49f4abd257dccf1c605090dde667b966809bce5f2a5a8911e05
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '9'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 6682ec5ed889679c36f1430c688c9ef2
+    sidecar_md5: fc8cf811e466ebe0b185c965f45d2a79
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 20.0
+      z_in_acceleration_mm_s2: 10.0
+      z_out_velocity_mm_s: 20.0
+      z_out_acceleration_mm_s2: 10.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 20.0
+      z_in_acceleration_mm_s2: 10.0
+      z_out_velocity_mm_s: 20.0
+      z_out_acceleration_mm_s2: 10.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: OQ_384st_highVol
+  source_archive:
+    filename: OQ_384st_highVol.xml.roiZip
+    sha256: cc9fd236b82d03c7929baf79b23fb77898d35092ae998d94c7507b3f54135c62
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0799
+    - 1.0251
+    raw_coefficient_values:
+    - '0.079900'
+    - '1.025100'
+    embedded_md5: 165a7a2b06454dab5c3483b83aadc2c4
+    sidecar_md5: ddca4db29c979bdebadc8329889a7311
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 20.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 40.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 20.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 40.0
+      z_out_acceleration_mm_s2: 100.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_638b36623d
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_384_D_70
+    tip_id: ''
+    tip_capacity_ul: 10.0
+  differences: []
+- name: OQ_384st_lowVol
+  source_archive:
+    filename: OQ_384st_lowVol.xml.roiZip
+    sha256: 04048bc16d2bcef5e76e9a1578b9c6391742f332c1e05fb87c6b225ac54dc819
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.1026
+    - 1.0567
+    raw_coefficient_values:
+    - '0.102600'
+    - '1.056700'
+    embedded_md5: 0b59af51d3bf8dd49a001e92bd3866d2
+    sidecar_md5: ab495d294feab1e60c377d39b0cdb770
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 2.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 1000
+      z_in_velocity_mm_s: 30.0
+      z_in_acceleration_mm_s2: 5.0
+      z_out_velocity_mm_s: 30.0
+      z_out_acceleration_mm_s2: 5.0
+    dispense:
+      w_velocity_ul_s: 2.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 1000
+      z_in_velocity_mm_s: 30.0
+      z_in_acceleration_mm_s2: 5.0
+      z_out_velocity_mm_s: 30.0
+      z_out_acceleration_mm_s2: 5.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_af39b84186
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_384_D_70
+    tip_id: ''
+    tip_capacity_ul: 10.0
+  differences: []
+- name: OQ_96AM_highVol
+  source_archive:
+    filename: OQ_96AM_highVol.xml.roiZip
+    sha256: 151692b9b6b7ed13bd91af2af026dc0e4fc3f389b85020c25972025bd0818286
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 0.9578
+    raw_coefficient_values:
+    - '0.000000'
+    - '0.957800'
+    embedded_md5: b2931b5a81d8a51bc2ed4b3f9054985d
+    sidecar_md5: 1bdfc0bcecf1d44b644cec99c90b8af2
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 250
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 50.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 250
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 50.0
+      z_out_acceleration_mm_s2: 100.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_de256db84f
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: OQ_96AM_lowVol
+  source_archive:
+    filename: OQ_96AM_lowVol.xml.roiZip
+    sha256: f7ceab1af05b4872bbe17cbb289824082e8c88499b31f8b68b24a88a58202c47
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.167
+    - 1.0454
+    raw_coefficient_values:
+    - '0.167000'
+    - '1.045400'
+    embedded_md5: 7762c76da47dbe1fbc1695ca49681c9e
+    sidecar_md5: d85ea1e1152370e50795d576f63b58da
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 250
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 50.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 250
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 50.0
+      z_out_acceleration_mm_s2: 100.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_480897ab58
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: OQ_96LT_highVol
+  source_archive:
+    filename: OQ_96LT_highVol.xml.roiZip
+    sha256: 3183ec73408f54c166c7b8342c974a51c7bf804a82e4f4ee7afd430fdda076bf
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 1.0074
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.007400'
+    embedded_md5: 5d4aaf2963d7d15fd98ef7dd3f0d91c8
+    sidecar_md5: 1fa782ceb62375ab8cc8c3a0945bc88e
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 250
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 50.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 250
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 50.0
+      z_out_acceleration_mm_s2: 100.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_2b2aa98876
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: OQ_96LT_lowVol
+  source_archive:
+    filename: OQ_96LT_lowVol.xml.roiZip
+    sha256: b65e13bd337fa527ee442292be24a646313ae21b6d0a7a761e9e45a2172f1d7f
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0033
+    - 1.0543
+    raw_coefficient_values:
+    - '0.003300'
+    - '1.054300'
+    embedded_md5: cf87a689be996668ea32cac1f589d3e8
+    sidecar_md5: e0e2acf2838724be9e2a31ac35f237a3
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 250
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 50.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 5.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 250
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 50.0
+      z_out_acceleration_mm_s2: 100.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_498d6654aa
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: OQ_96st_highVol
+  source_archive:
+    filename: OQ_96st_highVol.xml.roiZip
+    sha256: d01e33dcaaf8fd33fe972ac907e8766ea50d8c99092aad9b8dcf99eefa79bc70
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0799
+    - 1.0251
+    raw_coefficient_values:
+    - '0.079900'
+    - '1.025100'
+    embedded_md5: 6254c926529e290716e503b7cac25ff4
+    sidecar_md5: 592f7a653d661ec987423ee0490c084e
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 20.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 40.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 20.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 50.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 40.0
+      z_out_acceleration_mm_s2: 100.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_c6e418240a
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: OQ_96st_lowVol
+  source_archive:
+    filename: OQ_96st_lowVol.xml.roiZip
+    sha256: 630a652fad7e6b2ae58e732877ba3247381b88dd4b6e17e3a5c816f666f79f24
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 1.0642
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.064200'
+    embedded_md5: 7538c991e7fa9ec667afbaa13695f632
+    sidecar_md5: 3c2c1c186015ea6f4f13c468f9809a69
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 2.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 1000
+      z_in_velocity_mm_s: 30.0
+      z_in_acceleration_mm_s2: 5.0
+      z_out_velocity_mm_s: 30.0
+      z_out_acceleration_mm_s2: 5.0
+    dispense:
+      w_velocity_ul_s: 2.0
+      w_acceleration_ul_s2: 10.0
+      post_delay_ms: 1000
+      z_in_velocity_mm_s: 30.0
+      z_in_acceleration_mm_s2: 5.0
+      z_out_velocity_mm_s: 30.0
+      z_out_acceleration_mm_s2: 5.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_98e6c996e9
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: OQ_AM_100uLperSec
+  source_archive:
+    filename: OQ_AM_100uLperSec.xml.roiZip
+    sha256: f8d335b8a9bc0d786fa32cda5df2b9163eb5a98d69fe0bdceaac2514d0871965
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: b9dddf5ee4c9d578a4a50f5241cf67d4
+    sidecar_md5: 4fcc18e652f2176d8bd017cdcf45b234
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_a86c990321
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: OQ_AM_100uLperSec_delay_after_aspirate
+  source_archive:
+    filename: OQ_AM_100uLperSec_delay_after_aspirate.xml.roiZip
+    sha256: 277604a5b836aecc5dba0419193502a179138d03241482a2444466f6c14dd09d
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 29778c2cba996fa0a94f772e7824953d
+    sidecar_md5: 71d52268d9928c11628904f7d665e005
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 5000
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_3a22f264d8
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_D_70
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: SinglePlateISD_ProbesHighVol
+  source_archive:
+    filename: SinglePlateISD_ProbesHighVol.xml.roiZip
+    sha256: aa89695370fe3e00284e291872498f0866123e92c05ba7efac9cfc98a15627b3
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 31b6636ef6d28258c6357faf4c0e9a1b
+    sidecar_md5: 4a0ef154b75655d9a31dfae0b8aa5a6c
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: SinglePlateISD_ProbesLowVol
+  source_archive:
+    filename: SinglePlateISD_ProbesLowVol.xml.roiZip
+    sha256: 795cb9fcda0e074a3f793781a91a33eb2c68f62a133bdf76f4652851131d3e4f
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.0
+    - 0.95
+    raw_coefficient_values:
+    - '0.000000'
+    - '0.950000'
+    embedded_md5: 8cc5e814d8ca469e463850a14c52f60c
+    sidecar_md5: b04f7399e2f7ecb590f9674ecf8b253f
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: SinglePlateISD_TipsHighVol
+  source_archive:
+    filename: SinglePlateISD_TipsHighVol.xml.roiZip
+    sha256: 47584c3f078d74715d029dd50f0a85a87a9ac3687a8ae21a51567000747d1e27
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.0
+    - 1.03
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.030000'
+    embedded_md5: 56c98a1827cf6edff7f4ae98f36a2d9c
+    sidecar_md5: a4373ede3f12b84f446bf9f2ca101c8b
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: SinglePlateISD_TipsLowVol
+  source_archive:
+    filename: SinglePlateISD_TipsLowVol.xml.roiZip
+    sha256: c8d084145f30a30e7e230908ff8db00681ec7d805039087257af5527f6844daa
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '8'
+    raw_coefficients:
+    - 0.0
+    - 1.1
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.100000'
+    embedded_md5: 8df5af32c29501bb5bfb28e63086a5d2
+    sidecar_md5: aa2a9d104955c2d1eecfa092907191fe
+  archive_note: ''
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 100.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 100.0
+      z_out_acceleration_mm_s2: 500.0
+  status: unmapped
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+- name: fixed tip 0.05 - 1ul
+  source_archive:
+    filename: fixed tip 0.05 - 1ul.xml.roiZip
+    sha256: bdfe05d5d1eacfbda3bfefaf38ddb1be94f1ccb684595b8342aaf6152f7225cc
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.1
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.100000'
+    embedded_md5: c44b1ea0081a7a27b29f72cc0d0b0320
+    sidecar_md5: 0bfd71fac2c3387a9d591de500b2da81
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 1.0
+      w_acceleration_ul_s2: 5.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 5.0
+    dispense:
+      w_velocity_ul_s: 1.0
+      w_acceleration_ul_s2: 1.0
+      post_delay_ms: 2100
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 5.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_13d05768d5
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_F_50
+    tip_id: ''
+    tip_capacity_ul: 1.0
+  differences: []
+- name: fixed tip 1 - 3ul
+  source_archive:
+    filename: fixed tip 1 - 3ul.xml.roiZip
+    sha256: 9b6697da7fdc868f06b87ea70b45cf19fd0acda7a7cd99d39cdcee34b98f29a9
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 8abcf2192d3ac99ee5e52541dfd8a866
+    sidecar_md5: 67859b91be452c7520972beefb2607e2
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 1.0
+      w_acceleration_ul_s2: 5.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 5.0
+    dispense:
+      w_velocity_ul_s: 1.0
+      w_acceleration_ul_s2: 1.0
+      post_delay_ms: 2100
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 5.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_3c6f5c9f9c
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_F_50
+    tip_id: ''
+    tip_capacity_ul: 3.0
+  differences: []
+- name: fixed tip 11 - 50ul
+  source_archive:
+    filename: fixed tip 11 - 50ul.xml.roiZip
+    sha256: a3a64fbf58c3ff5007910e103cd740934ed3c40dff49a8725e7902829f6d1cd5
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: b3fe1b87500026835da572e7b9080ea2
+    sidecar_md5: d96f75172719ff5da8a4e419e25f11e8
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 20.0
+      w_acceleration_ul_s2: 50.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 100.0
+    dispense:
+      w_velocity_ul_s: 10.0
+      w_acceleration_ul_s2: 30.0
+      post_delay_ms: 800
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 100.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_dbaef36463
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_F_50
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: fixed tip 3 - 10ul
+  source_archive:
+    filename: fixed tip 3 - 10ul.xml.roiZip
+    sha256: 2d6eb1355127453fb0d3ac3cd62f2af9b525c69aab0d3b5e98d8894a65c55a1e
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: f09aac3011f49986d0c300202a1aad51
+    sidecar_md5: fe15407e78f261f49d07458443c1f2ad
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 1.0
+      w_acceleration_ul_s2: 3.0
+      post_delay_ms: 500
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 30.0
+    dispense:
+      w_velocity_ul_s: 1.0
+      w_acceleration_ul_s2: 1.0
+      post_delay_ms: 1500
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 10.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_d8275b97c2
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_F_50
+    tip_id: ''
+    tip_capacity_ul: 10.0
+  differences: []
+- name: fixed tip 51 - 200ul
+  source_archive:
+    filename: fixed tip 51 - 200ul.xml.roiZip
+    sha256: e3934da30aa0a6d4e36ff064a21f10545276975142be61d87b5f73ca1c49735e
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: b9ab893208fd88fe9d26dda746768e2a
+    sidecar_md5: 8bf829fd1e5bfbb801a92ebdfbfed96c
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 20.0
+      w_acceleration_ul_s2: 50.0
+      post_delay_ms: 0
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 20.0
+      z_out_acceleration_mm_s2: 500.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 100.0
+      post_delay_ms: 800
+      z_in_velocity_mm_s: 6.0
+      z_in_acceleration_mm_s2: 500.0
+      z_out_velocity_mm_s: 20.0
+      z_out_acceleration_mm_s2: 500.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_f5bfc35b85
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_F_200
+    tip_id: ''
+    tip_capacity_ul: 200.0
+  differences: []
+- name: fixed tip wash fast
+  source_archive:
+    filename: fixed tip wash fast.xml.roiZip
+    sha256: a7db3ebd082564916f861c02f3a5c984c9581c38b598946ea426debc7a4f1d93
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: a1a55da6949de0d53a3d2131080eb219
+    sidecar_md5: 2e34349e7d85e50864acce26935269a3
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 300
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 100.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 30.0
+    dispense:
+      w_velocity_ul_s: 50.0
+      w_acceleration_ul_s2: 500.0
+      post_delay_ms: 300
+      z_in_velocity_mm_s: 40.0
+      z_in_acceleration_mm_s2: 50.0
+      z_out_velocity_mm_s: 10.0
+      z_out_acceleration_mm_s2: 30.0
+  status: matched_preserved
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_742fb50a3d
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_F_50
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences: []
+- name: fixed tip wash slow
+  source_archive:
+    filename: fixed tip wash slow.xml.roiZip
+    sha256: 2583ecf1ac0dcedd9e535735b4cef4dc37ebb4678354a85d9162241f7c5f9918
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 41df5b29dfd227a2e18d50b3a49416ef
+    sidecar_md5: 02d874ba2d949e23c1728c7ac37955a1
+  archive_note: Enter description of new liquid type here
+  archive_motion:
+    aspirate:
+      w_velocity_ul_s: 15.0
+      w_acceleration_ul_s2: 20.0
+      post_delay_ms: 1000
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 200.0
+      z_out_velocity_mm_s: 30.0
+      z_out_acceleration_mm_s2: 10.0
+    dispense:
+      w_velocity_ul_s: 10.0
+      w_acceleration_ul_s2: 20.0
+      post_delay_ms: 200
+      z_in_velocity_mm_s: 100.0
+      z_in_acceleration_mm_s2: 200.0
+      z_out_velocity_mm_s: 5.0
+      z_out_acceleration_mm_s2: 1.0
+  status: matched_values_differ
+  needs_review:
+  - archive does not establish machine/head/tip or reagent/plate applicability
+  - tip ID is blank in existing catalog
+  catalog_id: liq_a8a34b8a49
+  catalog_binding:
+    machine_id: 04-91-62-CF-7B-B0
+    head_type: HT_96_F_50
+    tip_id: ''
+    tip_capacity_ul: 50.0
+  differences:
+  - field: aspirate.w_velocity_ul_s
+    catalog: 50.0
+    archive: 15.0
+  - field: aspirate.z_out_velocity_mm_s
+    catalog: 250.0
+    archive: 30.0
+  - field: aspirate.z_out_acceleration_mm_s2
+    catalog: 200.0
+    archive: 10.0
+  - field: dispense.z_out_velocity_mm_s
+    catalog: 150.0
+    archive: 5.0
+  - field: dispense.z_out_acceleration_mm_s2
+    catalog: 200.0
+    archive: 1.0
+summary:
+  archive_count: 48
+  status_counts:
+    unmapped: 26
+    matched_preserved: 20
+    matched_values_differ: 2
+  catalog_count: 47

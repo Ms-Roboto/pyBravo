@@ -77,6 +77,20 @@ class TestMotion:
         assert len(positions) == 6
         assert all(v == 0.0 for v in positions.values())
 
+    def test_strict_validation_can_skip_travel_delay_without_skipping_motion(self, sim, monkeypatch):
+        from pybravo.controllers import simulation as simulation_module
+
+        delays = []
+        with monkeypatch.context() as patch:
+            patch.setattr(simulation_module.time, "sleep", delays.append)
+            sim.move([AxisMoveInfo(axis=Axis.X, position=10.0, velocity=2.0)])
+            assert delays == [5.0]
+
+            sim.set_move_timing_enabled(False)
+            sim.move([AxisMoveInfo(axis=Axis.X, position=20.0, velocity=2.0)])
+            assert delays == [5.0]
+            assert sim.get_position(Axis.X) == 20.0
+
 
 class TestDeviceState:
     def test_query_state_clean(self, sim):

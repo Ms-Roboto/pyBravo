@@ -15,6 +15,7 @@ from pybravo.workflow.protocols.liquid_class_proposals import (
     LiquidClassProposalQuery,
     propose_liquid_classes,
 )
+from pybravo.workflow.protocols.methods import _digest
 
 MOTION = {
     "w_velocity_ul_s": 1.0,
@@ -133,6 +134,26 @@ def test_active_hardware_class_is_proposed_without_copying_or_qualifying_it(
     assert source.read_bytes() == before
 
 
+def test_archive_provenance_and_embedded_status_are_visible_without_qualifying_method(monkeypatch, tmp_path):
+    original = _class()
+    original["source_archive"] = {
+        "filename": "384 disposable tip 0.5 - 10ul.xml.roiZip",
+        "sha256": "a" * 64,
+        "roi_state": "IN_DEVELOPMENT",
+    }
+    _write_classes(monkeypatch, tmp_path, [original])
+    active = liquid_classes.list_liquid_classes(machine_id="physical-bravo", head_type="HT_384_D_70")
+
+    candidate = propose_liquid_classes(
+        _context(controller_type="simulation", machine_id="physical-bravo", liquid_classes=active),
+        _query(),
+    )["candidates"][0]
+
+    assert candidate["provenance"]["source_archive"] == original["source_archive"]
+    assert any("IN_DEVELOPMENT" in note for note in candidate["caveats"])
+    assert candidate["execution_ready"] is False
+
+
 def test_no_cross_profile_proposal_on_physical_controller_or_without_exact_tip(monkeypatch, tmp_path):
     _write_classes(monkeypatch, tmp_path, [_class()])
     assert propose_liquid_classes(_context(controller_type="agile"), _query())["candidates"] == []
@@ -159,6 +180,76 @@ def test_proposals_rank_nearby_recorded_control_point_without_claiming_liquid_su
     assert candidates[0]["score_scope"] == "calibration_control_point_proximity_only"
     assert "does not establish reagent or plate suitability" in candidates[0]["ranking_reason"]
     assert candidates[0]["execution_ready"] is False
+
+
+def test_scientist_named_class_is_ranked_before_unrelated_calibration_points(monkeypatch, tmp_path):
+    chosen = _class("scientist-chosen")
+    chosen["name"] = "Named class"
+    other = _class("closer-point")
+    other["name"] = "Unrelated class"
+    other["equation"]["control_points"].insert(1, {"desired_ul": 5.0, "commanded_ul": 5.0})
+    class_path = _write_classes(monkeypatch, tmp_path, [chosen, other])
+    chosen_digest = _digest(chosen)
+    method_path = tmp_path / "protocol_methods.yaml"
+    method_path.write_text(yaml.safe_dump({
+        "version": 1,
+        "methods": [{
+            "method_id": "candidate:dmso-pp-ldv", "version": "0.1.0",
+            "status": "reference_candidate", "title": "Scientist-reported class pairing",
+            "applicability": {
+                "machine_ids": ["physical-bravo"], "head_types": ["HT_384_D_70"],
+                "tip_ids": ["st_10ul"], "source_labware_ids": ["labcyte-pp"],
+                "destination_labware_ids": ["labcyte-ldv"],
+                "reagent_ids": ["neat DMSO"],
+                "reagent_families": ["DMSO"], "min_volume_ul": 5.0, "max_volume_ul": 5.0,
+            },
+            "aspirate": {"liquid_class_ref": {"id": "scientist-chosen", "digest": chosen_digest}},
+            "dispense": {"liquid_class_ref": {"id": "scientist-chosen", "digest": chosen_digest}},
+            "evidence": [{"source_type": "scientist_statement", "note": "Class was named for this liquid."}],
+        }],
+    }), encoding="utf-8")
+
+    candidates = propose_liquid_classes(_context(), _query(reagent_id="neat DMSO"))["candidates"]
+    assert [row["liquid_class_id"] for row in candidates] == ["scientist-chosen", "closer-point"]
+    assert candidates[0]["score_scope"] == "scientist_statement_match_only"
+    assert candidates[0]["application_statement"]["method_id"] == "candidate:dmso-pp-ldv"
+    assert candidates[0]["execution_ready"] is False
+
+    diluted = propose_liquid_classes(_context(), _query(reagent_id="5% DMSO"))["candidates"]
+    assert [row["liquid_class_id"] for row in diluted] == ["closer-point", "scientist-chosen"]
+    assert all("application_statement" not in row for row in diluted)
+
+    unspecified = propose_liquid_classes(_context(), _query())["candidates"]
+    assert all("application_statement" not in row for row in unspecified)
+
+    # A later edit to motion settings must not inherit the old scientist claim.
+    chosen["aspirate"]["w_velocity_ul_s"] = 2.0
+    class_path.write_text(yaml.safe_dump({"version": 1, "liquid_classes": [chosen, other]}),
+                          encoding="utf-8")
+    changed = propose_liquid_classes(_context(), _query(reagent_id="neat DMSO"))["candidates"]
+    assert [row["liquid_class_id"] for row in changed] == ["closer-point", "scientist-chosen"]
+    assert all("application_statement" not in row for row in changed)
+
+
+def test_volume_and_plate_geometry_propose_source_height_but_leave_near_full_ldv_unresolved(monkeypatch, tmp_path):
+    _write_classes(monkeypatch, tmp_path, [_class()])
+    context = _context(labware=[
+        {"id": "labcyte-pp", "well_depth_mm": 11.4, "well_diameter_mm": 3.5,
+         "well_volume_ul": 130.0, "well_geometry": "square"},
+        {"id": "labcyte-ldv", "well_depth_mm": 5.2, "well_diameter_mm": 1.7,
+         "well_volume_ul": 5.5, "well_geometry": "square"},
+    ])
+    candidate = propose_liquid_classes(context, _query(
+        source_initial_volume_ul=45.0, source_dead_volume_ul=6.5,
+        total_source_withdrawal_ul=10.0, destination_initial_volume_ul=0.0,
+    ))["candidates"][0]
+
+    geometry = candidate["geometry_proposal"]
+    assert geometry["aspirate"]["distance_from_bottom_mm"] == pytest.approx(1.694)
+    assert geometry["dispense"]["status"] == "unresolved"
+    assert geometry["dispense"]["distance_from_bottom_mm"] is None
+    assert geometry["aspirate"]["motion"]["z_in_velocity_mm_s"] == 30.0
+    assert geometry["physical_safety_established"] is False
 
 
 def test_related_publication_is_context_only_not_numeric_class_provenance(monkeypatch, tmp_path):

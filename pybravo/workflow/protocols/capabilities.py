@@ -22,6 +22,7 @@ SCHEMA_VERSION = "0.3.0"
 _LABWARE_FIELDS = (
     "id", "name", "kind", "base_class", "wells", "rows", "cols",
     "spacing_x_mm", "spacing_y_mm", "well_volume_ul", "well_depth_mm",
+    "well_diameter_mm", "well_geometry",
     "dead_volume_ul", "dead_volume_status",
     "height_mm", "stack_height_mm", "provisional", "supported_tip_ids",
     "tip_definition_id", "compatible_head_types",

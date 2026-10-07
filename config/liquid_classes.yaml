@@ -5,7 +5,7 @@ liquid_classes:
   description: Enter description of new liquid type here
   machine_id: 04-91-62-CF-7B-B0
   head_type: HT_384_D_70
-  tip_id: ''
+  tip_id: st_10ul
   tip_capacity_ul: 10.0
   aspirate:
     w_velocity_ul_s: 1.0
@@ -29,6 +29,37 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 10.0
       commanded_ul: 10.0
+  source_archive:
+    filename: 384 disposable tip 0.5 - 10ul.xml.roiZip
+    sha256: 6535613db0d5b6fbab1362f1af9a92a6842c8b05462536399b63d597662c4067
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 9016a37f461623a3522a9aa9fc35ccff
+    sidecar_md5: 8e77e16885d28e2486def3ac83847a7b
+  field_origins:
+    tip_id: reviewed
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_638b36623d
   name: OQ_384st_highVol
   description: ''
@@ -58,6 +89,36 @@ liquid_classes:
       commanded_ul: 0.0799
     - desired_ul: 10.0
       commanded_ul: 10.3309
+  source_archive:
+    filename: OQ_384st_highVol.xml.roiZip
+    sha256: cc9fd236b82d03c7929baf79b23fb77898d35092ae998d94c7507b3f54135c62
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0799
+    - 1.0251
+    raw_coefficient_values:
+    - '0.079900'
+    - '1.025100'
+    embedded_md5: 165a7a2b06454dab5c3483b83aadc2c4
+    sidecar_md5: ddca4db29c979bdebadc8329889a7311
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_af39b84186
   name: OQ_384st_lowVol
   description: ''
@@ -87,6 +148,36 @@ liquid_classes:
       commanded_ul: 0.1026
     - desired_ul: 10.0
       commanded_ul: 10.6696
+  source_archive:
+    filename: OQ_384st_lowVol.xml.roiZip
+    sha256: 04048bc16d2bcef5e76e9a1578b9c6391742f332c1e05fb87c6b225ac54dc819
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.1026
+    - 1.0567
+    raw_coefficient_values:
+    - '0.102600'
+    - '1.056700'
+    embedded_md5: 0b59af51d3bf8dd49a001e92bd3866d2
+    sidecar_md5: ab495d294feab1e60c377d39b0cdb770
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_cf4e01f34b
   name: 384 disposable tip 10 - 50ul
   description: Enter description of new liquid type here
@@ -116,6 +207,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 50.0
       commanded_ul: 50.0
+  source_archive:
+    filename: 384 disposable tip 10 - 50ul.xml.roiZip
+    sha256: f478bb4a2f7da792db5eb228bc3587be8c7bd67d82b12da99782accba58400e1
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 38dd7627662874b3dbbee3597aad0794
+    sidecar_md5: 653e3c03257e85048c5a8358d33f935a
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_66d89a6738
   name: D10 384 Head 1-10
   description: ''
@@ -332,6 +453,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 200.0
       commanded_ul: 200.0
+  source_archive:
+    filename: 96 disposable tip 51 - 200ul.xml.roiZip
+    sha256: 0d53906c84344be29e95d283071f581bbaff2ba487007ade30996332e5082717
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: ec15dcd69471e832f7437ef0b379a9ef
+    sidecar_md5: 3c2310a8765583579c86d9d762917a9d
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_2183f6c67c
   name: 96 disposable tip 1 - 2ul
   description: Enter description of new liquid type here
@@ -361,6 +512,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 2.0
       commanded_ul: 2.0
+  source_archive:
+    filename: 96 disposable tip 1 - 2ul.xml.roiZip
+    sha256: d595a3f169f50b882cebc48c065c7560eb32c7250266a5d3215b846097c80c3a
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 08f35825fc2708fa9665b43f2e9369fe
+    sidecar_md5: 01d81bc635939eac8134a684749df340
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_cb7b8c94ec
   name: 96 disposable fast mix
   description: ''
@@ -651,6 +832,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 50.0
       commanded_ul: 47.89
+  source_archive:
+    filename: OQ_96AM_highVol.xml.roiZip
+    sha256: 151692b9b6b7ed13bd91af2af026dc0e4fc3f389b85020c25972025bd0818286
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 0.9578
+    raw_coefficient_values:
+    - '0.000000'
+    - '0.957800'
+    embedded_md5: b2931b5a81d8a51bc2ed4b3f9054985d
+    sidecar_md5: 1bdfc0bcecf1d44b644cec99c90b8af2
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_480897ab58
   name: OQ_96AM_lowVol
   description: ''
@@ -680,6 +891,36 @@ liquid_classes:
       commanded_ul: 0.167
     - desired_ul: 50.0
       commanded_ul: 52.437
+  source_archive:
+    filename: OQ_96AM_lowVol.xml.roiZip
+    sha256: f7ceab1af05b4872bbe17cbb289824082e8c88499b31f8b68b24a88a58202c47
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.167
+    - 1.0454
+    raw_coefficient_values:
+    - '0.167000'
+    - '1.045400'
+    embedded_md5: 7762c76da47dbe1fbc1695ca49681c9e
+    sidecar_md5: d85ea1e1152370e50795d576f63b58da
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_2b2aa98876
   name: OQ_96LT_highVol
   description: ''
@@ -709,6 +950,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 50.0
       commanded_ul: 50.37
+  source_archive:
+    filename: OQ_96LT_highVol.xml.roiZip
+    sha256: 3183ec73408f54c166c7b8342c974a51c7bf804a82e4f4ee7afd430fdda076bf
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 1.0074
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.007400'
+    embedded_md5: 5d4aaf2963d7d15fd98ef7dd3f0d91c8
+    sidecar_md5: 1fa782ceb62375ab8cc8c3a0945bc88e
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_498d6654aa
   name: OQ_96LT_lowVol
   description: ''
@@ -738,6 +1009,36 @@ liquid_classes:
       commanded_ul: 0.0033
     - desired_ul: 50.0
       commanded_ul: 52.7183
+  source_archive:
+    filename: OQ_96LT_lowVol.xml.roiZip
+    sha256: b65e13bd337fa527ee442292be24a646313ae21b6d0a7a761e9e45a2172f1d7f
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0033
+    - 1.0543
+    raw_coefficient_values:
+    - '0.003300'
+    - '1.054300'
+    embedded_md5: cf87a689be996668ea32cac1f589d3e8
+    sidecar_md5: e0e2acf2838724be9e2a31ac35f237a3
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_c6e418240a
   name: OQ_96st_highVol
   description: ''
@@ -767,6 +1068,36 @@ liquid_classes:
       commanded_ul: 0.0799
     - desired_ul: 50.0
       commanded_ul: 51.3349
+  source_archive:
+    filename: OQ_96st_highVol.xml.roiZip
+    sha256: d01e33dcaaf8fd33fe972ac907e8766ea50d8c99092aad9b8dcf99eefa79bc70
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0799
+    - 1.0251
+    raw_coefficient_values:
+    - '0.079900'
+    - '1.025100'
+    embedded_md5: 6254c926529e290716e503b7cac25ff4
+    sidecar_md5: 592f7a653d661ec987423ee0490c084e
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_98e6c996e9
   name: OQ_96st_lowVol
   description: ''
@@ -796,6 +1127,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 50.0
       commanded_ul: 53.21
+  source_archive:
+    filename: OQ_96st_lowVol.xml.roiZip
+    sha256: 630a652fad7e6b2ae58e732877ba3247381b88dd4b6e17e3a5c816f666f79f24
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 1.0642
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.064200'
+    embedded_md5: 7538c991e7fa9ec667afbaa13695f632
+    sidecar_md5: 3c2c1c186015ea6f4f13c468f9809a69
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_a86c990321
   name: OQ_AM_100uLperSec
   description: ''
@@ -825,6 +1186,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 50.0
       commanded_ul: 50.0
+  source_archive:
+    filename: OQ_AM_100uLperSec.xml.roiZip
+    sha256: f8d335b8a9bc0d786fa32cda5df2b9163eb5a98d69fe0bdceaac2514d0871965
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: b9dddf5ee4c9d578a4a50f5241cf67d4
+    sidecar_md5: 4fcc18e652f2176d8bd017cdcf45b234
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_3a22f264d8
   name: OQ_AM_100uLperSec_delay_after_aspirate
   description: ''
@@ -854,6 +1245,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 50.0
       commanded_ul: 50.0
+  source_archive:
+    filename: OQ_AM_100uLperSec_delay_after_aspirate.xml.roiZip
+    sha256: 277604a5b836aecc5dba0419193502a179138d03241482a2444466f6c14dd09d
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: null
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 29778c2cba996fa0a94f772e7824953d
+    sidecar_md5: 71d52268d9928c11628904f7d665e005
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_97ae4cc9af
   name: SPRI Beads
   description: '"Calibrated by R. Keyser 09/2017'
@@ -999,6 +1420,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 200.0
       commanded_ul: 200.0
+  source_archive:
+    filename: fixed tip 51 - 200ul.xml.roiZip
+    sha256: e3934da30aa0a6d4e36ff064a21f10545276975142be61d87b5f73ca1c49735e
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: b9ab893208fd88fe9d26dda746768e2a
+    sidecar_md5: 8bf829fd1e5bfbb801a92ebdfbfed96c
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_13d05768d5
   name: fixed tip 0.05 - 1ul
   description: Enter description of new liquid type here
@@ -1028,6 +1479,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 1.0
       commanded_ul: 1.1
+  source_archive:
+    filename: fixed tip 0.05 - 1ul.xml.roiZip
+    sha256: bdfe05d5d1eacfbda3bfefaf38ddb1be94f1ccb684595b8342aaf6152f7225cc
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.1
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.100000'
+    embedded_md5: c44b1ea0081a7a27b29f72cc0d0b0320
+    sidecar_md5: 0bfd71fac2c3387a9d591de500b2da81
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_3c6f5c9f9c
   name: fixed tip 1 - 3ul
   description: Enter description of new liquid type here
@@ -1057,6 +1538,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 3.0
       commanded_ul: 3.0
+  source_archive:
+    filename: fixed tip 1 - 3ul.xml.roiZip
+    sha256: 9b6697da7fdc868f06b87ea70b45cf19fd0acda7a7cd99d39cdcee34b98f29a9
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: 8abcf2192d3ac99ee5e52541dfd8a866
+    sidecar_md5: 67859b91be452c7520972beefb2607e2
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_d8275b97c2
   name: fixed tip 3 - 10ul
   description: Enter description of new liquid type here
@@ -1086,6 +1597,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 10.0
       commanded_ul: 10.0
+  source_archive:
+    filename: fixed tip 3 - 10ul.xml.roiZip
+    sha256: 2d6eb1355127453fb0d3ac3cd62f2af9b525c69aab0d3b5e98d8894a65c55a1e
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: f09aac3011f49986d0c300202a1aad51
+    sidecar_md5: fe15407e78f261f49d07458443c1f2ad
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_dbaef36463
   name: fixed tip 11 - 50ul
   description: Enter description of new liquid type here
@@ -1115,6 +1656,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 50.0
       commanded_ul: 50.0
+  source_archive:
+    filename: fixed tip 11 - 50ul.xml.roiZip
+    sha256: a3a64fbf58c3ff5007910e103cd740934ed3c40dff49a8725e7902829f6d1cd5
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: b3fe1b87500026835da572e7b9080ea2
+    sidecar_md5: d96f75172719ff5da8a4e419e25f11e8
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_742fb50a3d
   name: fixed tip wash fast
   description: Enter description of new liquid type here
@@ -1144,6 +1715,36 @@ liquid_classes:
       commanded_ul: 0.0
     - desired_ul: 50.0
       commanded_ul: 50.0
+  source_archive:
+    filename: fixed tip wash fast.xml.roiZip
+    sha256: a7db3ebd082564916f861c02f3a5c984c9581c38b598946ea426debc7a4f1d93
+    roi_state: IN_DEVELOPMENT
+    xml_version: '1.0'
+    entry_version: '2'
+    raw_coefficients:
+    - 0.0
+    - 1.0
+    raw_coefficient_values:
+    - '0.000000'
+    - '1.000000'
+    embedded_md5: a1a55da6949de0d53a3d2131080eb219
+    sidecar_md5: 2e34349e7d85e50864acce26935269a3
+  field_origins:
+    aspirate.w_velocity_ul_s: imported_config
+    aspirate.w_acceleration_ul_s2: imported_config
+    aspirate.post_delay_ms: imported_config
+    aspirate.z_in_velocity_mm_s: imported_config
+    aspirate.z_in_acceleration_mm_s2: imported_config
+    aspirate.z_out_velocity_mm_s: imported_config
+    aspirate.z_out_acceleration_mm_s2: imported_config
+    dispense.w_velocity_ul_s: imported_config
+    dispense.w_acceleration_ul_s2: imported_config
+    dispense.post_delay_ms: imported_config
+    dispense.z_in_velocity_mm_s: imported_config
+    dispense.z_in_acceleration_mm_s2: imported_config
+    dispense.z_out_velocity_mm_s: imported_config
+    dispense.z_out_acceleration_mm_s2: imported_config
+    equation.control_points: imported_config
 - liquid_class_id: liq_07fae07b68
   name: fixed tip wash fast 2
   description: Enter description of new liquid type here
@@ -1204,7 +1805,8 @@ liquid_classes:
       commanded_ul: 50.0
 - liquid_class_id: liq_opp_spri_beads
   name: SPRI Beads
-  description: 'Adapted from HT_96_D_70 calibration (R. Keyser 09/2017) for Opportunity HT_96_D_200 / lt_250ul'
+  description: Adapted from HT_96_D_70 calibration (R. Keyser 09/2017) for Opportunity
+    HT_96_D_200 / lt_250ul
   machine_id: SIM_OPPORTUNITY
   head_type: HT_96_D_200
   tip_id: lt_250ul
@@ -1233,7 +1835,7 @@ liquid_classes:
       commanded_ul: 53.5803
 - liquid_class_id: liq_opp_disp_tip2_50ul
   name: 96 disposable tip 2 - 50ul
-  description: 'Adapted from HT_96_D_70 for Opportunity HT_96_D_200 / lt_250ul'
+  description: Adapted from HT_96_D_70 for Opportunity HT_96_D_200 / lt_250ul
   machine_id: SIM_OPPORTUNITY
   head_type: HT_96_D_200
   tip_id: lt_250ul
@@ -1262,7 +1864,7 @@ liquid_classes:
       commanded_ul: 250.0
 - liquid_class_id: liq_opp_etoh
   name: EtOH
-  description: 'Adapted from HT_96_D_70 for Opportunity HT_96_D_200 / lt_250ul'
+  description: Adapted from HT_96_D_70 for Opportunity HT_96_D_200 / lt_250ul
   machine_id: SIM_OPPORTUNITY
   head_type: HT_96_D_200
   tip_id: lt_250ul
@@ -1291,7 +1893,8 @@ liquid_classes:
       commanded_ul: 250.0
 - liquid_class_id: liq_opp_200ul_water
   name: 96 disposable tip 5 - 200ul Water
-  description: 'Adapted from 04-91-62 calibration (R. Keyser 09/2017) for Opportunity HT_96_D_200 / lt_250ul'
+  description: Adapted from 04-91-62 calibration (R. Keyser 09/2017) for Opportunity
+    HT_96_D_200 / lt_250ul
   machine_id: SIM_OPPORTUNITY
   head_type: HT_96_D_200
   tip_id: lt_250ul
@@ -1320,7 +1923,7 @@ liquid_classes:
       commanded_ul: 250.0
 - liquid_class_id: liq_opp_200ul_water_slow
   name: 96 disposable tip 5 - 200ul Water (slow)
-  description: 'Adapted from 04-91-62 calibration for Opportunity HT_96_D_200 / lt_250ul'
+  description: Adapted from 04-91-62 calibration for Opportunity HT_96_D_200 / lt_250ul
   machine_id: SIM_OPPORTUNITY
   head_type: HT_96_D_200
   tip_id: lt_250ul
@@ -1349,7 +1952,7 @@ liquid_classes:
       commanded_ul: 250.0
 - liquid_class_id: liq_opp_fast_mix
   name: 96 disposable fast mix
-  description: 'Adapted from HT_96_D_70 for Opportunity HT_96_D_200 / lt_250ul'
+  description: Adapted from HT_96_D_70 for Opportunity HT_96_D_200 / lt_250ul
   machine_id: SIM_OPPORTUNITY
   head_type: HT_96_D_200
   tip_id: lt_250ul

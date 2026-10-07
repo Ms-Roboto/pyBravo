@@ -522,6 +522,63 @@ assert.deepEqual(liquidClassProposalQueries(),[]);
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
 
 
+def test_geometry_proposal_requires_analyzable_source_use_and_disjoint_destination_writes(tmp_path):
+    html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
+    functions = []
+    for name in ("sharedProposalTipRack", "liquidClassProposalQueries"):
+        match = re.search(rf"function {name}\([^\n]*\)\{{[\s\S]*?\n\}}", html)
+        assert match, name
+        functions.append(match[0])
+    source = (
+        """
+const assert=require('node:assert/strict');
+const list=value=>Array.isArray(value)?value:[];
+const state={session:{setup:{tip_rack_ids:['rack'],head_mode:{subset_type:'all_barrels'}},
+  plan:{materials:[
+    {id:'source',role:'liquid',labware_id:'pp',reagent_id:'neat DMSO',
+      reagent_family:'DMSO',initial_volume_ul:45,dead_volume_ul:6.5},
+    {id:'dest',role:'liquid',labware_id:'ldv',initial_volume_ul:0},
+    {id:'rack',role:'tips',labware_id:'stbox',tip_definition_id:'st_10ul'}],steps:[]}},
+  context:{head_type:'HT_384_D_70',
+    tipbox_choices:[{labware_id:'stbox',tip_definition_id:'st_10ul',execution_ready:true}],
+    labware:[{id:'ldv',wells:1536,rows:32,cols:48,spacing_x_mm:2.25,spacing_y_mm:2.25}]}};
+function methodQuery(step){return {tip_id:'st_10ul',volume_ul:5,reagent_id:'neat DMSO',
+  reagent_family:'DMSO',source_labware_id:'pp',destination_labware_id:'ldv'};}
+const transfer=anchor=>({kind:'transfer',source:'source',source_anchor:'A1',
+  destination:'dest',destination_anchor:anchor,volume_ul:5});
+"""
+        + "\n".join(functions)
+        + """
+state.session.plan.steps=[transfer('A1'),transfer('A2')];
+let rows=liquidClassProposalQueries();
+assert.equal(rows.length,1);
+assert.equal(rows[0].step_count,2);
+assert.equal(rows[0].query.total_source_withdrawal_ul,10);
+assert.equal(rows[0].query.destination_initial_volume_ul,0);
+
+state.session.plan.steps.push({kind:'distribute',source:'source',source_anchor:'A1',
+  dispenses:[{destination:'dest',volume_ul:1}]});
+rows=liquidClassProposalQueries();
+assert.ok(rows.every(row=>row.query.source_initial_volume_ul===undefined),
+  'A transfer-plus-distribute source cannot use an understated residual estimate');
+
+state.session.plan.steps=[transfer('A1'),transfer('A1')];
+rows=liquidClassProposalQueries();
+assert.equal(rows[0].query.destination_initial_volume_ul,undefined,
+  'Repeated writes to one destination footprint cannot use starting volume as final occupancy');
+
+state.session.plan.steps=[transfer('A1'),transfer('A2')];
+state.context.labware[0].wells=384;
+rows=liquidClassProposalQueries();
+assert.equal(rows[0].query.destination_initial_volume_ul,undefined,
+  'Distinct anchors alone do not prove disjoint footprints for arbitrary plates');
+"""
+    )
+    script = tmp_path / "geometry-volume-use.cjs"
+    script.write_text(source)
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
 def test_bulk_setup_proposals_only_fill_review_draft_choices(tmp_path):
     html = (ROOT / "frontend" / "protocol_assistant.html").read_text()
     functions = []

@@ -3,6 +3,41 @@
 # technique, provenance, and an exact tip identity for a method.
 version: 1
 methods:
+  - method_id: candidate:384st10-neat-dmso-pp-ldv-5ul
+    version: 0.1.0
+    status: reference_candidate
+    title: Scientist-reported 384ST10 class for 5 µL neat DMSO, Labcyte PP to LDV
+    applicability:
+      machine_ids: [04-91-62-CF-7B-B0]
+      head_types: [HT_384_D_70]
+      tip_ids: [st_10ul]
+      tipbox_ids: [lw-4914769d0af7]
+      source_labware_ids: [01KD4PYY7N4EG0E22P3QP1RHB9]
+      destination_labware_ids: [lw-3918306f45b8]
+      reagent_ids: [neat DMSO]
+      reagent_families: [DMSO]
+      operations: [transfer]
+      min_volume_ul: 5.0
+      max_volume_ul: 5.0
+    aspirate:
+      liquid_class_ref:
+        id: liq_89aeface22
+        name: 384 disposable tip 0.5 - 10ul
+        digest: 57b8836d7797c21e3a7cde879536a81f2500a776ff686bd719408c9ddf2618ae
+    dispense:
+      liquid_class_ref:
+        id: liq_89aeface22
+        name: 384 disposable tip 0.5 - 10ul
+        digest: 57b8836d7797c21e3a7cde879536a81f2500a776ff686bd719408c9ddf2618ae
+    tip_policy: fresh_per_source
+    evidence:
+      - source_type: scientist_statement
+        retrieved_at: '2026-10-06'
+        note: Scientist identified this archive class as validated for 5 µL neat DMSO with 384 ST10 tips from Labcyte PP to LDV plates. The supplied archive itself does not contain reagent, plate, height, validation run, or reviewer details. The class's numeric motion settings are recorded separately; this method candidate needs phase-specific height and technique review before it can be used for physical execution.
+      - source_type: local_config
+        source_path: config/liquid_classes.yaml
+        source_digest: 6535613db0d5b6fbab1362f1af9a92a6842c8b05462536399b63d597662c4067
+        note: SHA-256 of the supplied original ROI ZIP, recorded with the reconciled class. Its embedded ROIState is IN_DEVELOPMENT; the scientist's validation claim is external to the archive.
   - method_id: reference:agilent-384st10-1536
     version: 1.0.0
     status: reference_candidate

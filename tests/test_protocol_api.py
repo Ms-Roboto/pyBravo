@@ -12,6 +12,7 @@ import pytest
 from fastapi import HTTPException
 
 from pybravo.bravo import Bravo
+from pybravo.controllers.simulation import SimulationController
 from pybravo.web import server
 from pybravo.workflow.protocols import api
 from pybravo.workflow.protocols import setup_recommendations as setup_recommendations_module
@@ -62,6 +63,28 @@ async def simulate_and_approve(client, session):
         "qualification": "qualification_run", "revision": session["revision"], "notes": "Synthetic test only"})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+@pytest.mark.asyncio
+async def test_strict_protocol_simulation_disables_travel_delay_but_completes_tasks(environment, monkeypatch):
+    calls = []
+    original = SimulationController.set_move_timing_enabled
+
+    def record_timing_choice(self, enabled):
+        calls.append(enabled)
+        original(self, enabled)
+
+    monkeypatch.setattr(SimulationController, "set_move_timing_enabled", record_timing_choice)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+        session = await session_with_plan(client)
+        identity = session["id"]
+        response = await client.post(f"/api/protocols/{identity}/simulate")
+        assert response.status_code == 200, response.text
+        await asyncio.wait_for(api._simulations[identity], timeout=10)
+        saved = (await client.get(f"/api/protocols/{identity}")).json()
+    assert calls == [False]
+    assert saved["simulation"]["status"] == "passed"
+    assert saved["simulation"]["events"][-1]["type"] == "workflow:complete"
 
 
 @pytest.mark.asyncio
