@@ -160,6 +160,15 @@ def _cross_well_aspiration_risks(events: list[dict]) -> list[dict]:
     return findings
 
 
+def _runlog_payload(output: Path, stdout: str) -> dict:
+    """Accept the pinned logger's file or stdout JSON transport."""
+    raw = output.read_text(encoding="utf-8") if output.is_file() else stdout
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("runlog response is not a JSON object")
+    return payload
+
+
 def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
                      dataset_root: Path | None, labware_dir: Path | None = None,
                      instruction: str | None = None) -> dict:
@@ -185,7 +194,7 @@ def _official_runlog(task: str, protocol: Path, task_dir: Path, simulator: Path,
         try:
             completed = subprocess.run(command, capture_output=True, text=True, timeout=600,
                                        env=_local_env(), check=False)
-            payload = json.loads(output.read_text(encoding="utf-8"))
+            payload = _runlog_payload(output, completed.stdout)
         except (subprocess.TimeoutExpired, OSError, ValueError) as exc:
             return {"status": "error", "source_sha256": _digest(source),
                     "detail": f"{type(exc).__name__}: {exc}"[-1500:]}

@@ -247,3 +247,12 @@ def test_event_audit_flags_cross_sample_aspiration_but_not_stock_distribution():
         "tip_number": 2, "instrument": "p300", "labware": "sample on 1",
         "distinct_wells": 2, "example_wells": ["A1", "B1"],
     }]
+
+
+def test_pinned_runlog_can_return_json_on_stdout_or_in_output_file(tmp_path):
+    output = tmp_path / "result.json"
+    stdout_payload = {"ok": True, "events": [{"kind": "pick"}]}
+    file_payload = {"ok": True, "events": [{"kind": "drop"}]}
+    assert runner._runlog_payload(output, json.dumps(stdout_payload)) == stdout_payload
+    output.write_text(json.dumps(file_payload), encoding="utf-8")
+    assert runner._runlog_payload(output, json.dumps(stdout_payload)) == file_payload
