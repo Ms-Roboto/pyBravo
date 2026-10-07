@@ -9,6 +9,7 @@ are physically admissible. No reagent choice, volume, or step is inferred here.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Annotated, Literal, Mapping
 
@@ -69,7 +70,27 @@ class Pause(_Strict):
     message: str = Field(min_length=1)
 
 
-Action = Annotated[Pickup | Drop | Stroke | Mix | Delay | Pause, Field(discriminator="kind")]
+PrimitiveAction = Annotated[
+    Pickup | Drop | Stroke | Mix | Delay | Pause, Field(discriminator="kind")
+]
+
+
+class ForEach(_Strict):
+    """Repeat explicit actions over model-supplied well-name bindings.
+
+    A body may use a whole-well placeholder such as ``$source_well``. The
+    compiler does not derive any source/destination pairing or volume.
+    """
+
+    kind: Literal["for_each"]
+    bindings: list[dict[str, str]] = Field(min_length=1, max_length=384)
+    actions: list[PrimitiveAction] = Field(min_length=1, max_length=32)
+
+
+Action = Annotated[
+    Pickup | Drop | Stroke | Mix | Delay | Pause | ForEach,
+    Field(discriminator="kind"),
+]
 
 
 class ActionPlan(_Strict):
@@ -88,6 +109,9 @@ class LabwareFacts:
     is_tiprack: bool = False
     tip_capacity_ul: float | None = None
     multichannel_compatible: bool = False
+    # Trusted anchors for an entire multichannel pickup. A boolean alone does
+    # not establish that B1 or an irregular column is a valid 8-channel anchor.
+    multichannel_anchor_wells: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -101,11 +125,63 @@ class ActionPlanError(ValueError):
     """The proposed action sequence violates a known structural constraint."""
 
 
+_MAX_EXPANDED_ACTIONS = 10_000
+_BINDING_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_WELL_PLACEHOLDER = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)\Z")
+
+
+def _expand_actions(plan: ActionPlan) -> tuple[list[PrimitiveAction], list[str]]:
+    """Expand finite, flat bindings and retain paths for actionable errors."""
+    expanded: list[PrimitiveAction] = []
+    paths: list[str] = []
+    for index, action in enumerate(plan.actions):
+        path = f"actions[{index}]"
+        if not isinstance(action, ForEach):
+            expanded.append(action)
+            paths.append(path)
+            continue
+        names = set(action.bindings[0])
+        if not names or any(_BINDING_NAME.fullmatch(name) is None for name in names):
+            raise ActionPlanError(f"{path} has invalid or absent binding names.")
+        used: set[str] = set()
+        for body_index, item in enumerate(action.actions):
+            if isinstance(item, (Stroke, Mix)) and item.well.startswith("$"):
+                matched = _WELL_PLACEHOLDER.fullmatch(item.well)
+                if matched is None or matched.group(1) not in names:
+                    raise ActionPlanError(
+                        f"{path}.actions[{body_index}] uses an unknown well binding {item.well!r}."
+                    )
+                used.add(matched.group(1))
+        if used != names:
+            raise ActionPlanError(f"{path} has unused well bindings: {sorted(names - used)}.")
+        if len(expanded) + len(action.bindings) * len(action.actions) > _MAX_EXPANDED_ACTIONS:
+            raise ActionPlanError(f"{path} exceeds the {_MAX_EXPANDED_ACTIONS} action expansion limit.")
+        for binding_index, binding in enumerate(action.bindings):
+            if set(binding) != names or any(not value for value in binding.values()):
+                raise ActionPlanError(
+                    f"{path}.bindings[{binding_index}] must supply the same nonempty well names."
+                )
+            for body_index, item in enumerate(action.actions):
+                if isinstance(item, (Stroke, Mix)) and item.well.startswith("$"):
+                    symbol = _WELL_PLACEHOLDER.fullmatch(item.well)
+                    assert symbol is not None
+                    item = item.model_copy(update={"well": binding[symbol.group(1)]})
+                expanded.append(item)
+                paths.append(f"{path}.bindings[{binding_index}].actions[{body_index}]")
+    if len(expanded) > _MAX_EXPANDED_ACTIONS:
+        raise ActionPlanError(f"Plan exceeds the {_MAX_EXPANDED_ACTIONS} action expansion limit.")
+    return expanded, paths
+
+
 def _facts_are_valid(labware: Mapping[str, LabwareFacts],
                      pipettes: Mapping[str, PipetteFacts]) -> None:
     for name, facts in labware.items():
         if not facts.wells:
             raise ValueError(f"Trusted labware {name!r} has no wells.")
+        if not facts.multichannel_anchor_wells <= facts.wells:
+            raise ValueError(f"Trusted labware {name!r} has an anchor outside its well set.")
+        if facts.multichannel_anchor_wells and not facts.multichannel_compatible:
+            raise ValueError(f"Trusted labware {name!r} marks anchors as incompatible.")
         if facts.is_tiprack and (facts.tip_capacity_ul is None or
                                  not math.isfinite(facts.tip_capacity_ul) or
                                  facts.tip_capacity_ul <= 0):
@@ -126,16 +202,18 @@ def compile_actions(
 ) -> str:
     """Validate and lower explicit actions to fixed Opentrons API primitives.
 
-    This first slice supports direct liquid primitives, tip pickup/disposal,
-    delays, and operator pauses. It deliberately has no loops, module controls,
-    deck moves, refill semantics, or scientific source interpretation. Such a
-    protocol must still pass simulator, event, and scientific gates before use.
+    This slice supports direct liquid primitives, finite mapping expansion,
+    tip pickup/disposal, delays, and operator pauses. It deliberately has no
+    module controls, deck moves, refill semantics, or scientific source
+    interpretation. The output must still pass simulator, event, and science
+    gates before use.
     """
     try:
         plan = raw if isinstance(raw, ActionPlan) else ActionPlan.model_validate(raw)
     except ValidationError as exc:
         raise ActionPlanError(str(exc)) from exc
     _facts_are_valid(labware_catalog, pipette_catalog)
+    expanded_actions, action_paths = _expand_actions(plan)
 
     loads: dict[str, LabwareLoad] = {}
     slots: set[int] = set()
@@ -175,10 +253,12 @@ def compile_actions(
             facts = labware_catalog[rack.load_name]
             if not facts.is_tiprack or facts.tip_capacity_ul is None:
                 raise ActionPlanError(f"{rack_id!r} is not a trusted tip rack.")
-            if specs.channels > 1 and not facts.multichannel_compatible:
+            if specs.channels > 1 and (not facts.multichannel_compatible or
+                                        not facts.multichannel_anchor_wells):
                 raise ActionPlanError(f"Tip rack {rack_id!r} is not multichannel compatible.")
             capacities.append(facts.tip_capacity_ul)
-            pickups += len(facts.wells) // specs.channels
+            pickups += (len(facts.multichannel_anchor_wells) if specs.channels > 1
+                        else len(facts.wells))
             assigned_racks.add(rack_id)
         upper = min(specs.max_volume_ul, *capacities)
         if upper < specs.min_volume_ul:
@@ -192,8 +272,7 @@ def compile_actions(
     # compiled into a runnable file.
     attached = {name: False for name in instruments}
     held = {name: 0.0 for name in instruments}
-    for index, action in enumerate(plan.actions):
-        path = f"actions[{index}]"
+    for action, path in zip(expanded_actions, action_paths, strict=True):
         if isinstance(action, (Delay, Pause)):
             continue
         if action.pipette not in instruments:
@@ -221,8 +300,11 @@ def compile_actions(
         facts = labware_catalog[item.load_name]
         if facts.is_tiprack or action.well not in facts.wells:
             raise ActionPlanError(f"{path} names an invalid liquid well {action.well!r}.")
-        if pipette_catalog[instruments[name].model].channels > 1 and not facts.multichannel_compatible:
-            raise ActionPlanError(f"{path} uses a multichannel head on incompatible labware.")
+        if pipette_catalog[instruments[name].model].channels > 1 and (
+            not facts.multichannel_compatible or
+            action.well not in facts.multichannel_anchor_wells
+        ):
+            raise ActionPlanError(f"{path} uses an invalid multichannel column anchor.")
         minimum, maximum = effective_ranges[name]
         if not minimum <= action.volume_ul <= maximum:
             raise ActionPlanError(
@@ -257,7 +339,7 @@ def compile_actions(
         racks = ", ".join(var_by_labware[rack] for rack in item.tip_rack_ids)
         lines.append(f"    {var_by_pipette[item.id]} = protocol.load_instrument("
                      f"{item.model!r}, {item.mount!r}, tip_racks=[{racks}])")
-    for action in plan.actions:
+    for action in expanded_actions:
         if isinstance(action, Delay):
             lines.append(f"    protocol.delay(seconds={action.seconds!r})")
         elif isinstance(action, Pause):
@@ -274,6 +356,6 @@ def compile_actions(
                     lines.append(f"    {pip}.mix({action.cycles!r}, {action.volume_ul!r}, {well})")
                 else:
                     lines.append(f"    {pip}.{action.kind}({action.volume_ul!r}, {well})")
-    if not plan.actions and not plan.labware and not plan.pipettes:
+    if not expanded_actions and not plan.labware and not plan.pipettes:
         lines.append("    pass")
     return "\n".join(lines) + "\n"
