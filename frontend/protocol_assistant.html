@@ -1921,7 +1921,8 @@ function readinessIssueGroup(issue){
         return 'Confirm rack and tip pairing';
     if(/\/materials\/\d+\/(initial_volume_ul|dead_volume_ul|well_volumes_ul)$/.test(path))
         return 'Confirm plate starting and dead volumes';
-    if(/liquid_class|distance_from_bottom|method_ref/.test(path)||/method|liquid_class/.test(code))
+    if(/liquid_class|distance_from_bottom|method_ref|simulation_only_liquid_assumption/.test(path)||
+        /method|liquid_class|simulation_assumption/.test(code))
         return 'Review or qualify the liquid method';
     if(path.startsWith('/setup/'))return 'Confirm head, deck and tip policy';
     if(path.startsWith('/steps/'))return 'Review transfer mapping and motion';
