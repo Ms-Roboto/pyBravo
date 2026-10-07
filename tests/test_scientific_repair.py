@@ -6,6 +6,7 @@ import pytest
 
 from pybravo.workflow.drafter.llm import DrafterConfig, DraftResult
 from pybravo.workflow.drafter.schema import DraftedWorkflow
+from pybravo.workflow.drafter.scientific_patterns import StageRequirement
 from pybravo.workflow.drafter.scientific_repair import (
     repair_scientific_workflow,
     validate_scientific_repair_candidate,
@@ -207,3 +208,22 @@ async def test_prior_hardware_error_cannot_be_declared_fixed_without_recheck():
     assert result.workflow == original
     assert result.candidate_workflow is not None
     assert "EXTERNAL_REVALIDATION_REQUIRED" in {issue["code"] for issue in result.issues}
+
+
+async def test_reviewed_stage_contract_is_rechecked_after_model_response():
+    original = _draft("flow/Start", "flow/End").to_designer_json()
+    transfer_only = _draft("flow/Start", "tips/TipsOn", "liquid/Aspirate",
+                           "liquid/Dispense", "tips/TipsOff", "flow/End")
+
+    async def fake_drafter(prompt, **kwargs):
+        return _response(transfer_only)
+
+    result = await repair_scientific_workflow(
+        instruction=SOURCE, source_excerpt="Thermocycling follows setup.",
+        current_workflow=original, validator_issues=[], config=CONFIG,
+        expected_stages=[StageRequirement("transfer", "Assemble reaction", volume_ul=10),
+                         StageRequirement("manual", "Thermocycle reaction", marker="thermocycl")],
+        max_attempts=1, drafter=fake_drafter,
+    )
+    assert result.passed_checks is False
+    assert "SOURCE_STAGE_UNACCOUNTED" in {issue["code"] for issue in result.issues}

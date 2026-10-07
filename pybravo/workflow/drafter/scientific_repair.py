@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from pybravo.types import HeadType
 from pybravo.workflow.drafter.llm import DrafterConfig, DraftResult, draft_workflow
 from pybravo.workflow.drafter.schema import DraftedWorkflow
-from pybravo.workflow.drafter.scientific_patterns import audit_scientific_patterns
+from pybravo.workflow.drafter.scientific_patterns import StageRequirement, audit_scientific_patterns
 from pybravo.workflow.drafter.validator import ValidationIssue, validate_drafted_workflow
 
 _SAFE_NODE_TYPES = frozenset({
@@ -143,6 +143,7 @@ def _graph_cycle_issues(workflow: Mapping[str, Any]) -> list[Issue]:
 
 def validate_scientific_repair_candidate(
     workflow: Mapping[str, Any], *, instruction: str, head_type: str | HeadType | None = None,
+    expected_stages: Sequence[StageRequirement] | None = None,
     extra_validator: ExtraValidator | None = None,
 ) -> list[Issue]:
     """Check schema, graph, permitted node set, and scientific patterns.
@@ -177,6 +178,7 @@ def validate_scientific_repair_candidate(
     issues.extend(_graph_cycle_issues(designer))
     issues.extend(audit_scientific_patterns(
         designer, source_instruction=instruction, head_type=head_type,
+        expected_stages=expected_stages,
     ))
     if extra_validator is not None:
         issues.extend(_normalize_issues(extra_validator(designer)))
@@ -213,6 +215,7 @@ async def repair_scientific_workflow(
     validator_issues: Sequence[Mapping[str, Any] | ValidationIssue], config: DrafterConfig,
     provenance: Mapping[str, Any] | None = None,
     head_type: str | HeadType | None = None,
+    expected_stages: Sequence[StageRequirement] | None = None,
     max_attempts: int | None = None,
     extra_validator: ExtraValidator | None = None,
     drafter: DraftFunction | None = None,
@@ -243,7 +246,8 @@ async def repair_scientific_workflow(
         "Earlier catalog, deck, or active-profile errors require an extra_validator before a repaired draft can pass checks.",
     )
     initial = _deduplicate(supplied_issues + validate_scientific_repair_candidate(
-        original, instruction=instruction, head_type=head_type, extra_validator=extra_validator,
+        original, instruction=instruction, head_type=head_type,
+        expected_stages=expected_stages, extra_validator=extra_validator,
     ) + ([recheck_issue] if context_recheck_required else []))
     if not any(issue["severity"] == "error" for issue in initial):
         return ScientificRepairResult(original, None, initial, 0, True,
@@ -284,6 +288,7 @@ async def repair_scientific_workflow(
         last_candidate = candidate
         last_issues = validate_scientific_repair_candidate(
             candidate, instruction=instruction, head_type=head_type,
+            expected_stages=expected_stages,
             extra_validator=extra_validator,
         )
         if context_recheck_required:
