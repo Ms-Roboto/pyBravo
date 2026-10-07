@@ -7,8 +7,8 @@
 <script type="importmap">
 {
     "imports": {
-        "three": "https://esm.sh/three@0.162.0",
-        "three/addons/": "https://esm.sh/three@0.162.0/examples/jsm/"
+        "three": "/static/vendor/three/0.162.0/build/three.module.js?v=dev",
+        "three/addons/": "/static/vendor/three/0.162.0/examples/jsm/"
     }
 }
 </script>
@@ -721,7 +721,7 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
 @media(max-width:760px) { body.protocol-compiled-preview .left-panel { width:140px; min-width:140px; } body.protocol-compiled-preview .right-panel { width:180px; min-width:180px; } }
 
 </style>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/css/litegraph.css">
+<link rel="stylesheet" href="/static/vendor/litegraph/0.7.18/css/litegraph.css?v=dev">
 <script>
 // Apply the stored theme BEFORE first paint to avoid a flash of the default
 // (dark) theme on page load. Shares the localStorage key with the Control
@@ -1545,9 +1545,9 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/litegraph.js@0.7.18/build/litegraph.min.js"></script>
+<script src="/static/vendor/litegraph/0.7.18/build/litegraph.min.js?v=dev"></script>
 <!-- Dagre: DAG layout engine used by the "Arrange" toolbar button. -->
-<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<script src="/static/vendor/dagre/0.8.5/dist/dagre.min.js?v=dev"></script>
 <script type="module">
 // The ?v= token is rewritten to the file's mtime when this page is served
 // (see _version_static_assets in pybravo/web/server.py), so it does not need

@@ -1,0 +1,12 @@
+6a349742a6cb219d5a2fc8d0844f6d89a6efc62e20c664450d884fc7ff2d6015  dagre/0.8.5/LICENSE
+62eb9787ccfdbdf4148d4d99d31dbf9ee4770eafee81e637d759b52aac22cd51  dagre/0.8.5/dist/dagre.min.js
+1b38cc30fe774bcc77538ab99eb460f4e1c8a47c4fddc6e991ee3b5cc2a96bb9  litegraph/0.7.18/LICENSE
+6a6bd1480057107b8dc12b40730b88afb01729ebcbf0555cd67f5a229f381589  litegraph/0.7.18/build/litegraph.min.js
+565cee8d54e7dfd16295f0ec7b19f910a739c0f42d5263198e3416a38a6006b3  litegraph/0.7.18/css/litegraph.css
+4c40a1ef62450b857c3b2aaf294936304cd552d965fbcd9d32d4c5bcf4ba4454  three/0.162.0/LICENSE
+ec3ddc3897ec75288b5502057456c471c2eb7d6e7cf36140d0a5224e94a1984b  three/0.162.0/build/three.module.js
+f260591ef315aa04888152e7f121865214e33fb54727145cf4e4445058db1297  three/0.162.0/examples/jsm/controls/OrbitControls.js
+d073b438e6a07e1359741dd5d6c76c953420cc0d4fd84eb1bdde94315540e6a3  three/0.162.0/examples/jsm/loaders/GLTFLoader.js
+896d006a48b8f125385a485ccae154dadee801a953f0b45ceffe7ddd8a29ca93  three/0.162.0/examples/jsm/loaders/STLLoader.js
+b0c64fe6f3b9907262921b73fafc4ade874c07ba6b4876e164c87a830c2c2113  three/0.162.0/examples/jsm/utils/BufferGeometryUtils.js
+e0dcb498b3383a032e6e934fcc5bfe07b5e99d4d4d1c77a7956fe935304abf5c  three/0.162.0/examples/jsm/utils/SkeletonUtils.js

@@ -4779,6 +4779,13 @@ def run_server(
     configure_logging()
     import uvicorn
 
+    # Designer and Control Panel both load ES modules through /static. A
+    # caller that only chooses another port still needs the bundled frontend.
+    if static_dir is None:
+        frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
+        if frontend_dir.is_dir():
+            static_dir = str(frontend_dir)
+
     global _labware_assets_mounted
     global _bravo, _profile_path, _profile_dir
     if bravo is None:
