@@ -706,13 +706,14 @@ body {
 .protocol-draft-banner a { color:var(--accent); white-space:nowrap; }
 body.protocol-compiled-preview .protocol-draft-banner { font-size:10px; line-height:1.35; padding:8px 10px; }
 body.protocol-preview-active .left-panel { display:flex; }
-body.protocol-preview-active #section-tasks { display:none; }
+body.protocol-preview-active:not(.protocol-compiled-preview) #section-tasks { display:none; }
+body.protocol-compiled-preview #section-tasks .task-chip { pointer-events:none; opacity:.55; }
 body.protocol-preview-active #section-deck .deck-cell { pointer-events:none; }
 body.protocol-preview-active #section-deck .panel-section-body { display:block; }
 .protocol-draft-deck-list { margin:10px 8px; padding:9px; border:1px solid var(--border); border-radius:4px; font-size:10px; line-height:1.5; color:var(--text-dim); }
 .protocol-draft-deck-list strong { display:block; color:var(--text); margin-bottom:4px; }
 body.protocol-preview-active .toolbar-btn:disabled { opacity:.4; cursor:not-allowed; }
-body.protocol-preview-active #viewport-float { display:none; }
+body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { display:none; }
 .protocol-review-property { margin-bottom:12px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; line-height:1.5; }
 .protocol-review-property strong { display:block; color:var(--text-dim); margin-bottom:4px; }
 @media(max-width:1100px) { body.protocol-chat-open .left-panel { display:none; } .protocol-chat-panel { width:320px; } }
@@ -831,6 +832,8 @@ body.protocol-preview-active #viewport-float { display:none; }
                     <div class="task-chip" data-type="initialize">Initialize</div>
                     <div class="task-chip" data-type="home">Home</div>
                     <div class="task-chip" data-type="dock_gripper">Dock Gripper</div>
+                    <div class="task-chip" data-type="manual">Manual</div>
+                    <div class="task-chip" data-type="wait">Wait</div>
                 </div>
             </div>
         </div>
@@ -1639,7 +1642,8 @@ function updateDeckCell(location) {
         cell.classList.add('assigned');
         cell.setAttribute('data-kind', kindClass);
         const stackLabel = stack.length > 1 ? ` (${stack.length})` : '';
-        const inventoryLabel = top.proposed && top.tip_inventory_status === 'unconfirmed' ? ' · tips unconfirmed' : '';
+        const inventoryLabel = top.tip_inventory_status === 'spent' ? ' · spent tips' :
+            top.proposed && top.tip_inventory_status === 'unconfirmed' ? ' · tips unconfirmed' : '';
         label.textContent = (top.name || top.labware_id || 'Assigned') + stackLabel + inventoryLabel;
     } else {
         cell.classList.add('empty');
@@ -3520,6 +3524,8 @@ const CHIP_TO_NODE_TYPE = {
     initialize: 'system/Initialize',
     home: 'system/Home',
     dock_gripper: 'system/DockGripper',
+    manual: 'system/Manual',
+    wait: 'system/Wait',
     if_else: 'flow/IfElse',
     loop: 'flow/Loop',
     script: 'logic/Script',
@@ -4656,6 +4662,65 @@ function renderTipsOffInheritCard(body, node) {
     body.appendChild(card);
 }
 
+function renderCompiledPreviewProperties(body, node) {
+    const note = document.createElement('p');
+    note.className = 'protocol-review-property';
+    note.textContent = 'This is the same Bravo task used in a hand-built workflow. Its compiled values are read only; the provisional liquid method is not approved for hardware use.';
+    body.appendChild(note);
+
+    const labels = {
+        location: 'Deck position', source_location: 'Source position',
+        destination_location: 'Destination position', pick_location: 'Pick position',
+        place_location: 'Place position', base_location: 'Base position',
+        volume: 'Volume', liquid_class: 'Liquid class',
+        distance_from_bottom: 'Distance from well bottom',
+        pre_aspirate_volume: 'Pre-aspirate volume',
+        post_aspirate_volume: 'Post-aspirate volume',
+        blowout_volume: 'Blowout volume', tip_touch: 'Tip touch',
+        head_mode: 'Head mode', tip_anchor_row: 'Tip-box anchor',
+        anchor: 'Well anchor', message: 'Operator instruction',
+    };
+    const positionKeys = new Set(['location', 'source_location', 'destination_location', 'pick_location', 'place_location', 'base_location']);
+    const volumeKeys = new Set(['volume', 'pre_aspirate_volume', 'post_aspirate_volume', 'blowout_volume']);
+    const properties = node.properties || {};
+    let visible = 0;
+    for (const [key, value] of Object.entries(properties)) {
+        // Compiler provenance and the companion tip column stay available in
+        // the saved plan. They are not editable task parameters.
+        if (key.startsWith('_') || key === 'tip_anchor_col') continue;
+        let display = String(value ?? '');
+        if (positionKeys.has(key)) display = `Position ${value}`;
+        else if (volumeKeys.has(key)) display += ' µL';
+        else if (key === 'distance_from_bottom') display += ' mm';
+        else if (key === 'head_mode') display = value?.display_text || value?.subset_type || String(value);
+        else if (key === 'tip_anchor_row') display = `R${Number(value) + 1} C${Number(properties.tip_anchor_col || 0) + 1}`;
+        else if (typeof value === 'boolean') display = value ? 'Yes' : 'No';
+        const field = document.createElement('div');
+        field.className = 'protocol-review-property';
+        const label = document.createElement('strong');
+        label.textContent = labels[key] || key.replaceAll('_', ' ');
+        field.append(label, document.createTextNode(display));
+        body.appendChild(field);
+        visible += 1;
+    }
+    if (!visible) {
+        const empty = document.createElement('p');
+        empty.className = 'protocol-review-property';
+        empty.textContent = 'No configurable properties';
+        body.appendChild(empty);
+    }
+    if (node._protocolPreviewOriginalTitle && node._protocolPreviewOriginalTitle !== node.title) {
+        const provenance = document.createElement('details');
+        provenance.className = 'protocol-review-property';
+        const summary = document.createElement('summary');
+        summary.textContent = 'Source plan step';
+        const description = document.createElement('p');
+        description.textContent = node._protocolPreviewOriginalTitle;
+        provenance.append(summary, description);
+        body.appendChild(provenance);
+    }
+}
+
 function renderPropertiesPanel(node) {
     const body = document.getElementById('properties-body');
     body.textContent = '';
@@ -4674,18 +4739,7 @@ function renderPropertiesPanel(node) {
     body.appendChild(title);
     if (node.type === 'review/ProtocolStep') { renderProtocolReviewProperties(body, node); return; }
     if (isCompiledProtocolPreviewTab()) {
-        const note = document.createElement('p');
-        note.className = 'protocol-review-property';
-        note.textContent = 'Compiled simulation preview · read only. These settings are not approved for hardware use.';
-        const planStep = document.createElement('p');
-        planStep.className = 'protocol-review-property';
-        planStep.textContent = node._protocolPreviewOriginalTitle ? 'Plan step: ' + node._protocolPreviewOriginalTitle : '';
-        const details = document.createElement('pre');
-        details.className = 'protocol-review-property';
-        details.textContent = JSON.stringify(node.properties || {}, null, 2);
-        body.append(note);
-        if (node._protocolPreviewOriginalTitle) body.append(planStep);
-        body.append(details);
+        renderCompiledPreviewProperties(body, node);
         return;
     }
 
@@ -5216,6 +5270,10 @@ function markActiveDirty() {
 
 function switchToTab(idx) {
     if (idx < 0 || idx >= openTabs.length || idx === activeTabIdx) return;
+    if (isCompiledProtocolPreviewTab()) {
+        pauseCompiledPreviewPlayback();
+        designerState.robotScene?.setSimulationMode(false);
+    }
     activeTabIdx = idx;
     const t = openTabs[idx];
     // Re-point all the "live" state references at the new tab's owned state.
@@ -6716,6 +6774,7 @@ document.getElementById('btn-execute').addEventListener('click', () => {
 // ── Simulation Controls ─────────────────────────────────────────────
 async function runWorkflow() {
     const progress = document.getElementById('playback-progress');
+    if (isCompiledProtocolPreviewTab()) { await replayCompiledSimulationPreview(); return; }
     if (isProtocolDraftTab()) { progress.textContent = 'This protocol preview cannot run in Designer. Review it in Protocol Assistant.'; return; }
 
     // Validate first
@@ -6816,6 +6875,10 @@ function highlightInvalidNodes(invalidNodes) {
 }
 
 document.getElementById('btn-stop').addEventListener('click', async () => {
+    if (isCompiledProtocolPreviewTab()) {
+        stopCompiledPreviewPlayback();
+        return;
+    }
     if (isProtocolDraftTab()) return;
     await apiCall('/api/workflows/stop', 'POST');
     document.getElementById('playback-progress').textContent = 'Stopped';
@@ -6826,6 +6889,16 @@ document.getElementById('btn-stop').addEventListener('click', async () => {
 
 document.getElementById('btn-play').addEventListener('click', () => {
     runWorkflow();
+});
+
+document.getElementById('btn-pause').addEventListener('click', () => {
+    if (isCompiledProtocolPreviewTab()) pauseCompiledPreviewPlayback();
+});
+document.getElementById('btn-step').addEventListener('click', () => {
+    if (!isCompiledProtocolPreviewTab() || !timeline.frames.length) return;
+    pauseCompiledPreviewPlayback();
+    const current = Number(document.getElementById('scrubber-slider').value) || 0;
+    scrubTo(Math.min(current + 1, timeline.frames.length - 1));
 });
 
 function clearActiveNodeHighlight() {
@@ -6885,6 +6958,7 @@ const timeline = {
     recording: false,
     scrubbing: false,   // true when user is scrubbing (pauses live updates)
     playbackTimer: null,
+    replayEventTime: null,
 };
 
 function timelineReset() {
@@ -6892,6 +6966,7 @@ function timelineReset() {
     timeline.startTime = 0;
     timeline.recording = false;
     timeline.scrubbing = false;
+    timeline._appliedDeckSignature = null;
     if (timeline.playbackTimer) { clearInterval(timeline.playbackTimer); timeline.playbackTimer = null; }
     document.getElementById('scrubber-container').style.display = 'none';
 }
@@ -6921,6 +6996,7 @@ function restoreDeckConfig(snapshot) {
     for (const [loc, stack] of Object.entries(snapshot)) {
         designerState.deckConfig[loc] = stack.map(item => ({ ...item }));
     }
+    if (isCompiledProtocolPreviewTab()) getActiveTab().deckConfig = designerState.deckConfig;
     for (let i = 1; i <= 9; i++) updateDeckCell(i);
     syncDeckTo3D();
 }
@@ -6928,7 +7004,7 @@ function restoreDeckConfig(snapshot) {
 function timelineRecord(positions, nodeId, stepName) {
     if (!timeline.recording) return;
     timeline.frames.push({
-        time: (performance.now() - timeline.startTime) / 1000,
+        time: timeline.replayEventTime ?? (performance.now() - timeline.startTime) / 1000,
         positions: positions ? { ...positions } : null,
         nodeId: nodeId || null,
         stepName: stepName || '',
@@ -6998,7 +7074,11 @@ function scrubTo(frameIndex) {
     }
     // Restore deck state (plate positions) from snapshot
     if (frame.deckSnapshot) {
-        restoreDeckConfig(frame.deckSnapshot);
+        const signature = JSON.stringify(frame.deckSnapshot);
+        if (signature !== timeline._appliedDeckSignature) {
+            restoreDeckConfig(frame.deckSnapshot);
+            timeline._appliedDeckSignature = signature;
+        }
     }
     // Restore tip state and carry animation status
     if (designerState.robotScene) {
@@ -7076,6 +7156,9 @@ document.getElementById('scrub-play').addEventListener('click', () => {
             clearInterval(timeline.playbackTimer);
             timeline.playbackTimer = null;
             document.getElementById('scrub-play').textContent = '\u25B6';
+            if (isCompiledProtocolPreviewTab()) {
+                document.getElementById('playback-progress').textContent = 'Saved strict simulation replay complete · no new simulation was run';
+            }
         }
     }, 33); // ~30fps
 });
@@ -7396,6 +7479,7 @@ function hookWorkflowEvents() {
     workflowWs.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
+            if (isCompiledProtocolPreviewTab()) return;
             if (data.type && data.type.startsWith('workflow:')) {
                 console.log('Workflow event:', data);
                 handleWorkflowEvent(data);
@@ -7867,10 +7951,14 @@ function updateProtocolDraftControls() {
     const compiledPreview = isCompiledProtocolPreviewTab(tab);
     document.body.classList.toggle('protocol-preview-active', draft);
     document.body.classList.toggle('protocol-compiled-preview', compiledPreview);
+    if (compiledPreview) requestAnimationFrame(() => designerState.robotScene?.resize());
+    document.querySelector('#viewport-header span').textContent = compiledPreview ? 'Bravo 3D replay' : '3D Simulation';
+    document.getElementById('btn-simulate').title = compiledPreview ? 'Replay this revision’s saved strict simulation without starting a new run' : 'Simulate';
     document.getElementById('protocol-draft-banner').hidden = !draft;
-    for (const id of ['btn-save', 'btn-save-as', 'btn-library', 'btn-draft', 'btn-import', 'btn-export', 'btn-simulate', 'btn-execute', 'btn-play', 'btn-pause', 'btn-stop']) {
+    for (const id of ['btn-save', 'btn-save-as', 'btn-library', 'btn-draft', 'btn-import', 'btn-export', 'btn-simulate', 'btn-execute', 'btn-play', 'btn-pause', 'btn-stop', 'btn-step']) {
         const button = document.getElementById(id);
-        if (draft) {
+        const replayControl = compiledPreview && ['btn-simulate', 'btn-play', 'btn-pause', 'btn-stop', 'btn-step'].includes(id);
+        if (draft && !replayControl) {
             if (!('protocolPreviousDisabled' in button.dataset)) button.dataset.protocolPreviousDisabled = String(button.disabled);
             button.disabled = true;
         } else if ('protocolPreviousDisabled' in button.dataset) {
@@ -7888,7 +7976,7 @@ function updateProtocolDraftControls() {
     if (compiledPreview) {
         const operations = (tab.graph?._nodes || []).filter(node => !['flow/Start', 'flow/End', 'flow/Frame'].includes(node.type)).length;
         const assumption = tab.protocolPreviewStatus === 'simulation_only' ? ' Liquid method and height are provisional; hardware use unavailable.' : ' Scientist approval is still required.';
-        document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata.protocol_revision} · ${operations} compiled operations · read only.${assumption} Click nodes for parameters; drag to pan.`;
+        document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata.protocol_revision} · ${operations} Bravo tasks · read only.${assumption} Simulate replays saved motion and reconstructs plate/tip changes from primitive task steps; it does not run or approve a new method.`;
     } else if (draft) {
         document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;
     }
@@ -8027,16 +8115,177 @@ function frameProtocolPreviewGraph(canvas, nodes, minimumScale = .08) {
 }
 function labelCompiledProtocolPreviewNodes(graph) {
     for (const node of graph._nodes || []) {
-        const operation = node.type === 'liquid/Aspirate' ? 'Aspirate' :
-            node.type === 'liquid/Dispense' ? 'Dispense' : null;
+        const operation = {
+            'liquid/Aspirate': 'Aspirate', 'liquid/Dispense': 'Dispense',
+            'tips/TipsOn': 'Tips On', 'tips/TipsOff': 'Tips Off',
+            'plate/Destack': 'Destack', 'plate/Stack': 'Stack',
+            'plate/PickPlace': 'Pick/Place', 'system/Manual': 'Manual',
+        }[node.type];
         if (!operation) continue;
         node._protocolPreviewOriginalTitle = node.title || '';
-        const volume = Number(node.properties?.volume);
         const parts = [operation];
-        if (Number.isFinite(volume)) parts.push(`${volume} µL`);
-        if (node.properties?.location != null) parts.push(`slot ${node.properties.location}`);
-        if (node.properties?.anchor) parts.push(node.properties.anchor);
+        const props = node.properties || {};
+        if (node.type === 'system/Manual') {
+            if (node._protocolPreviewOriginalTitle && node._protocolPreviewOriginalTitle !== operation) parts.push(node._protocolPreviewOriginalTitle);
+        } else if (node.type.startsWith('plate/')) {
+            const source = props.pick_location ?? props.source_location;
+            const destination = props.place_location ?? props.destination_location ?? props.base_location;
+            if (source != null && destination != null) parts.push(`slot ${source} → ${destination}`);
+        } else {
+            const volume = Number(props.volume);
+            if (props.volume != null && Number.isFinite(volume)) parts.push(`${volume} µL`);
+            if (props.location != null) parts.push(`slot ${props.location}`);
+            if (props.anchor) parts.push(props.anchor);
+        }
         node.title = parts.join(' · ');
+    }
+}
+function verifyCompiledPreviewReplay(tab, fresh, session) {
+    const preview = fresh?.preview;
+    const simulation = session?.simulation;
+    if (!tab || !isCompiledProtocolPreviewTab(tab) || !preview || !simulation ||
+        preview.session_id !== tab.protocolPreviewSessionId ||
+        preview.revision !== tab.protocolMetadata.protocol_revision ||
+        session.id !== preview.session_id || session.revision !== preview.revision ||
+        !['simulation_only', 'unapproved'].includes(preview.status) ||
+        preview.read_only !== true || preview.executable !== false || preview.approved !== false ||
+        fresh.workflow?.protocol_compiled_preview !== true ||
+        fresh.workflow.protocol_session_id !== preview.session_id ||
+        fresh.workflow.protocol_revision !== preview.revision ||
+        simulation.status !== 'passed' ||
+        !Array.isArray(simulation.events) || simulation.events[0]?.type !== 'workflow:start' ||
+        simulation.events.at(-1)?.type !== 'workflow:complete' ||
+        !simulation.events.every(event => Number.isFinite(Date.parse(event.time))) ||
+        ['context_hash', 'record_hash', 'workflow_hash'].some(key =>
+            !preview[key] || preview[key] !== tab.protocolPreviewHashes?.[key] || simulation[key] !== preview[key])) {
+        throw new Error('The saved strict simulation no longer matches this Designer preview. Return to Protocol Assistant and validate and simulate this revision again.');
+    }
+    return simulation.events;
+}
+function pauseCompiledPreviewPlayback() {
+    if (!timeline.playbackTimer) return;
+    clearInterval(timeline.playbackTimer);
+    timeline.playbackTimer = null;
+    document.getElementById('scrub-play').textContent = '\u25B6';
+    document.getElementById('playback-progress').textContent = 'Saved simulation replay paused';
+}
+function stopCompiledPreviewPlayback() {
+    pauseCompiledPreviewPlayback();
+    if (timeline.frames.length) scrubTo(0);
+    document.getElementById('playback-progress').textContent = 'Saved simulation replay reset to start';
+}
+function synthesizeCompiledPreviewTaskState(node) {
+    const props = node?.properties || {};
+    if (!['tips/TipsOn', 'tips/TipsOff'].includes(node?.type)) return;
+    const rack = designerState.deckConfig[String(props.location)]?.at(-1);
+    const scene = designerState.robotScene;
+    if (!scene || !rack) return;
+    const tipsOn = node.type === 'tips/TipsOn';
+    const rackDefinition = designerState.labwareCatalog.find(item => item.id === rack.labware_id) || {};
+    const rows = Number(rackDefinition.rows || rack.rows);
+    const cols = Number(rackDefinition.cols || rack.cols);
+    const removed = scene.getTipboxTransientState();
+    if (rows > 0 && cols > 0 && rows * cols <= 1536) {
+        removed[String(props.location)] = tipsOn
+            ? Array.from({length: rows * cols}, (_, index) => `${Math.floor(index / cols)}:${index % cols}`)
+            : [];
+    }
+    if (!tipsOn) {
+        rack.tip_inventory_status = 'spent';
+        updateDeckCell(Number(props.location));
+    }
+    void scene.setHeadTipState({
+        tips_on_head: tipsOn,
+        ...(tipsOn ? {
+            tips_on_head_mode: props.head_mode,
+            tip_labware_name: rack.name || rackDefinition.name || '',
+            tip_definition_id: rack.tip_definition_id || rackDefinition.tip_definition_id || '',
+            active_tip_capacity_ul: Number(rackDefinition.disposable_tip_capacity_ul || 10),
+        } : {}),
+        tipbox_removed_cells: removed,
+    });
+    timelineRecord(null, node.id, `${node.title} complete`);
+}
+async function replayCompiledSimulationPreview() {
+    const tab = getActiveTab();
+    if (!isCompiledProtocolPreviewTab(tab) || tab.protocolPreviewReplayPending) return;
+    const progress = document.getElementById('playback-progress');
+    tab.protocolPreviewReplayPending = true;
+    progress.textContent = 'Checking the saved strict simulation for this revision…';
+    try {
+        const id = encodeURIComponent(tab.protocolPreviewSessionId);
+        // Refetch both records. The preview endpoint rejects any revision that
+        // no longer has a passing validation and strict simulation.
+        const fresh = await protocolChatRequest('/' + id + '/designer-preview');
+        const session = await protocolChatRequest('/' + id);
+        const events = verifyCompiledPreviewReplay(tab, fresh, session);
+        if (getActiveTab() !== tab) return;
+        pauseCompiledPreviewPlayback();
+        clearActiveNodeHighlight();
+        timelineReset();
+        tab.deckConfig = JSON.parse(JSON.stringify(tab.protocolPreviewInitialDeck));
+        designerState.deckConfig = tab.deckConfig;
+        for (let location = 1; location <= 9; location++) updateDeckCell(location);
+        syncDeckTo3D();
+        designerState.robotScene?.setTipboxTransientState({});
+        void designerState.robotScene?.setHeadTipState({tips_on_head: false});
+        const firstTime = Date.parse(events[0].time);
+        const hasPlateEvents = events.some(event => ['workflow:plate_pick', 'workflow:plate_place'].includes(event.type));
+        const hasTipEvents = events.some(event => event.type === 'workflow:tips_change');
+        const plateMoveKeys = {
+            'plate/PickPlace': ['pick_location', 'place_location'],
+            'plate/Stack': ['source_location', 'base_location'],
+            'plate/Destack': ['source_location', 'destination_location'],
+        };
+        const platePicked = new Set();
+        const platePlaced = new Set();
+        const tipsChanged = new Set();
+        for (const event of events) {
+            timeline.replayEventTime = Math.max(0, (Date.parse(event.time) - firstTime) / 1000);
+            handleWorkflowEvent(event);
+            const node = tab.graph.getNodeById(event.node_id);
+            if (!node) continue;
+            const move = !hasPlateEvents && plateMoveKeys[node.type];
+            const from = move && node.properties?.[move[0]];
+            const to = move && node.properties?.[move[1]];
+            if (event.type === 'workflow:node_step' && move && event.step_name === 'grip_plate' && !platePicked.has(node.id)) {
+                const plate = designerState.deckConfig[String(from)]?.at(-1);
+                handleWorkflowEvent({type:'workflow:plate_pick', from_location:from, to_location:to, labware_name:plate?.name || ''});
+                platePicked.add(node.id);
+            }
+            if (event.type === 'workflow:node_step' && move && event.step_name === 'release_plate' && !platePlaced.has(node.id)) {
+                handleWorkflowEvent({type:'workflow:plate_place', to_location:to});
+                platePlaced.add(node.id);
+            }
+            const tipStep = node.type === 'tips/TipsOn' ? 'tip_press_dwell' : 'eject_tips';
+            if (event.type === 'workflow:node_step' && !hasTipEvents && node.type.startsWith('tips/') && event.step_name === tipStep && !tipsChanged.has(node.id)) {
+                synthesizeCompiledPreviewTaskState(node);
+                tipsChanged.add(node.id);
+            }
+            if (event.type === 'workflow:node_complete' && event.status === 'ok') {
+                // Older simulations can lack named grip/eject steps. Recreate
+                // their final visible state from the same primitive task.
+                if (move && !platePlaced.has(node.id)) {
+                    if (!platePicked.has(node.id)) {
+                        handleWorkflowEvent({type:'workflow:plate_pick', from_location:from, to_location:to});
+                    }
+                    handleWorkflowEvent({type:'workflow:plate_place', to_location:to});
+                }
+                if (!hasTipEvents && node.type.startsWith('tips/') && !tipsChanged.has(node.id)) synthesizeCompiledPreviewTaskState(node);
+            }
+        }
+        timeline.replayEventTime = null;
+        if (timeline.frames.length < 2) throw new Error('The saved simulation has no motion frames to replay.');
+        const firstMotion = timeline.frames.find(frame => frame.positions)?.positions;
+        if (firstMotion && !timeline.frames[0].positions) timeline.frames[0].positions = {...firstMotion};
+        scrubTo(0);
+        progress.textContent = 'Replaying saved strict simulation · reconstructed plate/tip changes';
+        document.getElementById('scrub-play').click();
+    } catch (error) {
+        progress.textContent = 'Saved simulation replay unavailable: ' + error.message;
+    } finally {
+        timeline.replayEventTime = null;
+        tab.protocolPreviewReplayPending = false;
     }
 }
 function displayProtocolPreview(envelope, {activate = true} = {}) {
@@ -8096,6 +8345,12 @@ function displayCompiledSimulationPreview(envelope) {
         library: '',
         protocolPreviewSessionId: preview.session_id,
         protocolPreviewStatus: preview.status,
+        protocolPreviewHashes: {
+            context_hash: preview.context_hash,
+            record_hash: preview.record_hash,
+            workflow_hash: preview.workflow_hash,
+        },
+        protocolPreviewInitialDeck: JSON.parse(JSON.stringify(workflow.deck || {})),
         protocolMetadata: {
             protocol_compiled_preview: true,
             protocol_session_id: preview.session_id,
@@ -8105,6 +8360,7 @@ function displayCompiledSimulationPreview(envelope) {
     };
     openTabs.push(tab);
     switchToTab(openTabs.length - 1);
+    document.getElementById('playback-progress').textContent = 'Ready to replay saved strict simulation';
     requestAnimationFrame(() => {
         if (getActiveTab() !== tab) return;
         const canvas = designerState.graphCanvas;

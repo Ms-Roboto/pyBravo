@@ -48,6 +48,7 @@ const getActiveTab=()=>openTabs[activeTabIdx];
 function switchToTab(index){activeTabIdx=index;}
 function requestAnimationFrame(){}
 const designerState={graphCanvas:null};
+const document={getElementById(){return {textContent:''};}};
 """
         + functions
         + """
@@ -154,3 +155,84 @@ def test_preview_button_and_designer_actions_keep_release_separate():
     assert "(!requestedWorkflow && !requestedPreview)" in designer
     assert "if (isProtocolDraftTab()) return;" in designer
     assert "if (isProtocolDraftTab()) { progress.textContent = 'This protocol preview cannot run" in designer
+
+
+def test_compiled_preview_uses_normal_primitive_names_and_restores_3d():
+    html = (ROOT / "frontend" / "designer.html").read_text()
+    assert 'body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { display:none; }' in html
+    assert 'body.protocol-preview-active:not(.protocol-compiled-preview) #section-tasks { display:none; }' in html
+    assert 'data-type="manual">Manual</div>' in html
+    assert 'data-type="wait">Wait</div>' in html
+    assert "manual: 'system/Manual'" in html
+    assert "wait: 'system/Wait'" in html
+    assert "'plate/Destack': 'Destack'" in html
+    assert "'tips/TipsOn': 'Tips On'" in html
+    assert "'plate/PickPlace': 'Pick/Place'" in html
+    assert "renderCompiledPreviewProperties(body, node)" in html
+    assert "if (isCompiledProtocolPreviewTab()) { await replayCompiledSimulationPreview(); return; }" in html
+    assert "if (isCompiledProtocolPreviewTab()) {\n        stopCompiledPreviewPlayback();\n        return;\n    }" in html
+
+
+def test_replay_requires_same_saved_revision_and_all_simulation_hashes(tmp_path):
+    html = (ROOT / "frontend" / "designer.html").read_text()
+    script = tmp_path / "replay-integrity.cjs"
+    script.write_text(
+        """
+const assert=require('node:assert/strict');
+"""
+        + _function(html, "isCompiledProtocolPreviewTab")
+        + _function(html, "verifyCompiledPreviewReplay")
+        + """
+const hashes={context_hash:'c',record_hash:'r',workflow_hash:'w'};
+const tab={protocolPreviewSessionId:'session-1',protocolMetadata:{protocol_compiled_preview:true,protocol_revision:4},protocolPreviewHashes:hashes};
+const preview={status:'simulation_only',session_id:'session-1',revision:4,read_only:true,executable:false,approved:false,...hashes};
+const fresh={preview,workflow:{protocol_compiled_preview:true,protocol_session_id:'session-1',protocol_revision:4}};
+const events=[{type:'workflow:start',time:'2026-01-01T00:00:00Z'},{type:'workflow:complete',time:'2026-01-01T00:00:01Z'}];
+const session={id:'session-1',revision:4,simulation:{status:'passed',events,...hashes}};
+assert.equal(verifyCompiledPreviewReplay(tab,fresh,session),events);
+for (const key of Object.keys(hashes)) {
+  assert.throws(()=>verifyCompiledPreviewReplay(tab,fresh,{...session,simulation:{...session.simulation,[key]:'changed'}}),/no longer matches/);
+  assert.throws(()=>verifyCompiledPreviewReplay(tab,{...fresh,preview:{...preview,[key]:'changed'}},session),/no longer matches/);
+}
+assert.throws(()=>verifyCompiledPreviewReplay(tab,fresh,{...session,revision:5}),/no longer matches/);
+assert.throws(()=>verifyCompiledPreviewReplay(tab,fresh,{...session,simulation:{...session.simulation,status:'running'}}),/no longer matches/);
+assert.throws(()=>verifyCompiledPreviewReplay(tab,fresh,{...session,simulation:{...session.simulation,events:[{type:'workflow:error',time:events[0].time}]}}),/no longer matches/);
+"""
+    )
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
+
+
+def test_replay_reconstructs_tip_pickup_and_spent_return_from_primitive_tasks(tmp_path):
+    html = (ROOT / "frontend" / "designer.html").read_text()
+    script = tmp_path / "replay-tips.cjs"
+    script.write_text(
+        """
+const assert=require('node:assert/strict');
+const changes=[];
+const scene={
+  getTipboxTransientState(){return {};},
+  setHeadTipState(state){changes.push(state);return Promise.resolve();},
+};
+const rack={labware_id:'rack',name:'Dedicated ST10 tips',tip_definition_id:'st_10ul'};
+const designerState={deckConfig:{'1':[rack]},labwareCatalog:[{id:'rack',rows:16,cols:24,disposable_tip_capacity_ul:10}],robotScene:scene};
+const deckUpdates=[];
+function updateDeckCell(location){deckUpdates.push(location);}
+const timelineFrames=[];
+function timelineRecord(positions,nodeId,stepName){timelineFrames.push({nodeId,stepName});}
+"""
+        + _function(html, "synthesizeCompiledPreviewTaskState")
+        + """
+synthesizeCompiledPreviewTaskState({id:2,type:'tips/TipsOn',title:'Tips On · slot 1',properties:{location:1,head_mode:{subset_type:'all_barrels'}}});
+assert.equal(changes[0].tips_on_head,true);
+assert.equal(changes[0].tip_definition_id,'st_10ul');
+assert.equal(changes[0].tipbox_removed_cells['1'].length,384);
+assert.equal(timelineFrames.length,1);
+synthesizeCompiledPreviewTaskState({id:3,type:'tips/TipsOff',title:'Tips Off · slot 1',properties:{location:1}});
+assert.equal(changes[1].tips_on_head,false);
+assert.deepEqual(changes[1].tipbox_removed_cells['1'],[]);
+assert.equal(rack.tip_inventory_status,'spent');
+assert.deepEqual(deckUpdates,[1]);
+assert.equal(timelineFrames.length,2);
+"""
+    )
+    subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
