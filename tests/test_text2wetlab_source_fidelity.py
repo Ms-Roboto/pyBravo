@@ -150,6 +150,16 @@ def test_mixed_tip_lineage_is_left_for_review_instead_of_false_attribution():
     assert audit_direct_source_delivery(_plan(), events) == ()
 
 
+def test_unmatched_simulator_label_does_not_assert_a_source_volume():
+    events = [dict(event) for event in _events(primer_ul=1)]
+    for event in events:
+        if event.get("labware") == "primer_plate on 4":
+            event["labware"] = "operator_label on 4"
+    assert audit_direct_source_delivery(_plan(), events, labware={
+        "operator_label on 4": "corning_96_wellplate_360ul_flat",
+    }) == ()
+
+
 def test_guidance_forbids_unsourced_predilution_to_hide_subminimum_transfer():
     assert "do not invent a diluted stock" in SOURCE_FIDELITY_GUIDANCE.lower()
     assert "newly prepared dilution" in SOURCE_FIDELITY_GUIDANCE
