@@ -4668,6 +4668,16 @@ function renderPropertiesPanel(node) {
     title.textContent = node.title;
     body.appendChild(title);
     if (node.type === 'review/ProtocolStep') { renderProtocolReviewProperties(body, node); return; }
+    if (isCompiledProtocolPreviewTab()) {
+        const note = document.createElement('p');
+        note.className = 'protocol-review-property';
+        note.textContent = 'Compiled simulation preview · read only. These settings are not approved for hardware use.';
+        const details = document.createElement('pre');
+        details.className = 'protocol-review-property';
+        details.textContent = JSON.stringify(node.properties || {}, null, 2);
+        body.append(note, details);
+        return;
+    }
 
     // Tips Off: surface the inherited head_mode (and offer optional anchor
     // override) BEFORE the property loop so the operator sees the inherit
@@ -5187,7 +5197,7 @@ function syncActiveTabMeta() {
 
 function markActiveDirty() {
     const t = getActiveTab();
-    if (!t) return;
+    if (!t || isProtocolDraftTab(t)) return;
     if (!t.dirty) {
         t.dirty = true;
         renderTabStrip();
@@ -5212,6 +5222,7 @@ function switchToTab(idx) {
     // Redraw all deck cells from the new tab's deckConfig, and push to 3D.
     for (let i = 1; i <= 9; i++) updateDeckCell(i);
     syncDeckTo3D();
+    renderPropertiesPanel(null);
     renderTabStrip();
     if (t.protocolChatEnvelope) adoptProtocolChat(t.protocolChatEnvelope);
 }
@@ -5533,6 +5544,7 @@ async function recordDrafterPatch(workflow, trigger, savedAsId) {
 
 // Save button
 document.getElementById('workflow-save-btn').addEventListener('click', async () => {
+    if (isProtocolDraftTab()) return;
     const workflow = serializeWorkflow();
     const name = workflowNameInput.value.trim() || 'Untitled Workflow';
     workflow.name = name;
@@ -5588,6 +5600,7 @@ workflowModal.addEventListener('click', (e) => {
 // Save As: always creates a new workflow with a user-supplied name and
 // retargets subsequent Saves to the new copy. Never overwrites the source.
 async function saveWorkflowAs(defaultName) {
+    if (isProtocolDraftTab()) return;
     const suggested = (defaultName || currentWorkflowName || 'Untitled Workflow') + ' copy';
     const name = prompt('Save As — new workflow name:', suggested);
     if (name === null) return;
@@ -6426,6 +6439,7 @@ document.getElementById('btn-quit').addEventListener('click', async () => {
 
 // Export
 document.getElementById('btn-export').addEventListener('click', () => {
+    if (isProtocolDraftTab()) return;
     const workflow = serializeWorkflow();
     const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -6692,7 +6706,7 @@ document.getElementById('btn-execute').addEventListener('click', () => {
 // ── Simulation Controls ─────────────────────────────────────────────
 async function runWorkflow() {
     const progress = document.getElementById('playback-progress');
-    if (isProtocolDraftTab()) { progress.textContent = 'Review and approve this protocol in Protocol Assistant before execution.'; return; }
+    if (isProtocolDraftTab()) { progress.textContent = 'This protocol preview cannot run in Designer. Review it in Protocol Assistant.'; return; }
 
     // Validate first
     const errors = validateWorkflow();
@@ -6792,6 +6806,7 @@ function highlightInvalidNodes(invalidNodes) {
 }
 
 document.getElementById('btn-stop').addEventListener('click', async () => {
+    if (isProtocolDraftTab()) return;
     await apiCall('/api/workflows/stop', 'POST');
     document.getElementById('playback-progress').textContent = 'Stopped';
     document.getElementById('progress-fill').style.width = '0%';
@@ -7779,7 +7794,10 @@ document.getElementById('task-prompt-abort')?.addEventListener('click', () => {
 const protocolChat = { envelope: null, pending: false, pendingMessage: '', sessionId: null, capabilities: null, capabilityRequest: null };
 const PROTOCOL_CHAT_STORAGE = 'pybravo-designer-protocol-chat';
 function isProtocolDraftTab(tab = getActiveTab()) {
-    return Boolean(tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_draft);
+    return Boolean(tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_draft || isCompiledProtocolPreviewTab(tab));
+}
+function isCompiledProtocolPreviewTab(tab = getActiveTab()) {
+    return Boolean(tab?.protocolPreviewSessionId && tab?.protocolMetadata?.protocol_compiled_preview);
 }
 function protocolChatStatus(message, error = false) {
     const status = document.getElementById('protocol-chat-status');
@@ -7826,10 +7844,12 @@ async function loadProtocolCapabilities(refresh = false) {
     finally { protocolChat.capabilityRequest = null; }
 }
 function updateProtocolDraftControls() {
-    const draft = isProtocolDraftTab();
+    const tab = getActiveTab();
+    const draft = isProtocolDraftTab(tab);
+    const compiledPreview = isCompiledProtocolPreviewTab(tab);
     document.body.classList.toggle('protocol-preview-active', draft);
     document.getElementById('protocol-draft-banner').hidden = !draft;
-    for (const id of ['btn-save', 'btn-save-as', 'btn-library', 'btn-draft', 'btn-import', 'btn-export', 'btn-simulate', 'btn-execute']) {
+    for (const id of ['btn-save', 'btn-save-as', 'btn-library', 'btn-draft', 'btn-import', 'btn-export', 'btn-simulate', 'btn-execute', 'btn-play', 'btn-pause', 'btn-stop']) {
         const button = document.getElementById(id);
         if (draft) {
             if (!('protocolPreviousDisabled' in button.dataset)) button.dataset.protocolPreviousDisabled = String(button.disabled);
@@ -7841,10 +7861,18 @@ function updateProtocolDraftControls() {
     }
     const canvas = designerState.graphCanvas;
     if (canvas) { canvas.read_only = draft; canvas.allow_dragnodes = !draft; canvas.allow_reconnect_links = !draft; }
-    const tab = getActiveTab();
-    const id = tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_session_id;
+    const id = tab?.protocolPreviewSessionId || tab?.protocolChatSessionId || tab?.protocolMetadata?.protocol_chat_session_id;
     if (id) document.getElementById('protocol-draft-review').href = '/protocol-assistant?session=' + encodeURIComponent(id);
-    if (draft) document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;
+    const label = document.querySelector('#protocol-draft-banner strong');
+    label.textContent = compiledPreview ? 'Compiled simulation preview · unapproved' : 'Non-executable protocol draft';
+    document.getElementById('protocol-draft-review').textContent = compiledPreview ? 'Return to Protocol Assistant →' : 'Review setup, simulate & approve →';
+    if (compiledPreview) {
+        const operations = (tab.graph?._nodes || []).filter(node => !['flow/Start', 'flow/End', 'flow/Frame'].includes(node.type)).length;
+        const assumption = tab.protocolPreviewStatus === 'simulation_only' ? ' · Provisional liquid method and height; hardware use unavailable.' : ' · Awaiting scientist approval.';
+        document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata.protocol_revision} · ${operations} compiled operation nodes · read only; cannot save, export, simulate or execute.${assumption}`;
+    } else if (draft) {
+        document.getElementById('protocol-draft-summary').textContent = `Revision ${tab.protocolMetadata?.protocol_revision || '?'} · ${(tab.graph?._nodes || []).filter(node => node.type === 'review/ProtocolStep').length} review steps.${Object.keys(tab.deckConfig || {}).length ? ' · Proposed deck layout; confirm in Protocol Assistant.' : ''}`;
+    }
 }
 function renderProtocolReviewProperties(body, node) {
     const fields = [
@@ -8003,6 +8031,58 @@ function displayProtocolPreview(envelope, {activate = true} = {}) {
         });
     } else renderTabStrip();
 }
+function displayCompiledSimulationPreview(envelope) {
+    const {workflow, preview} = envelope || {};
+    if (!preview || !workflow || !['simulation_only', 'unapproved'].includes(preview.status) ||
+        preview.read_only !== true || preview.executable !== false || preview.approved !== false ||
+        !preview.session_id || !Number.isInteger(preview.revision) ||
+        workflow.protocol_compiled_preview !== true ||
+        workflow.protocol_session_id !== preview.session_id || workflow.protocol_revision !== preview.revision ||
+        !Array.isArray(workflow.graph?.nodes) || !workflow.graph.nodes.length ||
+        workflow.graph.nodes.some(node => node.type === 'review/ProtocolStep')) {
+        throw new Error('The server did not return a safe, compiled, read-only preview of this revision.');
+    }
+    const graph = new LGraph();
+    configureWorkflowGraph(graph, workflow);
+    const tab = {
+        id: null,
+        name: 'Simulation preview · ' + (workflow.name || 'Protocol'),
+        description: workflow.description || '',
+        graph,
+        deckConfig: JSON.parse(JSON.stringify(workflow.deck || {})),
+        library: '',
+        protocolPreviewSessionId: preview.session_id,
+        protocolPreviewStatus: preview.status,
+        protocolMetadata: {
+            protocol_compiled_preview: true,
+            protocol_session_id: preview.session_id,
+            protocol_revision: preview.revision,
+        },
+        dirty: false,
+    };
+    openTabs.push(tab);
+    switchToTab(openTabs.length - 1);
+    requestAnimationFrame(() => {
+        if (getActiveTab() !== tab) return;
+        const canvas = designerState.graphCanvas;
+        if (!canvas) return;
+        canvas.resize();
+        const nodes = graph._nodes || [];
+        if (!nodes.length) return;
+        const minX = Math.min(...nodes.map(node => node.pos[0]));
+        const minY = Math.min(...nodes.map(node => node.pos[1]));
+        const width = Math.max(...nodes.map(node => node.pos[0] + node.size[0])) - minX;
+        const height = Math.max(...nodes.map(node => node.pos[1] + node.size[1])) - minY;
+        canvas.ds.scale = Math.min(1, Math.max(.08, Math.min((canvas.canvas.width - 50) / Math.max(width, 1), (canvas.canvas.height - 130) / Math.max(height, 1))));
+        canvas.ds.offset = [25 / canvas.ds.scale - minX, 90 / canvas.ds.scale - minY];
+        canvas.setDirty(true, true);
+    });
+}
+async function loadCompiledSimulationPreview(sessionId) {
+    const envelope = await protocolChatRequest('/' + encodeURIComponent(sessionId) + '/designer-preview');
+    if (envelope?.preview?.session_id !== sessionId) throw new Error('Preview session mismatch.');
+    displayCompiledSimulationPreview(envelope);
+}
 async function protocolChatRequest(path, payload) {
     const response = await fetch(API_BASE + '/api/protocols' + path, {method: payload ? 'POST' : 'GET', headers: {'Content-Type':'application/json'}, ...(payload ? {body: JSON.stringify(payload)} : {})});
     let data;
@@ -8131,13 +8211,29 @@ async function init() {
     } catch (e) {
         console.error('Litegraph init failed:', e);
     }
-    // Protocol Assistant exports open the exact reviewed workflow.
-    const requestedWorkflow = new URLSearchParams(window.location.search).get('workflow');
+    // A simulated draft opens as a transient inspection tab. Only an approved
+    // export opens through the saved-workflow route below.
+    const params = new URLSearchParams(window.location.search);
+    const requestedWorkflow = params.get('workflow');
+    const requestedPreview = params.get('protocol_preview');
     if (requestedWorkflow) {
         const workflow = await apiCall(`/api/workflows/${encodeURIComponent(requestedWorkflow)}`);
         if (workflow) deserializeWorkflow(workflow);
-    } else {
+    } else if (!requestedPreview) {
         restoreDraft();
+    }
+    if (requestedPreview) {
+        try {
+            await loadCompiledSimulationPreview(requestedPreview);
+        } catch (error) {
+            const banner = document.getElementById('protocol-draft-banner');
+            banner.hidden = false;
+            banner.querySelector('strong').textContent = 'Simulation preview unavailable';
+            document.getElementById('protocol-draft-summary').textContent = error.message;
+            const review = document.getElementById('protocol-draft-review');
+            review.href = '/protocol-assistant?session=' + encodeURIComponent(requestedPreview);
+            review.textContent = 'Return to Protocol Assistant →';
+        }
     }
     // Hook workflow WebSocket events
     hookWorkflowEvents();
@@ -8156,8 +8252,8 @@ async function init() {
     // Start auto-save loop
     setInterval(scheduleAutoSave, 30000);
     console.log('Designer initialized');
-    const openProtocolChat = new URLSearchParams(window.location.search).get('protocol-chat') === '1';
-    await resumeProtocolChat({activate: openProtocolChat || !requestedWorkflow});
+    const openProtocolChat = params.get('protocol-chat') === '1';
+    await resumeProtocolChat({activate: openProtocolChat || (!requestedWorkflow && !requestedPreview)});
     if (openProtocolChat) {
         setProtocolChatOpen(true);
         document.getElementById('protocol-chat-message').focus();
