@@ -131,6 +131,23 @@ PrimitiveAction = Annotated[
 ]
 
 
+class WellSeries(_Strict):
+    """Model-selected traversal of one trusted labware's well ordering."""
+
+    binding: str = Field(min_length=1)
+    labware: str = Field(min_length=1)
+    mode: Literal["all", "column_anchors"]
+    columns: list[int] = Field(default_factory=list, max_length=48)
+
+
+class CatalogSelector(_Strict):
+    """Model-selected zip relation; catalog facts supply only well names."""
+
+    kind: Literal["catalog_wells"]
+    series: list[WellSeries] = Field(min_length=1, max_length=2)
+    relation: Literal["zip", "same_name"] = "zip"
+
+
 class ForEach(_ActionBase):
     """Repeat explicit actions over model-supplied well-name bindings.
 
@@ -139,7 +156,8 @@ class ForEach(_ActionBase):
     """
 
     kind: Literal["for_each"]
-    bindings: list[dict[str, str]] = Field(min_length=1, max_length=384)
+    bindings: list[dict[str, str]] = Field(default_factory=list, max_length=384)
+    selector: CatalogSelector | None = None
     actions: list[PrimitiveAction] = Field(min_length=1, max_length=32)
 
 
@@ -165,6 +183,7 @@ class LabwareFacts:
     """Trusted catalog details; these values must not come from model output."""
 
     wells: frozenset[str]
+    ordered_wells: tuple[str, ...] = ()
     is_tiprack: bool = False
     tip_capacity_ul: float | None = None
     multichannel_compatible: bool = False
@@ -270,9 +289,71 @@ def validate_action_evidence(
 _MAX_EXPANDED_ACTIONS = 10_000
 _BINDING_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _WELL_PLACEHOLDER = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)\Z")
+_COLUMN = re.compile(r"[A-Za-z]+([1-9][0-9]*)\Z")
 
 
-def _expand_actions(plan: ActionPlan) -> tuple[list[PrimitiveAction], list[str]]:
+def _selector_bindings(
+    selector: CatalogSelector,
+    path: str,
+    loads: Mapping[str, LabwareLoad],
+    catalog: Mapping[str, LabwareFacts],
+) -> tuple[list[dict[str, str]], dict[str, str]]:
+    names: dict[str, str] = {}
+    selections: list[list[str]] = []
+    for index, series in enumerate(selector.series):
+        series_path = f"{path}.selector.series[{index}]"
+        if _BINDING_NAME.fullmatch(series.binding) is None or series.binding in names:
+            raise ActionPlanError(f"{series_path} has an invalid or duplicate binding name.")
+        item = loads.get(series.labware)
+        if item is None:
+            raise ActionPlanError(f"{series_path} refers to unloaded labware {series.labware!r}.")
+        facts = catalog[item.load_name]
+        if not facts.ordered_wells:
+            raise ActionPlanError(f"{series_path} needs trusted ordered catalog wells.")
+        if series.mode == "column_anchors" and not facts.multichannel_anchor_wells:
+            raise ActionPlanError(f"{series_path} has no trusted full-column anchors.")
+        selected = [well for well in facts.ordered_wells
+                    if series.mode == "all" or well in facts.multichannel_anchor_wells]
+        if series.columns:
+            if (len(series.columns) != len(set(series.columns)) or
+                    any(column < 1 for column in series.columns)):
+                raise ActionPlanError(f"{series_path} has duplicate or invalid columns.")
+            grouped: dict[int, list[str]] = {}
+            for well in selected:
+                match = _COLUMN.fullmatch(well)
+                if match is None:
+                    raise ActionPlanError(f"{series_path} cannot parse catalog well {well!r}.")
+                grouped.setdefault(int(match.group(1)), []).append(well)
+            missing = set(series.columns) - set(grouped)
+            if missing:
+                raise ActionPlanError(f"{series_path} requests absent columns {sorted(missing)}.")
+            selected = [well for column in series.columns for well in grouped[column]]
+        if not selected or len(selected) > 384:
+            raise ActionPlanError(f"{series_path} selects no wells or more than 384 wells.")
+        names[series.binding] = series.labware
+        selections.append(selected)
+    if len(selections) == 1:
+        if selector.relation != "zip":
+            raise ActionPlanError(f"{path}.selector needs two series for same_name pairing.")
+        return ([{selector.series[0].binding: well} for well in selections[0]], names)
+    first, second = selections
+    if selector.relation == "zip":
+        if len(first) != len(second):
+            raise ActionPlanError(f"{path}.selector cannot zip unequal well counts.")
+        pairs = zip(first, second, strict=True)
+    else:
+        if set(first) != set(second):
+            raise ActionPlanError(f"{path}.selector same_name needs matching well names.")
+        pairs = ((well, well) for well in first)
+    return ([{selector.series[0].binding: left,
+              selector.series[1].binding: right} for left, right in pairs], names)
+
+
+def _expand_actions(
+    plan: ActionPlan,
+    loads: Mapping[str, LabwareLoad],
+    catalog: Mapping[str, LabwareFacts],
+) -> tuple[list[PrimitiveAction], list[str]]:
     """Expand finite, flat bindings and retain paths for actionable errors."""
     expanded: list[PrimitiveAction] = []
     paths: list[str] = []
@@ -282,7 +363,17 @@ def _expand_actions(plan: ActionPlan) -> tuple[list[PrimitiveAction], list[str]]
             expanded.append(action)
             paths.append(path)
             continue
-        names = set(action.bindings[0])
+        if bool(action.bindings) == (action.selector is not None):
+            raise ActionPlanError(f"{path} needs exactly one explicit binding list or catalog selector.")
+        if action.selector is not None:
+            rows, binding_labware = _selector_bindings(
+                action.selector, path, loads, catalog,
+            )
+            row_path = "selector.rows"
+        else:
+            rows, binding_labware = action.bindings, {}
+            row_path = "bindings"
+        names = set(rows[0])
         if not names or any(_BINDING_NAME.fullmatch(name) is None for name in names):
             raise ActionPlanError(f"{path} has invalid or absent binding names.")
         used: set[str] = set()
@@ -293,15 +384,21 @@ def _expand_actions(plan: ActionPlan) -> tuple[list[PrimitiveAction], list[str]]
                     raise ActionPlanError(
                         f"{path}.actions[{body_index}] uses an unknown well binding {item.well!r}."
                     )
+                expected_labware = binding_labware.get(matched.group(1))
+                if expected_labware is not None and item.labware != expected_labware:
+                    raise ActionPlanError(
+                        f"{path}.actions[{body_index}] uses a catalog binding on "
+                        "different labware."
+                    )
                 used.add(matched.group(1))
         if used != names:
             raise ActionPlanError(f"{path} has unused well bindings: {sorted(names - used)}.")
-        if len(expanded) + len(action.bindings) * len(action.actions) > _MAX_EXPANDED_ACTIONS:
+        if len(expanded) + len(rows) * len(action.actions) > _MAX_EXPANDED_ACTIONS:
             raise ActionPlanError(f"{path} exceeds the {_MAX_EXPANDED_ACTIONS} action expansion limit.")
-        for binding_index, binding in enumerate(action.bindings):
+        for binding_index, binding in enumerate(rows):
             if set(binding) != names or any(not value for value in binding.values()):
                 raise ActionPlanError(
-                    f"{path}.bindings[{binding_index}] must supply the same nonempty well names."
+                    f"{path}.{row_path}[{binding_index}] must supply the same nonempty well names."
                 )
             for body_index, item in enumerate(action.actions):
                 if isinstance(item, (Stroke, Mix)) and item.well.startswith("$"):
@@ -309,7 +406,7 @@ def _expand_actions(plan: ActionPlan) -> tuple[list[PrimitiveAction], list[str]]
                     assert symbol is not None
                     item = item.model_copy(update={"well": binding[symbol.group(1)]})
                 expanded.append(item)
-                paths.append(f"{path}.bindings[{binding_index}].actions[{body_index}]")
+                paths.append(f"{path}.{row_path}[{binding_index}].actions[{body_index}]")
     if len(expanded) > _MAX_EXPANDED_ACTIONS:
         raise ActionPlanError(f"Plan exceeds the {_MAX_EXPANDED_ACTIONS} action expansion limit.")
     return expanded, paths
@@ -327,6 +424,11 @@ def _facts_are_valid(labware: Mapping[str, LabwareFacts],
     for name, facts in labware.items():
         if not facts.wells:
             raise ValueError(f"Trusted labware {name!r} has no wells.")
+        if facts.ordered_wells and (
+            len(facts.ordered_wells) != len(facts.wells) or
+            set(facts.ordered_wells) != facts.wells
+        ):
+            raise ValueError(f"Trusted labware {name!r} has an invalid well ordering.")
         if not facts.multichannel_anchor_wells <= facts.wells:
             raise ValueError(f"Trusted labware {name!r} has an anchor outside its well set.")
         if facts.multichannel_anchor_wells and not facts.multichannel_compatible:
@@ -388,7 +490,6 @@ def compile_actions(
         raise ValueError("refill_authorized must be a trusted boolean.")
     trusted_modules = module_catalog or {}
     _facts_are_valid(labware_catalog, pipette_catalog, trusted_modules)
-    expanded_actions, action_paths = _expand_actions(plan)
 
     module_loads: dict[str, ModuleLoad] = {}
     occupied_slots: set[int] = set()
@@ -444,6 +545,8 @@ def compile_actions(
                 raise ActionPlanError(f"Deck slot {item.slot} is assigned more than once.")
             occupied_slots.add(item.slot)
         loads[item.id] = item
+
+    expanded_actions, action_paths = _expand_actions(plan, loads, labware_catalog)
 
     instruments: dict[str, PipetteLoad] = {}
     mounts: set[str] = set()

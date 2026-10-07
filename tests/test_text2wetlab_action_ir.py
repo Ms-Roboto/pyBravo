@@ -448,3 +448,107 @@ def test_loop_body_requires_its_own_evidence_reference():
             draft, labware_catalog=LABWARE, pipette_catalog=PIPETTES,
             source_spans=SPANS, instruction=INSTRUCTION,
         )
+
+
+def _catalog_selector_draft() -> dict:
+    draft = _mapped_draft()
+    loop = draft["actions"][0]
+    loop.pop("bindings")
+    loop["selector"] = {
+        "kind": "catalog_wells", "relation": "zip",
+        "series": [
+            {"binding": "source_well", "labware": "source", "mode": "all"},
+            {"binding": "target_well", "labware": "target", "mode": "all"},
+        ],
+    }
+    return draft
+
+
+def test_catalog_selector_compacts_ninety_six_explicit_well_mappings():
+    draft = _catalog_selector_draft()
+    ordered = tuple(f"{row}{column}" for column in range(1, 13)
+                    for row in "ABCDEFGH")
+    facts = {
+        "synthetic_96_tiprack_20ul": LabwareFacts(
+            frozenset(ordered), ordered_wells=ordered, is_tiprack=True,
+            tip_capacity_ul=20,
+        ),
+        "synthetic_source": LabwareFacts(frozenset(ordered), ordered_wells=ordered),
+        "synthetic_target": LabwareFacts(frozenset(ordered), ordered_wells=ordered),
+    }
+    code = _compile(draft, labware=facts)
+    assert code.count(".pick_up_tip()") == 96
+    assert code.count(".aspirate(") == 96
+    assert code.count(".dispense(") == 96
+    assert "lw_1.wells_by_name()['H12']" in code
+    assert "lw_2.wells_by_name()['H12']" in code
+    assert code.index("lw_1.wells_by_name()['A1']") < code.index("lw_1.wells_by_name()['H12']")
+
+
+def test_catalog_selector_uses_model_named_columns_in_selected_order():
+    draft = _catalog_selector_draft()
+    series = draft["actions"][0]["selector"]["series"]
+    for item in series:
+        item["mode"] = "column_anchors"
+        item["columns"] = [2, 1]
+    ordered = tuple(f"{row}{column}" for column in (1, 2)
+                    for row in "ABCDEFGH")
+    anchors = frozenset({"A1", "A2"})
+    facts = {
+        name: LabwareFacts(
+            frozenset(ordered), ordered_wells=ordered,
+            is_tiprack=name == "synthetic_96_tiprack_20ul",
+            tip_capacity_ul=20 if name == "synthetic_96_tiprack_20ul" else None,
+            multichannel_compatible=True,
+            multichannel_anchor_wells=anchors,
+        ) for name in LABWARE
+    }
+    multi = {"synthetic_p20": PipetteFacts(1, 20, 8)}
+    code = _compile(draft, labware=facts, pipettes=multi)
+    assert code.count(".pick_up_tip()") == 2
+    assert code.index("lw_1.wells_by_name()['A2']") < code.index("lw_1.wells_by_name()['A1']")
+    series[1]["columns"] = [99]
+    with pytest.raises(ActionPlanError, match="absent columns"):
+        _compile(draft, labware=facts, pipettes=multi)
+
+
+def test_catalog_selector_rejects_ambiguous_or_wrong_labware_relations():
+    draft = _catalog_selector_draft()
+    ordered = ("A1", "A2")
+    facts = {
+        "synthetic_96_tiprack_20ul": LABWARE["synthetic_96_tiprack_20ul"],
+        "synthetic_source": LabwareFacts(frozenset(ordered), ordered_wells=ordered),
+        "synthetic_target": LabwareFacts(frozenset(ordered), ordered_wells=ordered),
+    }
+    draft["actions"][0]["bindings"] = [{"source_well": "A1", "target_well": "A1"}]
+    with pytest.raises(ActionPlanError, match="exactly one"):
+        _compile(draft, labware=facts)
+    draft["actions"][0].pop("bindings")
+    draft["actions"][0]["actions"][1]["labware"] = "target"
+    with pytest.raises(ActionPlanError, match="different labware"):
+        _compile(draft, labware=facts)
+    draft["actions"][0]["actions"][1]["labware"] = "source"
+    draft["actions"][0]["selector"]["series"][1]["columns"] = [1]
+    with pytest.raises(ActionPlanError, match="cannot zip unequal"):
+        _compile(draft, labware=facts)
+
+
+def test_catalog_selector_requires_trusted_ordered_wells():
+    with pytest.raises(ActionPlanError, match="needs trusted ordered catalog wells"):
+        _compile(_catalog_selector_draft())
+
+
+def test_catalog_selector_same_name_relation_ignores_different_catalog_order():
+    draft = _catalog_selector_draft()
+    draft["actions"][0]["selector"]["relation"] = "same_name"
+    facts = {
+        "synthetic_96_tiprack_20ul": LABWARE["synthetic_96_tiprack_20ul"],
+        "synthetic_source": LabwareFacts(
+            frozenset({"A1", "A2"}), ordered_wells=("A1", "A2")),
+        "synthetic_target": LabwareFacts(
+            frozenset({"A1", "A2"}), ordered_wells=("A2", "A1")),
+    }
+    code = _compile(draft, labware=facts)
+    assert code.index("lw_2.wells_by_name()['A1']") < code.index(
+        "lw_2.wells_by_name()['A2']"
+    )
