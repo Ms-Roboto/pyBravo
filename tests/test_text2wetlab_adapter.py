@@ -1167,6 +1167,30 @@ async def test_duplicate_rejected_code_skips_resimulation_and_demands_change(tmp
         assert attempt["candidate_path"] == str(candidate)
 
 
+@pytest.mark.asyncio
+async def test_repeated_static_failure_gets_fresh_prompt_and_local_sampling(tmp_path):
+    source = VALID_PROTOCOL.replace("protocol.load_instrument(", "protocol.load_pipette(")
+    prompts = []
+    temperatures = []
+
+    async def completion(messages, schema, **kwargs):
+        prompts.append(messages)
+        temperatures.append(kwargs["config"].temperature)
+        return StructuredResponse({"code": source}, {"model": "local-qwen"})
+
+    with pytest.raises(adapter.GenerationError, match="byte-for-byte identical"):
+        await adapter.generate_ot2_protocol(
+            "Transfer samples.", tmp_path, completion=completion,
+            config=LocalLLMConfig(temperature=0, retries=0), repair_attempts=2,
+        )
+    assert temperatures == [0, 0, 0.2]
+    assert "byte-for-byte identical" in prompts[2][-1]["content"]
+    assert "previous code is omitted" in prompts[2][-1]["content"]
+    trace = json.loads((tmp_path / "generation_trace.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][1]["duplicate_of_attempt"] == 1
+    assert trace["attempts"][2]["temperature"] == 0.2
+
+
 def test_simulator_subprocess_does_not_receive_secrets_or_proxy_settings(tmp_path, monkeypatch):
     seen = {}
 

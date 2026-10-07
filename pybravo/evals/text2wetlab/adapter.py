@@ -1312,11 +1312,14 @@ async def generate_ot2_protocol(
     prior_code: str | None = None
     prior_error: str | None = None
     rejected_hashes: dict[str, int] = {}
+    static_rejected_hashes: dict[str, int] = {}
+    generation_config = config or LocalLLMConfig.from_env()
     try:
         for index in range(repair_attempts + 1):
             messages = list(base_messages)
             if prior_error is not None:
                 guidance = _repair_guidance(prior_error, prior_code or "")
+                repeated = "byte-for-byte identical" in prior_error
                 messages.append({
                     "role": "user",
                     "content": (
@@ -1324,11 +1327,17 @@ async def generate_ot2_protocol(
                         "all experimental requirements. Return a fresh complete code string.\n\n"
                         f"Failure: {prior_error[:4000]}\n\n"
                         + (f"Specific correction:\n{guidance}\n\n" if guidance else "")
-                        + f"Previous code:\n{(prior_code or '')[:100_000]}"
+                        + ("The previous code is omitted because repeating it did not resolve the failure. "
+                           "Rebuild the final protocol from the supplied task and source, with no exploratory "
+                           "steps or abandoned calculations in the executable file."
+                           if repeated else f"Previous code:\n{(prior_code or '')[:100_000]}")
                     ),
                 })
+            attempt_config = (replace(generation_config, temperature=max(generation_config.temperature, 0.2))
+                              if prior_error and "byte-for-byte identical" in prior_error
+                              else generation_config)
             response = await complete(
-                messages, _CODE_SCHEMA, config=config, schema_name="ot2_protocol",
+                messages, _CODE_SCHEMA, config=attempt_config, schema_name="ot2_protocol",
                 http_client=http_client,
             )
             raw_code = response.payload.get("code")
@@ -1350,9 +1359,20 @@ async def generate_ot2_protocol(
                 "model": model_metadata.get("model"),
                 "usage": model_metadata.get("usage"),
                 "model_elapsed_s": model_metadata.get("elapsed_s"),
+                "temperature": attempt_config.temperature,
                 "validation": "passed" if failure is None else "failed",
             }
             if failure is not None:
+                repeated_from = static_rejected_hashes.get(attempt["code_sha256"])
+                if repeated_from is not None:
+                    attempt["duplicate_of_attempt"] = repeated_from
+                    failure = (
+                        f"Generated code is byte-for-byte identical to rejected attempt "
+                        f"{repeated_from}. Repeating unchanged code cannot fix the validation failure. "
+                        f"Previous failure: {failure}"
+                    )
+                else:
+                    static_rejected_hashes[attempt["code_sha256"]] = index + 1
                 if code:
                     rejected = directory / f"rejected_attempt_{index + 1}.py.txt"
                     rejected.write_text(code, encoding="utf-8")
