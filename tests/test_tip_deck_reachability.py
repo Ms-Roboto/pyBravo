@@ -95,3 +95,44 @@ def test_reachability_is_rechecked_after_teachpoint_changes(bravo):
     bravo.teachpoints.set_teachpoint(2, Axis.Y, 227.97)
     with pytest.raises(RuntimeError, match="outside the configured X/Y range"):
         bravo._validated_tip_wells(bravo.deck.get_stack(2).top, bravo.head_mode, selection)
+
+
+def test_inaccessible_full_rack_column_names_requested_region_and_reachable_alternative(bravo):
+    bravo.set_labware(1, "tipbox-384", tipbox_fill_state="full")
+    bravo.set_head_mode("column", "back_left", column_count=1)
+    with pytest.raises(RuntimeError, match=r"Tip selection \(0, 0\) is not accessible for pickup") as error:
+        bravo.set_tip_selection(1, 0, 0)
+    message = str(error.value)
+    assert "rack A1:P1 at deck position 1" in message
+    assert "16 × 1 barrels" in message
+    assert "Remaining tips outside this region block pickup" in message
+    assert "Choose a reachable pickup region: A24:P24." in message
+    assert bravo._tip_selection is None
+    assert len(bravo._fresh_tip_wells(1)) == 384
+
+
+def test_missing_selected_tips_are_not_reported_as_blocked_by_other_tips(bravo):
+    bravo.set_labware(1, "tipbox-384", tipbox_fill_state="full")
+    bravo.set_head_mode("column", "back_left", column_count=1)
+    bravo._tipbox_occupancy[1].remove((0, 23))
+    with pytest.raises(RuntimeError) as error:
+        bravo.set_tip_selection(1, 0, 23)
+    message = str(error.value)
+    assert "rack A24:P24 at deck position 1" in message
+    assert "missing 1 tip" in message
+    assert "Remaining tips outside this region block pickup" not in message
+    assert "No reachable legal pickup region" in message
+    assert bravo._tip_selection is None
+    assert len(bravo._fresh_tip_wells(1)) == 383
+
+
+def test_inaccessible_selection_never_suggests_an_unreachable_column(bravo):
+    bravo.set_labware(3, "tipbox-384", tipbox_fill_state="full")
+    bravo.set_head_mode("column", "back_left", column_count=1)
+    with pytest.raises(RuntimeError) as error:
+        bravo.set_tip_selection(3, 0, 0)
+    message = str(error.value)
+    assert "rack A1:P1 at deck position 3" in message
+    assert "No reachable legal pickup region" in message
+    assert "Choose a reachable pickup region: A24:P24" not in message
+    assert bravo._tip_selection is None

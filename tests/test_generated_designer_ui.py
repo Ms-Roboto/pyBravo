@@ -104,6 +104,7 @@ const assert = require('node:assert/strict');
 const progress = {textContent:''};
 const document = {getElementById(id) {return id === 'playback-progress' ? progress : {style:{}};}};
 let executionMode = 'execute', currentWorkflowId = 'draft-1';
+const designerState={graph:{_nodes:[]}};
 let walkthroughResponse = false;
 const API_BASE = '';
 const calls = [];

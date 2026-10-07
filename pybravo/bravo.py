@@ -2626,7 +2626,47 @@ class Bravo:
                     selection.col,
                     purpose=purpose,
                 ):
-                    raise RuntimeError(f"Tip selection ({selection.row}, {selection.col}) is not accessible for {purpose}")
+                    def well_name(row, col):
+                        label = ""
+                        number = int(row) + 1
+                        while number:
+                            number, remainder = divmod(number - 1, 26)
+                            label = chr(65 + remainder) + label
+                        return f"{label}{int(col) + 1}"
+
+                    def region_name(row, col, row_count, column_count):
+                        first = well_name(row, col)
+                        last = well_name(row + row_count - 1, col + column_count - 1)
+                        return first if first == last else f"{first}:{last}"
+
+                    selected = set(wells)
+                    if purpose == "pickup":
+                        missing = len(selected - occupied)
+                        reason = (
+                            f"The selected region is missing {missing} {'tip' if missing == 1 else 'tips'}."
+                            if missing else
+                            "Remaining tips outside this region block pickup for the selected head footprint."
+                        )
+                    elif selected & occupied:
+                        reason = "The selected return region already contains tips."
+                    else:
+                        reason = "Choose an empty return region next to the tips already returned."
+                    legal = self._legal_tip_anchors(selection.location, labware, head_mode, purpose=purpose)
+                    choices = [
+                        region_name(a["row"], a["col"], a["row_count"], a["column_count"])
+                        for a in legal[:3]
+                    ]
+                    suggestion = (
+                        f"Choose a reachable {purpose} region: {', '.join(choices)}."
+                        if choices else f"No reachable legal {purpose} region is available with this rack inventory and head footprint."
+                    )
+                    region = region_name(selection.row, selection.col, selection.row_count, selection.column_count)
+                    raise RuntimeError(
+                        f"Tip selection ({selection.row}, {selection.col}) is not accessible for {purpose}: "
+                        f"rack {region} at deck position {selection.location}, "
+                        f"{head_mode.to_dict()['display_text']} ({head_mode.row_count} × {head_mode.column_count} barrels). "
+                        f"{reason} {suggestion}"
+                    )
         return wells
 
     def _effective_tip_selection(

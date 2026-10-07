@@ -1545,7 +1545,7 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
         </div>
         <div class="hm-modal-footer">
             <button class="btn" data-hm-close="tipbox">Cancel</button>
-            <button class="btn btn-primary" id="hm-tipbox-save">Save</button>
+            <button class="btn btn-primary" id="hm-tipbox-save">Apply selection</button>
         </div>
     </div>
 </div>
@@ -2603,6 +2603,102 @@ function openTipboxPicker(location, headMode, anchorRow, anchorCol, onSave, opts
     void refreshTipboxLegalAnchors();
 }
 
+// A head or deck-location change can invalidate a previously legal rack cell.
+// Resolve against the same inventory/reachability service as the picker before
+// writing a replacement; unknown or unreachable choices remain visible errors.
+async function resolveNodeTipAnchor(node) {
+    if (!['tips/TipsOn', 'tips/TipsOff'].includes(node?.type)) return false;
+    // Loop/variable positions retain their explicit per-run anchor contract;
+    // there is no single deck position to resolve safely in this editor.
+    if (/^(iter|var):/i.test(String(node.properties.location))) {
+        node._tipAnchorRequest = null;
+        node._tipAnchorResolution = null;
+        return false;
+    }
+    const graph = designerState.graph;
+    const tab = getActiveTab();
+    const target = tab?.protocolMetadata?.protocol_simulation_target;
+    const location = Number(node.properties.location);
+    const upstream = node.type === 'tips/TipsOff' ? findUpstreamFlowNode(node, ['tips/TipsOn'], graph) : node;
+    const headMode = upstream?.properties?.head_mode || {subset_type:'all_barrels', subset_config:'back_left'};
+    const hm = normalizeHeadModeForUi(target?.head_type || designerState.headType, headMode);
+    const detail = getTipboxDetailAtLocation(location);
+    const geometry = getTipboxGeometryFromDetail(detail);
+    const request = {};
+    const inputs = () => JSON.stringify([node.properties, upstream?.properties?.head_mode, designerState.deckConfig, target]);
+    const before = inputs();
+    node._tipAnchorRequest = request;
+    node._tipAnchorResolution = {status:'pending', message:'Checking a reachable rack placement…'};
+    const current = () => node._tipAnchorRequest === request && designerState.graph === graph
+        && getActiveTab() === tab && inputs() === before;
+    const refresh = () => {
+        if (designerState.graphCanvas?.selected_nodes?.[node.id] === node) renderPropertiesPanel(node);
+    };
+    refresh();
+    try {
+        const rackId = detail?.labware_id || detail?.id;
+        if (!Number.isInteger(location) || !rackId) throw new Error('Choose a catalog tip box at this deck position, then pick a reachable region.');
+        let legal;
+        if (TRASH_BASE_CLASSES.has(String(detail.base_class || '').toLowerCase())) {
+            if (node.type !== 'tips/TipsOff') throw new Error('Fresh tips cannot be picked up from tip trash.');
+            legal = [{row:0, col:0}];
+        } else {
+            if (!geometry) throw new Error('This rack needs catalog rows and columns before a placement can be selected.');
+            const state = simulateTipboxOccupancy(node, graph);
+            const params = new URLSearchParams({
+                location:String(location), labware_id:rackId,
+                subset_type:hm.subset_type, subset_config:hm.subset_config,
+                row_count:String(hm.row_count), column_count:String(hm.column_count),
+                tipbox_rows:String(geometry.rows), tipbox_cols:String(geometry.cols),
+                row_stride:String(node.properties.row_stride || 1), col_stride:String(node.properties.col_stride || 1),
+                purpose:node.type === 'tips/TipsOff' ? 'return' : 'pickup',
+                occupied_cells:Array.from(state.get(location) || []).join(','),
+                fresh_cells:Array.from(state.fresh.get(location) || []).join(','),
+            });
+            if (target) params.set('simulation_target', JSON.stringify(target));
+            const result = await apiCall(`/api/tipbox/legal_anchors?${params.toString()}`);
+            if (!current()) return false;
+            if (!result?.reachability?.assessed) throw new Error('Deck reachability could not be checked. Pick a rack region after checking the catalog and active profile.');
+            legal = Array.isArray(result.legal_anchors) ? result.legal_anchors : [];
+            if (!legal.length) throw new Error(`No legal ${node.type === 'tips/TipsOff' ? 'empty return' : 'fresh-tip'} region is reachable at position ${location}. Change the deck position or head corner.`);
+        }
+        if (!current()) return false;
+        const anchor = legal.find(item => Number(item.row) === Number(node.properties.tip_anchor_row)
+            && Number(item.col) === Number(node.properties.tip_anchor_col)) || legal[0];
+        if (!Number.isInteger(Number(anchor.row)) || !Number.isInteger(Number(anchor.col))) throw new Error('The rack lookup did not return a valid placement. Use Pick to check it again.');
+        node.properties.tip_anchor_row = Number(anchor.row);
+        node.properties.tip_anchor_col = Number(anchor.col);
+        node._tipAnchorResolution = {status:'ready', message:`Reachable anchor R${Number(anchor.row) + 1} C${Number(anchor.col) + 1} selected.`};
+        node.setDirtyCanvas(true);
+        markActiveDirty();
+        refresh();
+        return true;
+    } catch (error) {
+        if (!current()) return false;
+        node._tipAnchorResolution = {status:'error', message:error.message || 'Rack placement lookup failed. Use Pick to check it again.'};
+        refresh();
+        return false;
+    } finally {
+        if (node._tipAnchorRequest === request && node._tipAnchorResolution?.status === 'pending') node._tipAnchorResolution = null;
+    }
+}
+function resolveTipSetupChange(node) {
+    const graph = designerState.graph;
+    const update = (async () => {
+        if (!await resolveNodeTipAnchor(node)) return;
+        if (node.type !== 'tips/TipsOn' || designerState.graph !== graph) return;
+        // Tips Off inherits this footprint and the updated pickup inventory.
+        for (const other of graph?._nodes || []) {
+            if (other.type === 'tips/TipsOff' && findUpstreamFlowNode(other, ['tips/TipsOn'], graph) === node) await resolveNodeTipAnchor(other);
+        }
+    })();
+    const finished = update.finally(() => {
+        if (node._tipAnchorUpdatePromise === finished) node._tipAnchorUpdatePromise = null;
+    });
+    node._tipAnchorUpdatePromise = finished;
+    return finished;
+}
+
 function closeTipboxPicker() {
     document.getElementById('hm-modal-tipbox').classList.remove('open');
     tbOnSave = null;
@@ -2759,11 +2855,11 @@ function renderTipboxGrid() {
     } else if (tbLegalAnchors.length === 1) {
         summary.textContent =
             `Head footprint ${normalized.row_count}×${normalized.column_count} (${describeHeadMode(normalized)}). ` +
-            `Only one legal placement — click the green region to confirm.`;
+            `Only one legal placement — Apply selection to use it in the task.`;
     } else {
         summary.textContent =
             `Head footprint ${normalized.row_count}×${normalized.column_count} (${describeHeadMode(normalized)}). ` +
-            `${tbLegalAnchors.length} legal placements — click any green region to choose.`;
+            `${tbLegalAnchors.length} legal placements — choose a green region, then Apply selection.`;
     }
     if (tbLegalAnchors.length && tbDraft.lookupMessage) summary.textContent += ' ' + tbDraft.lookupMessage;
     document.getElementById('hm-tipbox-save').disabled = !tbDraft.reachability?.assessed || !matched;
@@ -5003,9 +5099,11 @@ function renderPropertiesPanel(node) {
                     node.properties[key] = newHm;
                     summary.textContent = describeHeadMode(newHm);
                     node.setDirtyCanvas(true);
+                    markActiveDirty();
                     // Re-render so the tip anchor preview reflects the new
                     // head-mode footprint immediately.
                     renderPropertiesPanel(node);
+                    void resolveTipSetupChange(node);
                 });
             });
             row.appendChild(btn);
@@ -5051,15 +5149,25 @@ function renderPropertiesPanel(node) {
                         || { subset_type: 'all_barrels', subset_config: 'back_left' };
                     purpose = 'pickup';
                 }
-                openTipboxPicker(loc, headMode, rowVal, colVal, (newRow, newCol) => {
+                openTipboxPicker(loc, headMode, node.properties.tip_anchor_row, node.properties.tip_anchor_col, (newRow, newCol) => {
                     node.properties.tip_anchor_row = newRow;
                     node.properties.tip_anchor_col = newCol;
+                    node._tipAnchorRequest = null;
+                    node._tipAnchorResolution = null;
                     summary.textContent = `Anchor R${newRow + 1} C${newCol + 1}`;
                     node.setDirtyCanvas(true);
+                    markActiveDirty();
+                    renderPropertiesPanel(node);
                 }, { purpose, sourceNode: node });
             });
             row.appendChild(btn);
             field.appendChild(row);
+            if (node._tipAnchorResolution) {
+                const status = document.createElement('div');
+                status.style.cssText = `font-size:11px;line-height:1.4;margin-top:5px;color:${node._tipAnchorResolution.status === 'error' ? '#ff8a8a' : 'var(--text-dim)'}`;
+                status.textContent = node._tipAnchorResolution.message;
+                field.appendChild(status);
+            }
         } else if (key === 'script') {
             // Multi-line Python editor for logic/Script nodes. Inline textarea
             // is a quick-glance / quick-tweak surface; the "Edit in big editor"
@@ -5260,6 +5368,7 @@ function renderPropertiesPanel(node) {
                     node.properties[key] = raw;
                 }
                 node.setDirtyCanvas(true);
+                if (key === 'location' && node.type.startsWith('tips/')) { markActiveDirty(); void resolveTipSetupChange(node); }
                 const old = field.querySelector('.var-hint'); if (old) old.remove();
                 appendVarHint(field, input.value);
             });
@@ -5273,6 +5382,7 @@ function renderPropertiesPanel(node) {
             input.addEventListener('change', () => {
                 node.properties[key] = input.value;
                 node.setDirtyCanvas(true);
+                if (key === 'location' && node.type.startsWith('tips/')) { markActiveDirty(); void resolveTipSetupChange(node); }
                 // Refresh var-hint since the interpolation key may have changed.
                 const old = field.querySelector('.var-hint'); if (old) old.remove();
                 appendVarHint(field, input.value);
@@ -6749,6 +6859,7 @@ function validateWorkflow() {
             node.type === 'flow/Frame') continue;
 
         const props = node.properties || {};
+        if (node._tipAnchorResolution && node._tipAnchorResolution.status !== 'ready') errors.push(`${node.title}: ${node._tipAnchorResolution.message}`);
 
         // Check required volume
         if (props.volume !== undefined && props.volume <= 0) {
@@ -6930,6 +7041,16 @@ async function runWorkflow({ walkthrough = false } = {}) {
         return;
     }
 
+    // A just-saved head mode may still be resolving its rack placement.
+    // Wait before serializing so Simulate cannot save the old R1/C1 anchor.
+    const startingGraph = designerState.graph;
+    while (true) {
+        const pending = (startingGraph?._nodes || []).map(node => node._tipAnchorUpdatePromise).filter(Boolean);
+        if (!pending.length) break;
+        progress.textContent = 'Checking updated tip placements…';
+        await Promise.allSettled(pending);
+        if (designerState.graph !== startingGraph) { progress.textContent = 'Workflow changed while checking tip placements. Start the selected workflow again.'; return; }
+    }
     // Validate first
     const errors = validateWorkflow();
     if (errors.length > 0) {
