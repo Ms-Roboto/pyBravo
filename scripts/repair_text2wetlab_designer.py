@@ -29,6 +29,8 @@ from generate_text2wetlab_designer import (
 )
 
 from pybravo.evals.text2wetlab.source_context import prepare_scientific_source
+from pybravo.head_mode import head_geometry_for_type
+from pybravo.types import HeadType
 from pybravo.workflow.drafter.llm import DrafterConfig, draft_workflow
 from pybravo.workflow.drafter.scientific_patterns import audit_scientific_patterns
 from pybravo.workflow.drafter.scientific_repair import (
@@ -320,36 +322,108 @@ def _catalog_issues(workflow: dict[str, Any], context: dict[str, Any], instructi
     return issues
 
 
-def _catalog_brief(context: dict[str, Any]) -> str:
-    """Small active-profile option list, never a claim of physical loading."""
-    choices = {
-        "machine_id": context.get("machine_id"),
-        "head_type": context.get("head_type"),
-        "liquid_class_options": [
-            {key: item.get(key) for key in ("liquid_class_id", "name", "tip_id", "tip_capacity_ul")}
-            for item in context.get("liquid_classes") or [] if isinstance(item, dict)
-        ],
-        "compatible_tipbox_options": [
-            {key: item.get(key) for key in (
-                "labware_id", "labware_name", "tip_definition_id", "tip_capacity_ul", "execution_ready")}
-            for item in context.get("tipbox_choices") or [] if isinstance(item, dict)
+def _hardware_option_summary(context: dict[str, Any]) -> dict[str, Any]:
+    """Join class/tip/rack records before presenting hardware choices to Qwen.
+
+    A catalog pairing is only a geometric/capacity possibility. It never
+    certifies the reagent method, deck contents, teachpoints, or a physical run.
+    """
+    head_name = context.get("head_type")
+    head = HeadType.__members__.get(head_name) if isinstance(head_name, str) else None
+    geometry = head_geometry_for_type(head) if head else None
+    ready_pairs = [item for item in context.get("tipbox_choices") or []
+                   if isinstance(item, dict) and item.get("execution_ready") is True]
+    planning_pairs = [item for item in context.get("tipbox_choices") or []
+                      if isinstance(item, dict) and item.get("execution_ready") is not True]
+
+    def positive(value: Any) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if 0 < number < float("inf") else None
+
+    combinations: list[dict[str, Any]] = []
+    class_limitations: list[dict[str, str]] = []
+    for liquid_class in context.get("liquid_classes") or []:
+        if not isinstance(liquid_class, dict):
+            continue
+        identifier = str(liquid_class.get("liquid_class_id") or liquid_class.get("name") or "")
+        tip_id = str(liquid_class.get("tip_id") or "")
+        if not identifier:
+            continue
+        if ((context.get("machine_id") and liquid_class.get("machine_id")
+             and liquid_class["machine_id"] != context["machine_id"])
+                or (head_name and liquid_class.get("head_type")
+                    and liquid_class["head_type"] != head_name)):
+            class_limitations.append({"liquid_class_id": identifier,
+                                      "reason": "class belongs to another machine or head"})
+            continue
+        matches = [pair for pair in ready_pairs if pair.get("tip_definition_id") == tip_id]
+        if not matches:
+            class_limitations.append({"liquid_class_id": identifier,
+                                      "reason": "no execution-ready catalog tip-box pairing for this class's tip"})
+            continue
+        points = (liquid_class.get("equation") or {}).get("control_points") or []
+        calibrated = [positive(point.get("desired_ul")) for point in points
+                      if isinstance(point, dict)]
+        calibrated = [value for value in calibrated if value is not None]
+        for pair in matches:
+            limits = [positive(liquid_class.get("tip_capacity_ul")),
+                      positive(pair.get("tip_capacity_ul")),
+                      max(calibrated) if calibrated else None]
+            limits = [value for value in limits if value is not None]
+            if not limits:
+                class_limitations.append({"liquid_class_id": identifier,
+                                          "reason": "tip or calibration volume limit is unknown"})
+                continue
+            combinations.append({
+                "liquid_class_id": identifier,
+                "liquid_class_name": liquid_class.get("name"),
+                "tip_definition_id": tip_id,
+                "tip_box_labware_id": pair.get("labware_id"),
+                "max_single_stroke_ul": min(limits),
+                "required_head_mode": pair.get("required_head_mode"),
+            })
+    return {
+        "machine_id": context.get("machine_id"), "head_type": head_name,
+        "head_footprint": ({"rows": geometry.rows, "columns": geometry.columns,
+                            "channels": geometry.rows * geometry.columns,
+                            "pitch_x_mm": geometry.pitch_x_mm,
+                            "pitch_y_mm": geometry.pitch_y_mm} if geometry else None),
+        "catalog_supported_liquid_pairings": combinations,
+        "planning_only_liquid_classes": class_limitations,
+        "planning_only_tip_boxes": [
+            {key: item.get(key) for key in ("labware_id", "tip_definition_id", "missing_metadata")}
+            for item in planning_pairs
         ],
         "labware_options": [
             {key: item.get(key) for key in ("id", "name", "kind", "base_class", "wells")}
             for item in context.get("labware") or [] if isinstance(item, dict)
         ],
     }
+
+
+def _catalog_brief(context: dict[str, Any]) -> str:
+    """Small joined active-profile choices, never a claim of physical loading."""
+    choices = _hardware_option_summary(context)
     return (
         "\n\nACTIVE BRAVO PROFILE OPTIONS (read-only catalog facts; no labware or tips "
         "are confirmed loaded and no liquid method is declared qualified):\n"
         + json.dumps(choices, ensure_ascii=False, separators=(",", ":"))
-        + "\nChoose only catalog IDs and volume-compatible head/tip/class pairings. "
-        "For each proposed tip box on the deck, set tip_definition_id to the "
-        "exact matching independent tip ID. This proposes a consumable; it "
-        "does not confirm the physical rack contents or fresh-tip inventory. "
-        "If a task cannot be supported on this active profile, preserve its "
-        "scientific intent with an explicit manual handoff and review issue; "
-        "do not manufacture instrument settings or hardware readiness."
+        + "\nFor a liquid primitive, choose a complete entry from "
+        "catalog_supported_liquid_pairings: use its exact class ID, tip ID, "
+        "rack ID, and no more than max_single_stroke_ul per aspiration or "
+        "dispense. A catalog pairing still requires reagent-method and physical "
+        "loading review. Planning-only entries are not executable options. "
+        "A full-head mode cannot address labware with fewer wells than the "
+        "head_footprint.channels count; use an explicitly supported partial "
+        "mode only after checking pitch and geometry. For each proposed tip "
+        "box, set tip_definition_id to the paired independent tip ID. If no "
+        "catalog-supported pairing or geometry can perform a stage, preserve "
+        "its scientific intent in an explicit manual handoff and a visible "
+        "review issue. Never manufacture instrument settings, consumables, "
+        "or hardware readiness."
     )
 
 

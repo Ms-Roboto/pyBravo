@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -323,6 +324,44 @@ def test_catalog_gate_treats_incomplete_tip_metadata_as_planning_only():
     codes = {item["code"] for item in script._catalog_issues(
         workflow, context, INSTRUCTION.decode())}
     assert "TIP_PAIR_METADATA_INCOMPLETE" in codes
+
+
+def test_repair_brief_joins_only_ready_class_tip_rack_and_stroke_options():
+    context = {
+        "machine_id": "bravo-1", "head_type": "HT_384_D_70",
+        "labware": [{"id": "plate-96", "wells": 96, "base_class": "microplate"}],
+        "tipbox_choices": [
+            {"labware_id": "rack-384", "tip_definition_id": "st_10ul",
+             "tip_capacity_ul": 10, "execution_ready": True},
+            {"labware_id": "rack-384", "tip_definition_id": "st_70ul",
+             "tip_capacity_ul": 70, "execution_ready": False,
+             "missing_metadata": ["tip_length"]},
+        ],
+        "liquid_classes": [
+            {"liquid_class_id": "class-10", "name": "ST10", "machine_id": "bravo-1",
+             "head_type": "HT_384_D_70", "tip_id": "st_10ul", "tip_capacity_ul": 10,
+             "equation": {"control_points": [{"desired_ul": 0}, {"desired_ul": 8}]}},
+            {"liquid_class_id": "class-70", "name": "ST70", "machine_id": "bravo-1",
+             "head_type": "HT_384_D_70", "tip_id": "st_70ul", "tip_capacity_ul": 70},
+            {"liquid_class_id": "class-foreign", "name": "Foreign", "machine_id": "other",
+             "head_type": "HT_384_D_70", "tip_id": "st_10ul", "tip_capacity_ul": 10},
+        ],
+    }
+    options = script._hardware_option_summary(context)
+    assert options["head_footprint"]["channels"] == 384
+    assert options["catalog_supported_liquid_pairings"] == [{
+        "liquid_class_id": "class-10", "liquid_class_name": "ST10",
+        "tip_definition_id": "st_10ul", "tip_box_labware_id": "rack-384",
+        "max_single_stroke_ul": 8.0, "required_head_mode": None,
+    }]
+    assert {item["liquid_class_id"] for item in options["planning_only_liquid_classes"]} == {
+        "class-70", "class-foreign",
+    }
+    assert options["planning_only_tip_boxes"][0]["missing_metadata"] == ["tip_length"]
+    prompt = script._catalog_brief(context)
+    payload = json.loads(prompt.split("PROFILE OPTIONS", 1)[1].split("\n", 1)[1].split("\nFor a liquid", 1)[0])
+    assert payload["catalog_supported_liquid_pairings"] == options["catalog_supported_liquid_pairings"]
+    assert "full-head mode cannot address labware with fewer wells" in prompt
 
 
 def test_planned_move_does_not_prove_a_tip_supply_at_pickup_position():
