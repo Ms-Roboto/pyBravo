@@ -13,7 +13,7 @@ from pybravo.evals.text2wetlab.planning_runtime import (
     _parse_feedback,
     run_grounded_plan,
 )
-from pybravo.workflow.protocols.llm import StructuredResponse
+from pybravo.workflow.protocols.llm import ProtocolLLMError, StructuredResponse
 
 INSTRUCTION = "Move the reaction plate to a thermocycler by hand."
 
@@ -89,6 +89,22 @@ async def test_failed_plan_falls_back_without_becoming_protocol_fact(tmp_path):
     assert result.plan is None
     assert result.attempts[0]["status"] == "audit_failed"
     assert result.attempts[0]["issues"][0]["code"] == "empty_stage_plan"
+
+
+@pytest.mark.asyncio
+async def test_local_planning_timeout_falls_back_to_source_without_cloud(tmp_path):
+    async def completion(messages, schema, **kwargs):
+        raise ProtocolLLMError("Local Qwen request timed out")
+
+    result = await run_grounded_plan(
+        instruction=INSTRUCTION, scientific_source=None, geometry=None,
+        directory=tmp_path, completion=completion, config=None,
+    )
+    assert result.plan is None
+    assert result.attempts == ({
+        "number": 1, "status": "model_failed",
+        "error": "ProtocolLLMError: Local Qwen request timed out",
+    },)
 
 
 @pytest.mark.asyncio

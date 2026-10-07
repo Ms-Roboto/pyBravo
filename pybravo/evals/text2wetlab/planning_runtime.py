@@ -21,7 +21,7 @@ from pybravo.evals.text2wetlab.planning import (
     audit_plan,
     parse_plan,
 )
-from pybravo.workflow.protocols.llm import LocalLLMConfig, StructuredResponse
+from pybravo.workflow.protocols.llm import LocalLLMConfig, ProtocolLLMError, StructuredResponse
 
 _PLANNING_CHECKLIST = """Before returning the plan, check these distinctions against the task and paper:
 - A vessel described as empty at the start is a destination or later intermediate, not an initially available deck reagent. Give a generated source produced_by_stage equal to its earlier pipette or explicit manual handoff stage; never use its starting inventory quote as evidence that it already contains liquid. Its robot additions need stage_name equal to a later pipette stage.
@@ -121,10 +121,15 @@ async def run_grounded_plan(
     ]
     records: list[dict[str, Any]] = []
     for number in range(1, max_attempts + 1):
-        response = await completion(
-            messages, PLAN_SCHEMA, config=config, schema_name="ot2_evidence_plan",
-            http_client=http_client,
-        )
+        try:
+            response = await completion(
+                messages, PLAN_SCHEMA, config=config, schema_name="ot2_evidence_plan",
+                http_client=http_client,
+            )
+        except ProtocolLLMError as exc:
+            records.append({"number": number, "status": "model_failed",
+                            "error": f"{type(exc).__name__}: {exc}"})
+            return PlanningResult(None, tuple(records))
         payload = response.payload
         serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, allow_nan=False)
         record: dict[str, Any] = {
