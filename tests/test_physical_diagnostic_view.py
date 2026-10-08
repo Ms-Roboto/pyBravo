@@ -31,7 +31,7 @@ def modules(tmp_path_factory):
 IMPORTS = """
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {RobotScene} from './robot-scene.js?v=diagnostic-deck1';
+import {RobotScene} from './robot-scene.js?v=cellvis-lid1';
 import {createPhysicalDiagnosticView, prepareDiagnosticDeckDetails} from './physical-diagnostic-view.js';
 globalThis.location = {hostname:'test'};
 globalThis.WebSocket = class {constructor(){throw new Error('Diagnostic connected hardware WebSocket');}};
@@ -193,4 +193,161 @@ assert.equal(materialDisposals,1);
 assert.equal(container.children.length,0);
 assert.equal(currentScene.labwareRoot.children.length,0);
 assert.equal(currentScene.labwareTemplateCache.size,0);
+""", surface=True)
+
+
+def test_dimensioned_lid_uses_report_geometry_without_shrinking_plate(modules):
+    run_js(modules, """
+const lid_geometry={model:'manufacturer_exterior_envelope',length_mm:127.15,width_mm:85.05,
+    height_mm:10,seated_bottom_mm:6.8,source:'https://www.cellvis.com/drawing.png'};
+const evidence={...error,kind:'lid_access_blocked',geometry:lid_geometry.model,lid_geometry,
+    coordinate_frame:'machine_xyz_z_up_mm',lower_mm:[20,30,-130],upper_mm:[147.15,115.05,-120]};
+const source={'5':[{...plate,height_mm:14.33}]};
+const sourceBefore=JSON.stringify(source);
+const setup=prepareDiagnosticDeckDetails(source,evidence);
+assert.equal(JSON.stringify(source),sourceBefore);
+close(setup.detail.base_height_mm,14.33);
+close(setup.detail.total_height_mm,16.8);
+close(setup.detail.generated_lid.height_mm,10);
+close(setup.detail.generated_lid.length_mm,127.15);
+const view=createPhysicalDiagnosticView(container,{error:evidence,deckDetails:source});
+const result=await view.ready;
+assert.equal(result.dimensioned,true);assert.equal(result.sampledPoseShown,false);
+const selected=currentScene.labwareRoot.children[0];
+const lid=selected.children.find(child=>child.userData.labwarePart==='lid');
+assert.equal(lid.userData.geometryModel,'manufacturer_exterior_envelope');
+const localBounds=new THREE.Box3().setFromObject(lid);
+close(localBounds.max.x-localBounds.min.x,0.12715);
+close(localBounds.max.z-localBounds.min.z,0.08505);
+assert.equal(lid.children.find(child=>child.isMesh).material.opacity,0.28);
+view.dispose();
+""", surface=True)
+
+
+def test_sampled_lid_collision_freezes_snapshot_and_draws_recorded_tip_axis(modules):
+    run_js(modules, """
+const originalLoad=RobotScene.prototype._loadURDF;
+const jointValues={};
+RobotScene.prototype._buildTipTemplate=async()=>null;
+RobotScene.prototype._loadURDF=async function(){
+    await originalLoad.call(this);
+    this.urdfRobot.setJointValue=(name,value)=>{jointValues[name]=value;};
+};
+const lid_geometry={model:'manufacturer_exterior_envelope',length_mm:127.15,width_mm:85.05,
+    height_mm:10,seated_bottom_mm:6.8,source:'https://www.cellvis.com/drawing.png'};
+const pose={X:42,Y:50,Z:120,Zg:-20,G:0,W:5};
+const runtime_state={head_type:'HT_384_D_70',tips_on_head:true,
+    head_mode:{subset_type:'column',subset_config:'back_left',column_count:1},tips_on_head_mode:{subset_type:'column',subset_config:'back_left',column_count:1},
+    tips_on_head_selection:{anchor_row:0,anchor_col:23},attached_tip_length_mm:19.9,
+    active_tip_capacity_ul:10,teach_tip_length_mm:26.1,tipbox_removed_cells:{'1':['0:23']},
+    teachpoints:{'5':{X:42,Y:50,Z:140},'6':{X:180,Y:50,Z:140}}};
+const evidence={...error,kind:'lid_collision',geometry:lid_geometry.model,lid_geometry,pose,runtime_state,
+    coordinate_frame:'machine_xyz_z_up_mm',lower_mm:[20,30,-130],upper_mm:[147.15,115.05,-120],
+    tip_segment_mm:[[42,50,-121],[42,50,-101.1]]};
+const view=createPhysicalDiagnosticView(container,{error:evidence,deckDetails:{'5':[plate]}});
+const result=await view.ready;
+assert.equal(result.dimensioned,true);assert.equal(result.sampledPoseShown,true);assert.equal(result.tipAxisShown,true);
+assert.equal(currentScene.options.deckOnly,false);assert.equal(currentScene.options.autoConnect,false);
+assert.deepEqual(currentScene.positions,pose);assert.deepEqual(currentScene.renderPositions,pose);
+assert.equal(currentScene.attachedTipLengthMm,19.9);
+assert.equal(currentScene.teachTipLengthMm,26.1);
+assert.equal(currentScene.teachpoints['5'].x,42);
+assert.deepEqual(currentScene.tipboxTransientState,{'1':['0:23']});
+close(jointValues.zaxis,-0.0939);
+const selected=currentScene.labwareRoot.children[0];
+const line=selected.getObjectByName('sampled-tip-axis');
+assert.ok(line);assert.equal(line.material.color.getHex(),0xff414b);
+const positions=line.geometry.getAttribute('position');
+close(positions.getX(0),(42-83.575)/1000);
+close(positions.getY(0),(50-72.525)/1000);
+close(positions.getZ(0),0.0158);
+close(positions.getZ(1),0.0357);
+assert.match(currentScene.renderer.domElement.attributes['aria-label'],/Sampled interference/);
+view.dispose();
+""", surface=True)
+
+
+def test_incomplete_sampled_state_cannot_invent_a_robot_pose_or_contact(modules):
+    run_js(modules, """
+const lid_geometry={model:'manufacturer_exterior_envelope',length_mm:127.15,width_mm:85.05,
+    height_mm:10,seated_bottom_mm:6.8,source:'https://www.cellvis.com/drawing.png'};
+const evidence={...error,kind:'lid_collision',geometry:lid_geometry.model,lid_geometry,
+    runtime_state:{head_type:'HT_384_D_70',tips_on_head:true,teach_tip_length_mm:26.1},
+    pose:{X:42,Y:50,Z:120},tip_segment_mm:[[42,50,-121],[42,50,-101.1]]};
+const view=createPhysicalDiagnosticView(container,{error:evidence,deckDetails:{'5':[plate]}});
+const result=await view.ready;
+assert.equal(result.sampledPoseShown,false);assert.equal(result.tipAxisShown,false);
+assert.equal(currentScene.options.deckOnly,true);
+assert.equal(currentScene.labwareRoot.children[0].getObjectByName('sampled-tip-axis'),undefined);
+view.dispose();
+""", surface=True)
+
+
+def test_rejected_catalog_lid_metadata_stays_an_illustration(modules):
+    run_js(modules, """
+const invalid={model:'manufacturer_exterior_envelope',length_mm:127.15,width_mm:85.05,
+    height_mm:10,seated_bottom_mm:6.8,source:'https://www.cellvis.com/drawing.png'};
+const source={'5':[{...plate,lid_geometry:invalid,
+    generated_lid:{lid_geometry:invalid,height_mm:10}}]};
+// The catalog top remains 17.2, inconsistent with the proposed geometry's 16.8.
+const setup=prepareDiagnosticDeckDetails(source,error);
+assert.equal(setup.detail.lid_geometry,undefined);
+assert.equal(setup.detail.generated_lid.lid_geometry,undefined);
+close(setup.detail.generated_lid.height_mm,7.5);
+assert.ok(source['5'][0].generated_lid.lid_geometry,'Must not mutate the snapshot');
+""")
+
+
+def test_carried_lid_picture_uses_sampled_translation_not_source_deck_pose(modules):
+    run_js(modules, """
+const lid_geometry={model:'manufacturer_exterior_envelope',length_mm:127.15,width_mm:85.05,
+    height_mm:10,seated_bottom_mm:6.8,source:'https://www.cellvis.com/drawing.png'};
+const evidence={...error,kind:'lid_collision',geometry:lid_geometry.model,lid_geometry,
+    coordinate_frame:'machine_xyz_z_up_mm',carried_lid:true,carry_offset_mm:[130,-20,40],
+    lower_mm:[150,10,-90],upper_mm:[277.15,95.05,-80]};
+const source={'5':[plate]};
+const view=createPhysicalDiagnosticView(container,{error:evidence,deckDetails:source});
+await view.ready;
+const target=currentScene.labwareRoot.children[0];
+close(target.position.x,0.33);close(target.position.y,0.08);close(target.position.z,0.05);
+currentScene._updateLabwareAnimation();
+close(target.position.x,0.33);close(target.position.y,0.08);close(target.position.z,0.05);
+assert.equal(source['5'][0].name,'Lidded plate');
+view.dispose();
+const incomplete=createPhysicalDiagnosticView(container,{error:{...evidence,carry_offset_mm:null},deckDetails:source});
+await assert.rejects(incomplete.ready,/carried lid position is missing/);
+assert.equal(container.children.length,0);
+""", surface=True)
+
+
+def test_close_during_sampled_tip_asset_load_keeps_preview_disposed(modules):
+    run_js(modules, """
+let release;
+RobotScene.prototype._setupLighting=function(){
+    this.gltfLoader={load(_url,loaded){release=loaded;}};
+};
+const originalLoad=RobotScene.prototype._loadURDF;
+RobotScene.prototype._loadURDF=async function(){
+    await originalLoad.call(this);this.urdfRobot.setJointValue=()=>{};
+};
+const lid_geometry={model:'manufacturer_exterior_envelope',length_mm:127.15,width_mm:85.05,
+    height_mm:10,seated_bottom_mm:6.8,source:'https://www.cellvis.com/drawing.png'};
+const evidence={...error,kind:'lid_collision',geometry:lid_geometry.model,lid_geometry,
+    pose:{X:42,Y:50,Z:120,Zg:-20,G:0,W:5},runtime_state:{
+        head_type:'HT_384_D_70',tips_on_head:true,teach_tip_length_mm:26.1,
+        tips_on_head_mode:{subset_type:'column',subset_config:'back_left',column_count:1},
+        tips_on_head_selection:{anchor_row:0,anchor_col:23},attached_tip_length_mm:19.9}};
+const view=createPhysicalDiagnosticView(container,{error:evidence,deckDetails:{'5':[plate]}});
+while(!release)await Promise.resolve();
+view.dispose();
+const source=new THREE.Mesh(new THREE.BoxGeometry(.01,.02,.01),new THREE.MeshStandardMaterial());
+let geometryDisposals=0,materialDisposals=0;
+source.geometry.addEventListener('dispose',()=>geometryDisposals++);
+source.material.addEventListener('dispose',()=>materialDisposals++);
+release({scene:source});
+await view.ready;
+assert.equal(container.children.length,0);
+assert.equal(currentScene.headTipsRoot.children.length,0);
+assert.equal(currentScene.tipTemplateCache.size,0);
+assert.equal(geometryDisposals,1);assert.equal(materialDisposals,1);
 """, surface=True)

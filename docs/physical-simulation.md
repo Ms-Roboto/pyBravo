@@ -97,6 +97,9 @@ the same twelve-cycle path clears after docking.
 - Mounted tip axes against well centers and bottoms, using recorded tip length,
   well grid, depth and diameter. Intentional rack seating and flange contact
   have narrow task-specific allowances; they do not suppress neighbor contacts.
+- Recorded lid exterior envelopes against the moving tool and mounted tip
+  segments. A covered liquid target remains inaccessible; native well-access
+  checks are preserved rather than commanding an approach through the lid.
 - Simulated stack-height scan approach and descent to the catalog-derived stack
   surface. Plate count comes from the virtual deck; optical sensor response and
   force/contact sensing remain unqualified. The scan preserves the modeled
@@ -112,18 +115,38 @@ unchanged. Errors stop the rehearsal and highlight the task in Designer.
 
 ## Limits of a clear result
 
-When setup stops because a plate is marked lidded or sealed, Designer opens a
-rotatable setup preview. It highlights the cover on the reported deck position
-and stack item, with nearby labware for context. **View obstruction** reopens
-the picture; **Edit deck position** opens the affected setup. Closing the view
-disposes its renderer, including assets that finish loading later.
+Designer opens a rotatable obstruction preview for covered-plate failures.
+It highlights the reported deck position and stack item, with nearby labware
+for context. **View obstruction** reopens the picture; **Edit deck position**
+opens the affected setup. Closing the view disposes its renderer, including
+assets that finish loading later.
 
-This picture is an illustration of the recorded setup, not a sampled collision
-or a movie of motion. The diagnostic contains the plate identity, cover flags,
-and configured exterior bounds. It does not invent a rejected robot pose or a
-contact pair when setup checked zero moves. Lid collision support remains
-required for rehearsing Delid/Relid; opening the picture does not bypass that
-restriction or change the workflow.
+The CellVis 384 plate has a manufacturer-dimensioned lid envelope based on the
+[official drawing supplied by the user](media/cellvis-384-plate-lid-dimensions.png):
+
+| Dimension | Millimetres |
+| --- | ---: |
+| Plate length × width | 127.6 × 85.6 |
+| Uncovered plate height | 14.33 |
+| Lid length × width × height | 127.15 × 85.05 × 10 |
+| Covered assembly height | 16.8 |
+| Seated lid bottom above plate base | 6.8 (16.8 − 10) |
+
+Rendering and collision checks use the same centered exterior box. It includes
+the hollow interior and undimensioned corner chamfers, so it is conservative;
+it can reject close approaches that a detailed shell would clear. The drawing
+does not specify wall thickness, internal clearances or grasp calibration.
+It therefore supports exterior obstacle checking, not robotic lid removal or
+replacement. Existing grasp and departure calibration values are not inferred
+from the picture. Delid/Relid remain blocked pending a supported shell/contact
+model and verified state transitions.
+
+A liquid task aimed at the covered CellVis plate stops with a dimensioned
+well-access diagnostic before its approach is commanded. That picture has no
+rejected robot pose. A sampled tool or tip collision with a modeled lid reports
+the rejected pose and envelope instead. Unknown lids and seals still stop at
+setup and retain the explicitly illustrative preview. None of these views
+changes the workflow or marks the lid removed.
 
 The default spacing is 0.5 mm with a 0.05 mm penetration reporting threshold.
 These are sampled geometric checks, not certified continuous collision
@@ -134,7 +157,7 @@ a conservative envelope because separate CAD exports are unavailable.
 Plate envelopes include solid flanges and approximate well access. Detailed
 tip taper, grasp force, fluid retention, calibration accuracy, frame/gantry
 self-collision and wet-lab performance are not qualified. Lid operations,
-sealed/lidded labware and enabled accessories without collision geometry fail
+seals, lids without recorded envelopes, and accessories without collision geometry fail
 closed. Passing checks does not authorize hardware execution or qualify a
 liquid method. The saved revision's method review and release remain required.
 

@@ -532,6 +532,7 @@ def _editor_type_to_definition(item: dict[str, Any]) -> LabwareDefinition:
         lidded_stack_height_mm=float(props.get("lidded_stacking_thickness_mm") or 0.0),
         lid_resting_height_mm=float(props.get("lid_resting_height_mm") or 0.0),
         lid_departure_height_mm=float(props.get("lid_departure_height_mm") or 0.0),
+        lid_geometry=deepcopy(props.get("lid_geometry")),
         max_robot_handling_speed=str(props.get("max_robot_handling_speed") or ""),
         rows=int(wells.get("rows") or 0),
         cols=int(wells.get("cols") or 0),
@@ -547,7 +548,7 @@ def _editor_type_to_definition(item: dict[str, Any]) -> LabwareDefinition:
         disposable_tip_capacity_ul=float(wells.get("disposable_tip_capacity_ul") or 0.0),
         tip_definition_id=str(item.get("tip_definition_id") or ""),
         supported_tip_ids=list(item.get("supported_tip_ids") or []),
-        model_3d=str(model.get("url") or model.get("filename") or "") or None,
+        model_3d=(model if isinstance(model, str) else str(model.get("url") or model.get("filename") or "")) or None,
         provisional=bool(item.get("provisional", False)),
         compatible_head_types=list(item.get("compatible_head_types") or []),
     )
@@ -655,6 +656,7 @@ def _definition_to_editor_type(definition: LabwareDefinition) -> dict[str, Any]:
             "lidded_stacking_thickness_mm": definition.lidded_stack_height_mm,
             "lid_resting_height_mm": definition.lid_resting_height_mm,
             "lid_departure_height_mm": definition.lid_departure_height_mm,
+            "lid_geometry": deepcopy(definition.lid_geometry),
             "max_robot_handling_speed": definition.max_robot_handling_speed,
         },
         "well_dimensions_mm": {

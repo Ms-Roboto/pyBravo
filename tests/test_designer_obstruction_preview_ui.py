@@ -101,6 +101,7 @@ for(const [is_lidded,is_sealed,title] of [[true,false,'Lid'],[false,true,'Seal']
     assert.equal(element('physical-obstruction-modal').classList.contains('hidden'),false);
     assert.equal(element('physical-report-view').hidden,false);
     assert.equal(element('physical-obstruction-title').textContent,title+' covers the plate');
+    assert.equal(element('physical-obstruction-kind').textContent,'Setup illustration');
     assert.equal(element('physical-obstruction-context').textContent,'Position 7 · Sample plate');
     assert.match(element('physical-obstruction-explanation').textContent,/stopped during setup; no collision motion was recorded/);
     assert.doesNotMatch(element('physical-report-body').textContent,/Contact:|Rejected pose/);
@@ -214,4 +215,45 @@ assert.match(element('physical-obstruction-status').textContent,/Model unavailab
 factoryError=Error('WebGL unavailable');openPhysicalObstructionPreview();
 assert.match(element('physical-obstruction-status').textContent,/3D preview unavailable: WebGL unavailable/);
 assert.equal(element('physical-obstruction-modal').classList.contains('hidden'),false);
+""")
+
+
+def test_dimensioned_cover_access_and_sampled_collision_are_distinct(tmp_path):
+    _run(tmp_path, """
+const lid_geometry={model:'manufacturer_exterior_envelope',length_mm:127.15,width_mm:85.05,
+    height_mm:10,seated_bottom_mm:6.8};
+rememberRun();
+renderPhysicalSimulationReport(report({kind:'lid_access_blocked',geometry:lid_geometry.model,lid_geometry}),'workflow:error');
+assert.equal(element('physical-obstruction-title').textContent,'Lid blocks well access');
+assert.equal(element('physical-obstruction-kind').textContent,'Well-access check');
+assert.match(element('physical-obstruction-context').textContent,/Lid: 127.15 × 85.05 × 10 mm/);
+assert.match(element('physical-obstruction-explanation').textContent,/No approach motion was commanded/);
+views[0].resolve();await flush();
+assert.match(element('physical-obstruction-status').textContent,/Manufacturer-dimensioned exterior envelope/);
+assert.doesNotMatch(element('physical-obstruction-status').textContent,/illustrative|has not been checked|Sampled pose/);
+resetPhysicalObstructionPreview();rememberRun();
+const pose={X:42,Y:50,Z:120,Zg:-20,G:0,W:5};
+const runtime_state={head_type:'HT_384_D_70',tips_on_head:true};
+renderPhysicalSimulationReport(report({kind:'lid_collision',geometry:lid_geometry.model,lid_geometry,pose,runtime_state}),'workflow:error');
+assert.equal(element('physical-obstruction-title').textContent,'Lid interference');
+assert.equal(element('physical-obstruction-kind').textContent,'Sampled collision');
+assert.match(element('physical-obstruction-explanation').textContent,/sampled motion intersects/);
+assert.deepEqual(views[1].options.error.pose,pose);
+assert.deepEqual(views[1].options.error.runtime_state,runtime_state);
+views[1].resolve();await flush();
+assert.match(element('physical-obstruction-status').textContent,/Sampled pose: X 42.00 · Y 50.00 · Z 120.00 · Zg -20.00 mm/);
+assert.doesNotMatch(element('physical-obstruction-status').textContent,/illustrative|has not been checked/);
+""")
+
+
+def test_obstruction_prefers_actual_failed_deck_after_plate_movement(tmp_path):
+    _run(tmp_path, """
+rememberRun();
+const deck_details={'8':[{labware_id:'plate',name:'Sample plate',is_lidded:true}], '7':[]};
+const evidence=report({kind:'lid_collision',location:8,deck_details});
+renderPhysicalSimulationReport(evidence,'workflow:error');
+assert.deepEqual(views[0].options.deckDetails,deck_details);
+deck_details['8'][0].name='later mutation';
+assert.equal(views[0].options.deckDetails['8'][0].name,'Sample plate');
+assert.equal(physicalObstructionRun.deckDetails['7'][0].name,'Sample plate');
 """)

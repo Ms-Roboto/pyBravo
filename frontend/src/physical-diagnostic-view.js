@@ -1,12 +1,38 @@
-/** Read-only setup illustration. It never sends motion or connects a state socket. */
+/** Read-only obstruction evidence. It never sends motion or connects a state socket. */
 import * as THREE from 'three';
-import { RobotScene } from './robot-scene.js?v=diagnostic-deck1';
+import { RobotScene } from './robot-scene.js?v=cellvis-lid1';
 
 const COVER_COLOR = 0xff963d;
 
 function positive(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function validBounds(error) {
+    return error.coordinate_frame === 'machine_xyz_z_up_mm'
+        && [error.lower_mm, error.upper_mm].every(values => Array.isArray(values)
+            && values.length === 3 && values.every(Number.isFinite))
+        && error.upper_mm.every((value, axis) => value > error.lower_mm[axis]);
+}
+
+function validLidGeometry(geometry, detail = null) {
+    if (geometry?.model !== 'manufacturer_exterior_envelope'
+        || typeof geometry.source !== 'string' || !geometry.source.trim()
+        || !['length_mm', 'width_mm', 'height_mm'].every(key =>
+            typeof geometry[key] === 'number' && Number.isFinite(geometry[key]) && geometry[key] > 0)
+        || !Number.isFinite(geometry.seated_bottom_mm) || geometry.seated_bottom_mm < 0) return false;
+    const top = geometry.seated_bottom_mm + geometry.height_mm;
+    if (!Number.isFinite(top)) return false;
+    if (detail?.lidded_height_mm != null
+        && (!Number.isFinite(detail.lidded_height_mm) || Math.abs(detail.lidded_height_mm - top) > 1e-6)) return false;
+    const plateHeight = detail?.base_height_mm ?? detail?.height_mm;
+    return plateHeight == null || (Number.isFinite(plateHeight)
+        && geometry.seated_bottom_mm < plateHeight && plateHeight <= top);
+}
+
+function dimensionedLid(error) {
+    return error?.geometry === 'manufacturer_exterior_envelope' && validLidGeometry(error.lid_geometry);
 }
 
 function definitionMatches(detail, error) {
@@ -18,7 +44,8 @@ function definitionMatches(detail, error) {
 /** Resolve saved setup metadata without changing the editor's deck configuration. */
 export function prepareDiagnosticDeckDetails(deckDetails, error) {
     const location = Number(error?.location);
-    if (error?.kind !== 'covered_labware' || !Number.isInteger(location) || location < 1 || location > 9) {
+    if (!['covered_labware', 'lid_access_blocked', 'lid_collision'].includes(error?.kind)
+        || !Number.isInteger(location) || location < 1 || location > 9) {
         throw new Error('This diagnostic does not include a covered deck position.');
     }
     const sourceStack = deckDetails?.[String(location)];
@@ -37,6 +64,11 @@ export function prepareDiagnosticDeckDetails(deckDetails, error) {
         if (!Array.isArray(stack)) continue;
         result[loc] = stack.map((original, index) => {
             const detail = { ...original };
+            if (!validLidGeometry(detail.lid_geometry, detail)) {
+                delete detail.lid_geometry;
+                // Never present a backend-rejected geometry record as checked.
+                if (detail.generated_lid?.lid_geometry) delete detail.generated_lid;
+            }
             const selected = Number(loc) === location && index === stackIndex;
             if (selected) {
                 if (typeof error.is_lidded === 'boolean') detail.is_lidded = error.is_lidded;
@@ -46,12 +78,19 @@ export function prepareDiagnosticDeckDetails(deckDetails, error) {
             let height = detail.is_lidded
                 ? positive(detail.lidded_height_mm, positive(detail.total_height_mm, baseHeight))
                 : detail.is_sealed ? positive(detail.sealed_height_mm, baseHeight) : baseHeight;
-            // The reported envelope may establish the active exterior height.
-            // It is not rendered as a collision/contact shape or rejected pose.
-            if (selected && Array.isArray(error.lower_mm) && Array.isArray(error.upper_mm)
+            if (selected && dimensionedLid(error)) {
+                // These bounds describe the lid alone, not the complete plate.
+                // Keep the plate floor at its real height and seat the lid above it.
+                detail.lid_geometry = { ...error.lid_geometry };
+                height = detail.lid_geometry.seated_bottom_mm + detail.lid_geometry.height_mm;
+                detail.lidded_height_mm = height;
+                detail.lid_resting_height_mm = detail.lid_geometry.seated_bottom_mm;
+            } else if (selected && error.geometry !== 'manufacturer_exterior_envelope'
+                && Array.isArray(error.lower_mm) && Array.isArray(error.upper_mm)
                 && error.lower_mm.length === 3 && error.upper_mm.length === 3
                 && error.lower_mm.every(Number.isFinite) && error.upper_mm.every(Number.isFinite)
                 && error.upper_mm.every((value, axis) => value > error.lower_mm[axis])) {
+                // Older setup failures carry the full plate exterior bounds.
                 height = error.upper_mm[2] - error.lower_mm[2];
             }
             detail.base_height_mm = baseHeight;
@@ -73,6 +112,13 @@ export function prepareDiagnosticDeckDetails(deckDetails, error) {
                     width_mm: positive(detail.width_mm, positive(detail.width)),
                     height_mm: Math.max(0.1, thickness),
                 };
+                if (validLidGeometry(detail.lid_geometry, detail)) {
+                    const lid = detail.lid_geometry;
+                    detail.generated_lid = { ...detail.generated_lid, lid_geometry: { ...lid },
+                        length_mm: lid.length_mm, width_mm: lid.width_mm, height_mm: lid.height_mm,
+                        lower_local_mm: [-lid.length_mm / 2, -lid.width_mm / 2, lid.seated_bottom_mm],
+                        upper_local_mm: [lid.length_mm / 2, lid.width_mm / 2, lid.seated_bottom_mm + lid.height_mm] };
+                }
             } else {
                 delete detail.generated_lid;
                 if (detail.is_sealed) detail.stack_height_mm = positive(detail.sealed_stacking_height_mm, height);
@@ -106,8 +152,8 @@ function tintMeshes(root, color, retiredMaterials, { opacity = 1, emissive = 0x0
     });
 }
 
-function highlightCover(group, retiredMaterials) {
-    tintMeshes(group, COVER_COLOR, retiredMaterials, { opacity: 0.9, emissive: 0x70240a });
+function highlightCover(group, retiredMaterials, opacity = 0.9) {
+    tintMeshes(group, COVER_COLOR, retiredMaterials, { opacity, emissive: 0x70240a });
     const meshes = [];
     group.traverse(object => { if (object.isMesh) meshes.push(object); });
     for (const mesh of meshes) {
@@ -137,6 +183,37 @@ function addSealHighlight(group, detail, retiredMaterials) {
     seal.position.z = detail.total_height_mm / 1000 + 0.00015;
     group.add(seal);
     highlightCover(seal, retiredMaterials);
+}
+
+/** The sampled line is collision evidence, not a detailed tip taper. */
+function addSampledTipAxis(target, error) {
+    if (!dimensionedLid(error) || !validBounds(error)
+        || !Array.isArray(error.tip_segment_mm) || error.tip_segment_mm.length !== 2
+        || !error.tip_segment_mm.every(point => Array.isArray(point)
+            && point.length === 3 && point.every(Number.isFinite))) return null;
+    const centerX = (error.lower_mm[0] + error.upper_mm[0]) / 2;
+    const centerY = (error.lower_mm[1] + error.upper_mm[1]) / 2;
+    const lidTop = error.lid_geometry.seated_bottom_mm + error.lid_geometry.height_mm;
+    const points = error.tip_segment_mm.map(point => new THREE.Vector3(
+        (point[0] - centerX) / 1000, (point[1] - centerY) / 1000,
+        (point[2] - error.upper_mm[2] + lidTop) / 1000,
+    ));
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineBasicMaterial({ color: 0xff414b, depthTest: false, linewidth: 2 }));
+    line.name = 'sampled-tip-axis';
+    line.renderOrder = 10;
+    target.add(line);
+    return line;
+}
+
+function sampledRobotState(error) {
+    const state = error?.runtime_state;
+    if (error?.kind !== 'lid_collision' || !state || !positive(state.teach_tip_length_mm)
+        || !['X', 'Y', 'Z', 'Zg', 'G', 'W'].every(axis => Number.isFinite(error.pose?.[axis]))
+        || !state.head_type || typeof state.tips_on_head !== 'boolean') return null;
+    if (state.tips_on_head && (!positive(state.attached_tip_length_mm)
+        || !state.tips_on_head_mode || !state.tips_on_head_selection)) return null;
+    return state;
 }
 
 /**
@@ -179,17 +256,42 @@ export function createPhysicalDiagnosticView(container, { error, deckDetails } =
     const ready = Promise.resolve().then(async () => {
         if (disposed) return;
         const setup = prepareDiagnosticDeckDetails(deckDetails, error);
-        scene = new RobotScene(container, { autoConnect: false, showGizmo: false, deckOnly: true });
+        const runtime = sampledRobotState(error);
+        scene = new RobotScene(container, { autoConnect: false, showGizmo: false, deckOnly: !runtime,
+            teachTipLengthMm: runtime?.teach_tip_length_mm });
+        if (runtime) {
+            scene.setPositions(error.pose);
+            scene.snapRenderPositions(error.pose);
+        }
         await scene.init();
         if (disposed) return;
         if (!scene.deckSlotAnchors.has(setup.location)) {
             throw new Error('The deck asset could not be loaded for this preview.');
+        }
+        if (runtime) {
+            const teachpoints = Object.fromEntries(Object.entries(runtime.teachpoints || {}).map(([loc, point]) =>
+                [loc, { x: point.x ?? point.X, y: point.y ?? point.Y, z: point.z ?? point.Z }]));
+            scene.setTeachpoints(teachpoints);
+            await scene.setHeadTipState(runtime);
+            if (disposed) return;
+            scene._updateURDFJoints(error.pose);
         }
         await scene.setDeckDetails(setup.deckDetails);
         if (disposed) return;
         const target = scene.labwareRoot.children.find(group =>
             group.userData.deckLocation === setup.location && group.userData.stackIndex === setup.stackIndex);
         if (!target) throw new Error('The affected labware could not be drawn.');
+        if (error.carried_lid) {
+            if (error.coordinate_frame !== 'machine_xyz_z_up_mm'
+                || !Array.isArray(error.carry_offset_mm) || error.carry_offset_mm.length !== 3
+                || !error.carry_offset_mm.every(Number.isFinite)) {
+                throw new Error('The carried lid position is missing from the sampled evidence.');
+            }
+            const offset = new THREE.Vector3(...error.carry_offset_mm).multiplyScalar(0.001);
+            target.position.add(offset);
+            const entry = scene.deckLabwareMeshes.get(setup.location);
+            if (entry?.group === target) entry.anchor.add(offset);
+        }
 
         // Keep neighboring positions in view while reducing their contrast.
         for (const group of scene.labwareRoot.children) {
@@ -203,9 +305,10 @@ export function createPhysicalDiagnosticView(container, { error, deckDetails } =
             const lids = [];
             target.traverse(object => { if (object.userData.labwarePart === 'lid') lids.push(object); });
             if (!lids.length) throw new Error('The configured lid could not be drawn.');
-            lids.forEach(lid => highlightCover(lid, retiredMaterials));
+            lids.forEach(lid => highlightCover(lid, retiredMaterials, dimensionedLid(error) ? 0.28 : 0.9));
         }
         if (setup.detail.is_sealed) addSealHighlight(target, setup.detail, retiredMaterials);
+        const tipAxis = error.kind === 'lid_collision' ? addSampledTipAxis(target, error) : null;
 
         scene.scene.updateMatrixWorld(true);
         const bounds = new THREE.Box3().setFromObject(target);
@@ -213,9 +316,10 @@ export function createPhysicalDiagnosticView(container, { error, deckDetails } =
         scene.setBackground(getComputedStyle(container).getPropertyValue('--bg-viewport').trim() || '#0d0d14');
         scene.renderer.domElement.setAttribute('role', 'img');
         scene.renderer.domElement.setAttribute('aria-label',
-            `Setup preview, position ${setup.location}: ${setup.detail.name || 'labware'}, `
+            `${error.kind === 'lid_collision' ? 'Sampled interference' : 'Setup preview'}, position ${setup.location}: ${setup.detail.name || 'labware'}, `
             + `${setup.detail.is_lidded ? 'lid' : 'seal'} highlighted. Drag to rotate, scroll to zoom.`);
         resetView();
+        return { sampledPoseShown: Boolean(runtime), tipAxisShown: Boolean(tipAxis), dimensioned: dimensionedLid(error) };
     }).catch(error => {
         dispose();
         throw error;

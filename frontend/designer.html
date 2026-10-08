@@ -997,7 +997,7 @@ body.protocol-preview-active:not(.protocol-compiled-preview) #viewport-float { d
         <div id="physical-obstruction-viewport" aria-label="3D view of the covered plate" style="height:min(48vh,440px);min-height:220px;margin:0 18px;background:var(--bg-canvas,#0d0d14);border:1px solid var(--border);border-radius:8px;position:relative;"></div>
         <div style="padding:10px 18px;font-size:12px;color:var(--text-dim);">
             <p id="physical-obstruction-status" role="status" style="margin:0 0 6px;"></p>
-            <span style="color:#ffb454;">● Cover highlighted</span> · Setup illustration · Drag to rotate, scroll to zoom
+            <span style="color:#ffb454;">● Cover highlighted</span> · <span id="physical-obstruction-kind">Setup illustration</span> · Drag to rotate, scroll to zoom
         </div>
         <div class="modal-footer" style="gap:8px;">
             <button class="toolbar-btn" id="physical-obstruction-reset">Reset view</button>
@@ -7943,7 +7943,7 @@ function resetPhysicalObstructionPreview() {
 
 function updatePhysicalObstructionPreview(report, phase) {
     const error = report?.last_error;
-    const supported = error?.kind === 'covered_labware'
+    const supported = ['covered_labware', 'lid_access_blocked', 'lid_collision'].includes(error?.kind)
         && Number.isInteger(error.location) && error.location >= 1 && error.location <= 9
         && (error.is_lidded === true || error.is_sealed === true)
         && physicalObstructionRun?.graph === designerState.graph;
@@ -7951,8 +7951,8 @@ function updatePhysicalObstructionPreview(report, phase) {
     button.hidden = !supported;
     if (!supported) return;
     physicalObstructionSnapshot = { error: structuredClone(error),
-        deckDetails: structuredClone(physicalObstructionRun.deckDetails) };
-    const key = JSON.stringify([error.location, error.stack_index, error.labware_id, error.message]);
+        deckDetails: structuredClone(error.deck_details || physicalObstructionRun.deckDetails) };
+    const key = JSON.stringify([error.kind, error.location, error.stack_index, error.labware_id, error.message, error.pose]);
     if (phase === 'workflow:error' && key !== physicalObstructionOpenedKey) {
         physicalObstructionOpenedKey = key;
         openPhysicalObstructionPreview();
@@ -7965,20 +7965,41 @@ function openPhysicalObstructionPreview() {
     const { error, deckDetails } = physicalObstructionSnapshot;
     const cover = error.is_lidded && error.is_sealed ? 'Lid and seal' : error.is_lidded ? 'Lid' : 'Seal';
     physicalObstructionFocus = document.activeElement;
-    document.getElementById('physical-obstruction-title').textContent = `${cover} covers the plate`;
-    document.getElementById('physical-obstruction-context').textContent = `Position ${error.location} · ${error.labware_name || 'Plate'}`;
-    document.getElementById('physical-obstruction-explanation').textContent =
-        'The cover prevents access to the wells. Simulation stopped during setup; no collision motion was recorded.';
+    const sampled = error.kind === 'lid_collision';
+    const dimensioned = error.geometry === 'manufacturer_exterior_envelope'
+        && error.lid_geometry?.model === 'manufacturer_exterior_envelope';
+    document.getElementById('physical-obstruction-title').textContent = sampled ? 'Lid interference'
+        : error.kind === 'lid_access_blocked' ? 'Lid blocks well access' : `${cover} covers the plate`;
+    document.getElementById('physical-obstruction-kind').textContent = sampled ? 'Sampled collision'
+        : dimensioned ? 'Well-access check' : 'Setup illustration';
+    let context = `Position ${error.location} · ${error.labware_name || 'Plate'}`;
+    if (dimensioned) {
+        const lid = error.lid_geometry;
+        context += ` · Lid: ${lid.length_mm} × ${lid.width_mm} × ${lid.height_mm} mm`;
+    }
+    document.getElementById('physical-obstruction-context').textContent = context;
+    document.getElementById('physical-obstruction-explanation').textContent = sampled
+        ? 'The sampled motion intersects the highlighted lid envelope.'
+        : dimensioned ? 'The lid covers the wells. No approach motion was commanded.'
+        : 'The cover prevents access to the wells. Simulation stopped during setup; no collision motion was recorded.';
     const status = document.getElementById('physical-obstruction-status');
-    status.textContent = 'Loading setup preview…';
+    status.textContent = sampled ? 'Loading sampled pose…' : 'Loading setup preview…';
     const modal = document.getElementById('physical-obstruction-modal');
     modal.classList.remove('hidden');
     document.getElementById('physical-obstruction-close').focus();
     try {
         const view = createPhysicalDiagnosticView(document.getElementById('physical-obstruction-viewport'), { error, deckDetails });
         physicalObstructionView = view;
-        view.ready.then(() => {
-            if (physicalObstructionView === view) status.textContent = 'Cover shape is illustrative; lid collision geometry has not been checked.';
+        view.ready.then(result => {
+            if (physicalObstructionView !== view) return;
+            status.textContent = (result?.dimensioned ?? dimensioned)
+                ? 'Manufacturer-dimensioned exterior envelope; internal walls are not modeled.'
+                : 'Cover shape is illustrative; lid collision geometry has not been checked.';
+            if (result?.tipAxisShown) status.textContent += ' Red line: sampled tip axis.';
+            if (sampled && error.pose) {
+                const axes = ['X', 'Y', 'Z', 'Zg'].filter(axis => Number.isFinite(error.pose[axis]));
+                status.textContent += ` Sampled pose: ${axes.map(axis => `${axis} ${error.pose[axis].toFixed(2)}`).join(' · ')} mm.`;
+            }
         }).catch(err => {
             if (physicalObstructionView !== view) return;
             view.dispose();

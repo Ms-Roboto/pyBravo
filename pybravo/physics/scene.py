@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import xml.etree.ElementTree as ET
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -22,6 +23,7 @@ import trimesh
 from scipy.spatial.transform import Rotation
 
 from pybravo.deck.geometry import well_center_offset_from_teachpoint_mm, well_geometry_from_metadata
+from pybravo.deck.lid_geometry import lid_envelope_geometry
 from pybravo.head_mode import active_head_wells, head_geometry_for_type
 from pybravo.types import Axis
 
@@ -128,6 +130,9 @@ class _Obstacle:
     lower_mm: np.ndarray
     upper_mm: np.ndarray
     top_item: bool
+    part: str = "body"
+    stack_index: int = 0
+    lid_geometry: dict[str, Any] | None = None
 
 
 def _labware_setup_details(item, location):
@@ -160,6 +165,8 @@ class BravoCollisionScene:
         self.robot_bounds = {}
         self.tool_axes = {}
         self._known_labware = {}
+        self._lid_obstacles = {}
+        self._cover_states = {}
         self._metadata_digests = {}
         self._profile_snapshot = json.dumps(bravo.profile._to_dict(), sort_keys=True)
         self._teachpoint_snapshot = tuple(
@@ -234,7 +241,8 @@ class BravoCollisionScene:
                 if item is not None:
                     details.update(_labware_setup_details(item, location))
             self._fail(
-                "Lid collision geometry is not configured; no physical clearance result can be granted.",
+                "Lid collision geometry for robotic removal/replacement is not configured; "
+                "the exterior envelope does not establish internal or grasp clearance.",
                 **details,
             )
         self._refresh_deck()
@@ -242,6 +250,16 @@ class BravoCollisionScene:
             location = int(properties.get("location", -1))
             item = self.bravo._deck.get_stack(location).top if 1 <= location <= 9 else None
             if item is not None:
+                lid = self._lid_obstacles.get(id(item))
+                if lid is not None:
+                    # Preserve the native well-access guard. A covered liquid
+                    # target is rejected before a command is issued, so this is
+                    # dimensioned access evidence, not a sampled collision pose.
+                    self._fail(
+                        f"{item.name} at position {location} is covered by its lid; remove the lid before accessing wells.",
+                        **self._lid_details(lid, kind="lid_access_blocked"),
+                        reason="well_access_blocked",
+                    )
                 missing = missing_liquid_well_geometry(item.metadata)
                 if missing:
                     self._fail(
@@ -269,10 +287,18 @@ class BravoCollisionScene:
             stack = self.bravo._deck.get_stack(loc)
             support = -tz
             for idx, item in enumerate(stack.items):
-                dims = (float(item.length), float(item.width), float(item.height))
+                md = item.metadata or {}
+                if str(md.get("base_class") or item.labware_type).strip().lower() == "lid":
+                    raise PhysicalSimulationError(
+                        f"{item.name} is a standalone lid; its deck placement datum and grasp geometry are not configured",
+                        details={"kind": "unsupported_lid_operation", "operation": "setup/standalone_lid",
+                                 **_labware_setup_details(item, loc), "stack_index": idx},
+                    )
+                lid = lid_envelope_geometry(md) if item.is_lidded and not item.is_sealed else None
+                body_height = float(md.get("base_height_mm") or 0) if lid else float(item.height)
+                dims = (float(item.length), float(item.width), body_height)
                 if not all(math.isfinite(v) and v > 0 for v in dims):
                     raise PhysicalSimulationError(f"Position {loc}: {item.name} lacks positive collision dimensions")
-                md = item.metadata or {}
                 offset_x = float(md.get("offset_x_mm") or 0)
                 offset_y = float(md.get("offset_y_mm") or 0)
                 wg = well_geometry_from_metadata(md)
@@ -285,11 +311,25 @@ class BravoCollisionScene:
                 lower = np.array([tx - offset_x, ty - offset_y, support])
                 upper = lower + np.array(dims)
                 self._add_obstacle(
-                    f"labware/{loc}/{idx}/{item.name}", loc, item, lower, upper, idx == len(stack.items) - 1
+                    f"labware/{loc}/{idx}/{item.name}", loc, item, lower, upper,
+                    idx == len(stack.items) - 1, stack_index=idx,
                 )
                 self._known_labware[id(item)] = self.obstacles[-1]
                 self._metadata_digests[id(item)] = json.dumps(item.metadata, sort_keys=True)
-                if item.is_lidded or item.is_sealed:
+                self._cover_states[id(item)] = (bool(item.is_lidded), bool(item.is_sealed))
+                if lid is not None:
+                    closed_height = float(lid["upper_local_mm"][2])
+                    if not math.isclose(float(item.height), closed_height, abs_tol=1e-6):
+                        raise PhysicalSimulationError(f"{item.name} lidded height does not match its lid envelope")
+                    center = np.array([(lower[0] + upper[0]) / 2, (lower[1] + upper[1]) / 2, support])
+                    self._add_obstacle(
+                        f"lid/{loc}/{idx}/{item.name}", loc, item,
+                        center + np.array(lid["lower_local_mm"]),
+                        center + np.array(lid["upper_local_mm"]),
+                        idx == len(stack.items) - 1, part="lid", stack_index=idx, lid_geometry=lid,
+                    )
+                    self._lid_obstacles[id(item)] = self.obstacles[-1]
+                elif item.is_lidded or item.is_sealed:
                     details = {
                         "kind": "covered_labware",
                         **_labware_setup_details(item, loc),
@@ -311,9 +351,9 @@ class BravoCollisionScene:
                     )
                 support += float(item.stack_height or item.height)
 
-    def _add_obstacle(self, name, loc, item, lower, upper, top_item):
+    def _add_obstacle(self, name, loc, item, lower, upper, top_item, **details):
         self.backend.add_box(name, (lower + upper) / 2000, (upper - lower) / 2000, movable=item is not None)
-        self.obstacles.append(_Obstacle(name, loc, item, lower, upper, top_item))
+        self.obstacles.append(_Obstacle(name, loc, item, lower, upper, top_item, **details))
 
     def _geometry_record(self):
         return [
@@ -323,6 +363,8 @@ class BravoCollisionScene:
                 "lower_mm": o.lower_mm.tolist(),
                 "upper_mm": o.upper_mm.tolist(),
                 "metadata": getattr(o.labware, "metadata", {}),
+                "part": o.part,
+                "lid_geometry": o.lid_geometry,
             }
             for o in self.obstacles
         ]
@@ -348,7 +390,13 @@ class BravoCollisionScene:
                     self._fail("Unmodeled labware was added during physical rehearsal; rebuild the scene")
                 if json.dumps(item.metadata, sort_keys=True) != self._metadata_digests[id(item)]:
                     self._fail("Labware metadata geometry changed during physical rehearsal; rebuild the scene")
-                dims = np.array([item.length, item.width, item.height], dtype=float)
+                if self._cover_states[id(item)] != (bool(item.is_lidded), bool(item.is_sealed)):
+                    self._fail("Labware cover state changed during physical rehearsal; rebuild the scene")
+                lid = self._lid_obstacles.get(id(item))
+                height = (item.metadata or {}).get("base_height_mm") if lid else item.height
+                dims = np.array([item.length, item.width, height], dtype=float)
+                if lid and not math.isclose(float(item.height), lid.lid_geometry["upper_local_mm"][2], abs_tol=1e-6):
+                    self._fail("Labware lidded geometry changed during physical rehearsal; rebuild the scene")
                 if not np.allclose(dims, obstacle.upper_mm - obstacle.lower_mm, atol=1e-6):
                     self._fail("Labware geometry changed during physical rehearsal; rebuild the scene")
                 wg = well_geometry_from_metadata(item.metadata)
@@ -358,10 +406,79 @@ class BravoCollisionScene:
                 obstacle.upper_mm = obstacle.lower_mm + dims
                 obstacle.location = loc
                 obstacle.top_item = idx == len(stack.items) - 1
+                obstacle.stack_index = idx
+                if lid is not None:
+                    center = np.array([(obstacle.lower_mm[0] + obstacle.upper_mm[0]) / 2,
+                                       (obstacle.lower_mm[1] + obstacle.upper_mm[1]) / 2, support])
+                    lid.lower_mm = center + np.array(lid.lid_geometry["lower_local_mm"])
+                    lid.upper_mm = center + np.array(lid.lid_geometry["upper_local_mm"])
+                    lid.location = loc
+                    lid.stack_index = idx
+                    lid.top_item = obstacle.top_item
                 support += float(item.stack_height or item.height)
                 seen.add(id(item))
         if seen != set(self._known_labware):
             self._fail("Labware disappeared from the modeled deck; rebuild the physical rehearsal")
+
+    def _lid_details(self, obstacle, *, kind, bounds=None):
+        lower, upper = bounds if bounds is not None else (obstacle.lower_mm, obstacle.upper_mm)
+        carry_offset = lower - obstacle.lower_mm
+        return {
+            "kind": kind,
+            **_labware_setup_details(obstacle.labware, obstacle.location),
+            "stack_index": obstacle.stack_index,
+            "body": obstacle.name,
+            "lower_mm": lower.tolist(),
+            "upper_mm": upper.tolist(),
+            "geometry": "manufacturer_exterior_envelope",
+            "coordinate_frame": "machine_xyz_z_up_mm",
+            "lid_geometry": obstacle.lid_geometry,
+            "geometry_source": obstacle.lid_geometry.get("source"),
+            "carried_lid": bool(np.any(np.abs(carry_offset) > 1e-6)),
+            "carry_offset_mm": carry_offset.tolist(),
+            "deck_details": {
+                str(loc): [
+                    {**deepcopy(item.metadata or {}), "is_lidded": bool(item.is_lidded),
+                     "is_sealed": bool(item.is_sealed), "is_mounted": bool(item.is_mounted)}
+                    for item in self.bravo._deck.get_stack(loc).items
+                ]
+                for loc in range(1, 10) if self.bravo._deck.get_stack(loc).items
+            },
+        }
+
+    def _diagnostic_runtime_state(self):
+        bravo = self.bravo
+        removed_cells = {}
+        # Read the native inventory without invoking its lazy initialization
+        # or reachability calculations while inside the controller guard.
+        for location, occupied in bravo._tipbox_occupancy.items():
+            item = bravo._deck.get_stack(location).top
+            if item is None or bravo._tipbox_inventory_owners.get(location) is not item:
+                continue
+            rows, cols = bravo._tipbox_dimensions(item)
+            removed_cells[str(location)] = [
+                f"{row}:{col}" for row in range(rows) for col in range(cols)
+                if (row, col) not in occupied
+            ]
+        return {
+            "head_type": bravo.profile.head.head_type.name,
+            "head_mode": bravo._head_mode.to_dict() if bravo._head_mode else None,
+            "tips_on_head": bool(bravo._tips_on_head),
+            "tips_on_head_mode": bravo._tips_on_head_mode.to_dict() if bravo._tips_on_head_mode else None,
+            "tips_on_head_selection": (
+                bravo._tips_on_head_selection.to_dict() if bravo._tips_on_head_selection else None
+            ),
+            "tip_definition_id": bravo._tip_definition_id or "",
+            "attached_tip_length_mm": bravo._attached_tip_length_mm,
+            "active_tip_capacity_ul": bravo.active_tip_capacity_ul() if bravo._tips_on_head else None,
+            "teach_tip_length_mm": self.teach_length,
+            "tipbox_removed_cells": removed_cells,
+            "teachpoints": {
+                str(loc): {axis.name: bravo._teachpoints.get_teachpoint(loc, axis)
+                           for axis in (Axis.X, Axis.Y, Axis.Z)}
+                for loc in range(1, 10)
+            },
+        }
 
     def _shift(self, axes, pose):
         # URDF prismatic chain has constant orientations, so rigid tool meshes
@@ -406,8 +523,8 @@ class BravoCollisionScene:
             self._fail("Physical motion exceeds the bounded sampling budget")
         for idx in range(count + 1):
             pose = {a: start[a] + (end[a] - start[a]) * idx / count for a in Axis}
-            self._check_pose(pose)
             self.samples_checked += 1
+            self._check_pose(pose)
         self.moves_checked += 1
 
     def _check_pose(self, pose):
@@ -444,12 +561,24 @@ class BravoCollisionScene:
                     pairs.append((moving.name, other.name))
         # Attached-tip entry is checked against actual well axes and the recorded
         # bottom, avoiding the false assertion that a plate is an opaque block.
-        self._check_tips(pose)
+        self._check_tips(pose, bounds=bounds)
         if not pairs:
             return
         self.contact_queries += 1
         contacts = self.backend.contacts(include_pairs=pairs, min_penetration_m=0.00005)
         for contact in contacts:
+            lid = next((o for o in self._lid_obstacles.values()
+                        if o.name in (contact.body_a, contact.body_b)), None)
+            if lid is not None:
+                self._fail(
+                    f"Physical collision: {contact.body_a} intersects the lid envelope of {lid.labware.name} "
+                    f"({contact.penetration_m * 1000:.2f} mm envelope penetration).",
+                    **self._lid_details(lid, kind="lid_collision", bounds=bounds[lid.name]),
+                    bodies=[contact.body_a, contact.body_b],
+                    penetration_mm=contact.penetration_m * 1000,
+                    pose={a.name: pose[a] for a in Axis},
+                    runtime_state=self._diagnostic_runtime_state(),
+                )
             if self._intentional_stack_nesting(contact, bounds, carried, grasp_location):
                 continue
             obstacle = next(o for o in self.obstacles if o.name in (contact.body_a, contact.body_b))
@@ -492,7 +621,7 @@ class BravoCollisionScene:
         permits lateral transit through a stack or lowering past its seat.
         """
         pair = [o for o in self.obstacles if o.name in (contact.body_a, contact.body_b)]
-        if len(pair) != 2 or any(o.labware is None for o in pair):
+        if len(pair) != 2 or any(o.labware is None or o.part == "lid" for o in pair):
             return False
         moving = next((o for o in pair if id(o.labware) in carried), None)
         if moving is None:
@@ -514,7 +643,7 @@ class BravoCollisionScene:
             and su[2] - ml[2] <= nesting + 0.05
         )
 
-    def _check_tips(self, pose):
+    def _check_tips(self, pose, *, bounds=None):
         if not self.bravo._tips_on_head:
             return
         length = self.bravo._attached_tip_length_mm
@@ -524,13 +653,41 @@ class BravoCollisionScene:
         geometry = head_geometry_for_type(head)
         mode = self.bravo._tips_on_head_mode or self.bravo._head_mode
         tip_z = self.teach_length - pose[Axis.Z] - length
+        seat_z = self.teach_length - pose[Axis.Z]
+        bounds = bounds or {o.name: (o.lower_mm, o.upper_mm) for o in self.obstacles}
         for row, col in active_head_wells(head, mode):
             x, y = pose[Axis.X] + col * geometry.pitch_x_mm, pose[Axis.Y] + row * geometry.pitch_y_mm
+            # Unlike an open well, the cover is an opaque exterior envelope.
+            # Test the entire mounted tip axis, including when its end has
+            # already crossed below the cover; use the same explicit radial
+            # detection margin as the well-axis checker, not an invented taper.
+            for lid in self._lid_obstacles.values():
+                lower, upper = bounds[lid.name]
+                margin = 0.25
+                if (
+                    lower[0] - margin < x < upper[0] + margin
+                    and lower[1] - margin < y < upper[1] + margin
+                    and tip_z < upper[2] - 0.05
+                    and seat_z > lower[2] + 0.05
+                ):
+                    self._fail(
+                        f"Mounted tip intersects the lid envelope of {lid.labware.name} at position {lid.location}.",
+                        **self._lid_details(lid, kind="lid_collision", bounds=(lower, upper)),
+                        bodies=[f"mounted_tip/{row}/{col}", lid.name],
+                        tip=[row, col],
+                        tip_segment_mm=[[x, y, tip_z], [x, y, seat_z]],
+                        margin_mm=margin,
+                        pose={a.name: pose[a] for a in Axis},
+                        runtime_state=self._diagnostic_runtime_state(),
+                    )
             for obstacle in self.obstacles:
+                if obstacle.part == "lid":
+                    continue
+                lower, upper = bounds[obstacle.name]
                 if not (
-                    obstacle.lower_mm[0] < x < obstacle.upper_mm[0]
-                    and obstacle.lower_mm[1] < y < obstacle.upper_mm[1]
-                    and tip_z < obstacle.upper_mm[2] - 0.05
+                    lower[0] < x < upper[0]
+                    and lower[1] < y < upper[1]
+                    and tip_z < upper[2] - 0.05
                 ):
                     continue
                 if obstacle.labware is None:
@@ -547,6 +704,8 @@ class BravoCollisionScene:
                 if (
                     not obstacle.top_item
                     or obstacle.location != target
+                    or obstacle.labware.is_lidded
+                    or obstacle.labware.is_sealed
                     or not (task.startswith("liquid/") or returning)
                 ):
                     self._fail(f"Mounted tip would strike {obstacle.name}", tip=[row, col])
@@ -586,7 +745,7 @@ class BravoCollisionScene:
                         tip=[row, col],
                         well=[r, c],
                     )
-                if tip_z < obstacle.upper_mm[2] - depth + 0.1:
+                if tip_z < upper[2] - depth + 0.1:
                     self._fail(f"Mounted tip would hit the well bottom of {obstacle.labware.name}", tip=[row, col])
 
     def report(self):
@@ -607,7 +766,8 @@ class BravoCollisionScene:
                 "Sampled commanded geometry; firmware axis timing, fluid and force behavior are not modeled.",
                 "Catalog plate envelopes and well-axis checks; detailed tip taper is not qualified.",
                 "Carried plate envelopes follow verified native PickPlace stages; grasp force and flange detail are not simulated.",
-                "Lids and accessory-specific geometry are unsupported and block physical rehearsal.",
+                "Dimensioned lids use conservative exterior envelopes; internal walls, robotic Delid/Relid, "
+                "unknown covers, seals and accessory-specific geometry remain unsupported.",
                 "Robot internal assemblies and gantry/frame self-collision are not certified.",
             ],
             "qualification_granted": False,

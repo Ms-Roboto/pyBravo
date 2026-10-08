@@ -170,6 +170,7 @@ export class RobotScene {
      * @param {boolean} [options.autoConnect=true] - auto-connect WebSocket
      * @param {boolean} [options.showGizmo=true] - show coordinate gizmo
      * @param {boolean} [options.deckOnly=false] - load deck assets without robot tooling
+     * @param {number} [options.teachTipLengthMm] - fixed snapshot Z datum; skips live profile lookup
      * @param {Function} [options.onStateUpdate] - callback with raw state data
      */
     constructor(container, options = {}) {
@@ -179,6 +180,7 @@ export class RobotScene {
             autoConnect: true,
             showGizmo: true,
             deckOnly: false,
+            teachTipLengthMm: null,
             onStateUpdate: null,
             ...options,
         };
@@ -195,6 +197,11 @@ export class RobotScene {
         // Z datum for the model. Seeded with the common 30 uL value and
         // replaced by the profile's own figure once fetched.
         this.teachTipLengthMm = 26.1;
+        const snapshotTeachLength = Number(this.options.teachTipLengthMm);
+        if (Number.isFinite(snapshotTeachLength) && snapshotTeachLength > 0) {
+            this.teachTipLengthMm = snapshotTeachLength;
+            this._teachTipFetch = Promise.resolve();
+        }
         this.taskStatus = {};
         this.headType = null;
         this.headMode = null;
@@ -281,6 +288,7 @@ export class RobotScene {
         if (this._disposed) return;
         this._disposed = true;
         ++this.labwareRefreshToken;
+        this._headTipsRenderToken = (this._headTipsRenderToken || 0) + 1;
         if (this._animationId) cancelAnimationFrame(this._animationId);
         if (this._wsReconnectTimer) clearTimeout(this._wsReconnectTimer);
         if (this.ws) { this.ws.onclose = null; this.ws.close(); }
@@ -990,6 +998,11 @@ export class RobotScene {
                 mesh.userData.stackIndex = index;
                 const entry = { group: mesh, anchor: entryAnchor.clone(), detail, location: loc };
                 if (!this.options.deckOnly) await this._attachTipboxTips(entry, detail);
+                if (this._disposed) {
+                    disposeObjectResources(mesh);
+                    nextEntries.forEach(([, pending]) => disposeObjectResources(pending.group));
+                    return;
+                }
                 nextEntries.push([loc, entry, index === details.length - 1]);
                 supportHeightM += Math.max(
                     0.001,
@@ -1114,6 +1127,31 @@ export class RobotScene {
         const lengthM = Math.max(0.01, Number(detail?.length_mm || detail?.length || 127.76) / 1000);
         const widthM = Math.max(0.01, Number(detail?.width_mm || detail?.width || 85.48) / 1000);
         const heightM = Math.max(0.001, Number(detail?.height_mm || detail?.lid_thickness_mm || 2.0) / 1000);
+        if (detail?.lid_geometry?.model === 'manufacturer_exterior_envelope') {
+            // The drawing provides exterior dimensions, not wall thickness or
+            // interior clearance. Show exactly the solid envelope checked by
+            // SuperDex instead of inventing a fitted lid shell.
+            const group = new THREE.Group();
+            group.userData.labwarePart = 'lid';
+            group.userData.geometryModel = detail.lid_geometry.model;
+            const geometry = new THREE.BoxGeometry(lengthM, widthM, heightM);
+            const material = new THREE.MeshStandardMaterial({
+                color: options.attached ? 0xdde4ee : 0xe8edf4,
+                transparent: true, opacity: 0.32, depthWrite: false,
+                roughness: 0.28, metalness: 0.02,
+            });
+            const envelope = new THREE.Mesh(geometry, material);
+            envelope.position.z = heightM / 2;
+            envelope.castShadow = true; envelope.receiveShadow = true;
+            group.add(envelope);
+            const outline = new THREE.LineSegments(
+                new THREE.EdgesGeometry(geometry),
+                new THREE.LineBasicMaterial({color: 0xaebaca, transparent: true, opacity: 0.8}),
+            );
+            outline.position.z = heightM / 2;
+            group.add(outline);
+            return group;
+        }
         const skirtHeightM = Math.max(0.0007, Math.min(heightM * 0.65, heightM - 0.0005));
         const topThicknessM = Math.max(0.0005, heightM - skirtHeightM);
         const skirtThicknessM = Math.max(0.0009, Math.min(lengthM, widthM) * 0.035);
@@ -1154,7 +1192,11 @@ export class RobotScene {
         const baseHeightM = Math.max(0.001, Number(detail?.base_height_mm || detail?.height_mm || detail?.height || 14.4) / 1000);
         const totalHeightM = Math.max(baseHeightM, Number(detail?.total_height_mm || detail?.height_mm || detail?.height || 14.4) / 1000);
         const lidHeightM = Math.max(0.001, Number(lidDetail?.height_mm || lidDetail?.lid_thickness_mm || 1.0) / 1000);
-        lid.position.z = Math.max(0, totalHeightM - lidHeightM);
+        const seatedBottom = Number(lidDetail?.lid_geometry?.seated_bottom_mm);
+        lid.position.z = lidDetail?.lid_geometry?.model === 'manufacturer_exterior_envelope'
+            && Number.isFinite(seatedBottom) && seatedBottom >= 0
+            ? seatedBottom / 1000
+            : Math.max(0, totalHeightM - lidHeightM);
         wrapper.add(lid);
         return wrapper;
     }
@@ -1335,6 +1377,7 @@ export class RobotScene {
     }
 
     async _buildTipTemplate(url, targetLengthMm = 26.1) {
+        if (this._disposed) return null;
         const targetLengthM = Math.max(0.008, targetLengthMm / 1000);
         const cacheKey = `${url}|${targetLengthMm}`;
         if (!this.tipTemplateCache.has(cacheKey)) {
@@ -1342,6 +1385,11 @@ export class RobotScene {
                 this.gltfLoader.load(url, (gltf) => {
                     const wrapper = new THREE.Group();
                     const source = gltf.scene || gltf.scenes?.[0];
+                    if (this._disposed) {
+                        disposeObjectResources(source);
+                        resolve(null);
+                        return;
+                    }
                     if (!source) { resolve(null); return; }
                     const clone = SkeletonUtils.clone(source);
                     clone.rotation.x = Math.PI / 2;
@@ -1368,6 +1416,7 @@ export class RobotScene {
             }));
         }
         const template = await this.tipTemplateCache.get(cacheKey);
+        if (this._disposed) return null;
         return template ? template.clone(true) : null;
     }
 
@@ -1393,6 +1442,7 @@ export class RobotScene {
     }
 
     async _renderHeadTipsFromState() {
+        if (this._disposed) return;
         // Generation guard, same shape as labwareRefreshToken. This function
         // awaits mid-way (the tip template load), and the timeline scrubber
         // fires it unawaited on every frame restore — so without the token a
@@ -1425,7 +1475,7 @@ export class RobotScene {
         const tipTemplate = await this._buildTipTemplate(this._tipModelUrl(capacityUl), tipLengthMm);
         // A newer render (or clear) superseded this one while the template
         // loaded — populating now would resurrect tips the newer call removed.
-        if (token !== this._headTipsRenderToken) return;
+        if (this._disposed || token !== this._headTipsRenderToken) return;
         const useGltf = !!tipTemplate;
         const tipHeightM = useGltf
             ? Number(tipTemplate.userData?.tipHeightM || Math.max(0.008, tipLengthMm / 1000))
@@ -1454,6 +1504,7 @@ export class RobotScene {
     }
 
     async _attachTipboxTips(entry, detail) {
+        if (this._disposed) return;
         const isTipBox = ['tip_box'].includes(String(detail?.base_class || detail?.kind || '').toLowerCase());
         if (!isTipBox) return;
         const geometry = this._getTipboxGeometry(detail);
@@ -1478,6 +1529,7 @@ export class RobotScene {
 
         const url = this._tipModelUrl(capacityUl);
         const tipTemplate = await this._buildTipTemplate(url, tipLengthMm);
+        if (this._disposed) return;
         const useGltf = !!tipTemplate;
         const tipHeightM = useGltf
             ? Number(tipTemplate.userData?.tipHeightM || Math.max(0.008, tipLengthMm / 1000))

@@ -84,10 +84,22 @@ labware_types:
     sealed_thickness_mm: null
     sealed_stacking_thickness_mm: null
     can_have_lid: true
-    lidded_thickness_mm: 16.4
+    lidded_thickness_mm: 16.8
     lidded_stacking_thickness_mm: 17.7
-    lid_resting_height_mm: 9.7
+    lid_resting_height_mm: 6.8
     lid_departure_height_mm: 11
+    lid_geometry:
+      model: manufacturer_exterior_envelope
+      length_mm: 127.15
+      width_mm: 85.05
+      height_mm: 10.0
+      seated_bottom_mm: 6.8
+      source: https://www.cellvis.com/images/glass_bottom_plate_384_well_size.png
+      source_document: docs/media/cellvis-384-plate-lid-dimensions.png
+      source_sha256: 3ca5ca8dcf5f6aff0c44d32f66796c478ce66119c149fbcc250cef7d0f423985
+      source_note: Official Cellvis dimension diagram supplied by user; seated bottom = 16.8 - 10.0 mm.
+      limitations:
+      - Wall thickness, internal clearance and corner chamfers are not dimensioned.
     lower_plate_at_labeler: false
     can_mount: false
     can_be_mounted: false

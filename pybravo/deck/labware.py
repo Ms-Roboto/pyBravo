@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from pybravo.deck.lid_geometry import lid_envelope_geometry
 from pybravo.types import MAX_LOCATIONS, MIN_LOCATION
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,7 @@ class LabwareDefinition:
     lidded_stack_height_mm: float = 0.0
     lid_resting_height_mm: float = 0.0
     lid_departure_height_mm: float = 0.0
+    lid_geometry: dict[str, Any] | None = None
     max_robot_handling_speed: str = ""
     rows: int = 0
     cols: int = 0
@@ -223,6 +225,7 @@ class LabwareDefinition:
             lidded_stack_height_mm=float(props.get("lidded_stacking_thickness_mm") or 0.0),
             lid_resting_height_mm=float(props.get("lid_resting_height_mm") or 0.0),
             lid_departure_height_mm=float(props.get("lid_departure_height_mm") or 0.0),
+            lid_geometry=props.get("lid_geometry"),
             max_robot_handling_speed=str(props.get("max_robot_handling_speed") or ""),
             rows=int(wells.get("rows") or 0),
             cols=int(wells.get("cols") or 0),
@@ -348,6 +351,9 @@ def _active_labware_geometry(
 
 def lid_thickness_mm(metadata: dict[str, Any] | None) -> float:
     meta = metadata or {}
+    envelope = lid_envelope_geometry(meta)
+    if envelope is not None:
+        return float(envelope["height_mm"])
     resting_height = float(meta.get("lid_resting_height_mm") or 0.0)
     lidded_height = float(meta.get("lidded_height_mm") or 0.0)
     if lidded_height > 0.0 and resting_height > 0.0 and lidded_height > resting_height:
@@ -397,8 +403,9 @@ def lid_gripper_offset_mm(
 
 def generated_lid_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
     meta = dict(metadata or {})
-    length_mm = float(meta.get("length_mm") or meta.get("length") or 0.0)
-    width_mm = float(meta.get("width_mm") or meta.get("width") or 0.0)
+    envelope = lid_envelope_geometry(meta)
+    length_mm = float((envelope or {}).get("length_mm") or meta.get("length_mm") or meta.get("length") or 0.0)
+    width_mm = float((envelope or {}).get("width_mm") or meta.get("width_mm") or meta.get("width") or 0.0)
     if length_mm <= 0.0 or width_mm <= 0.0:
         return None
     thickness_mm = lid_thickness_mm(meta)
@@ -421,6 +428,7 @@ def generated_lid_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | 
         "lid_departure_height_mm": float(meta.get("lid_departure_height_mm") or 0.0),
         "source_plate_name": str(meta.get("name") or ""),
         "render_mode": "generated_lid",
+        **({"lid_geometry": envelope} if envelope is not None else {}),
     }
 
 
@@ -1021,6 +1029,7 @@ def _apply_mirrored_motion_fields(definition: LabwareDefinition) -> LabwareDefin
         ),
         lid_resting_height_mm=mirrored.lid_resting_height_mm or definition.lid_resting_height_mm,
         lid_departure_height_mm=mirrored.lid_departure_height_mm or definition.lid_departure_height_mm,
+        lid_geometry=definition.lid_geometry or mirrored.lid_geometry,
         max_robot_handling_speed=definition.max_robot_handling_speed or mirrored.max_robot_handling_speed,
         rows=definition.rows or mirrored.rows,
         cols=definition.cols or mirrored.cols,
