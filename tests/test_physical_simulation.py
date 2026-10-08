@@ -19,6 +19,7 @@ from pybravo.physics.runtime import CollisionRehearsal
 from pybravo.physics.scene import BravoCollisionScene, PhysicalSimulationError
 from pybravo.profile.profile import BravoProfile
 from pybravo.types import Axis
+from pybravo.workflow.executor import WorkflowExecutor
 
 PROFILE_PATH = Path(__file__).resolve().parents[1] / "profiles" / "simulation.yaml"
 PP_384_GEOMETRY = {
@@ -353,6 +354,83 @@ def test_missing_accessory_collision_geometry_fails_before_rehearsal():
     profile.accessories.barcode_reader.enabled = True
     with pytest.raises(PhysicalSimulationError, match="accessories need collision geometry"):
         BravoCollisionScene(Bravo(profile=profile, mode="simulation"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_lidded,is_sealed", [(True, False), (False, True), (True, True)])
+async def test_covered_labware_setup_evidence_reaches_workflow_error(is_lidded, is_sealed):
+    """The initial setup diagram has catalog evidence, never a fictitious contact."""
+    bravo = Bravo(profile=BravoProfile.load(PROFILE_PATH), mode="simulation")
+    definition_id = "01KD4PYY7N4EG0E22P3QP1RHB9"
+    events = []
+    graph = {
+        "nodes": [
+            {"id": 1, "type": "flow/Start", "properties": {}, "outputs": [{"links": [1]}]},
+            {"id": 2, "type": "flow/End", "properties": {}},
+        ],
+        "links": [[1, 1, 0, 2, 0, -1]],
+    }
+    executor = WorkflowExecutor.for_simulation(
+        bravo, graph, on_event=events.append,
+        deck_config={"7": [
+            {"labware_id": definition_id},
+            {"labware_id": definition_id, "is_lidded": is_lidded, "is_sealed": is_sealed},
+        ]},
+    )
+    try:
+        await executor.execute()
+        assert [event["type"] for event in events] == ["workflow:error"]
+        report = events[-1]["physical_simulation"]
+        assert report["status"] == "failed"
+        assert report["moves_checked"] == report["samples_checked"] == report["contact_queries"] == 0
+        assert report["qualification_granted"] is False
+        error = report["last_error"]
+        assert error["kind"] == "covered_labware"
+        assert error["stage"] == "initialization"
+        assert error["location"] == 7
+        assert error["stack_index"] == 1
+        assert error["is_lidded"] is is_lidded
+        assert error["is_sealed"] is is_sealed
+        plate = bravo._deck.get_stack(7).top
+        assert error["labware_id"] == plate.id
+        assert error["labware_definition_id"] == definition_id
+        assert error["labware_name"] == plate.name
+        assert error["body"] == f"labware/7/1/{plate.name}"
+        assert error["geometry"] == "catalog_envelope"
+        assert error["coordinate_frame"] == "machine_xyz_z_up_mm"
+        lower, upper = error["lower_mm"], error["upper_mm"]
+        assert all(float("-inf") < value < float("inf") for value in lower + upper)
+        assert [high - low for low, high in zip(lower, upper)] == pytest.approx(
+            [plate.length, plate.width, plate.height]
+        )
+        support = bravo._deck.get_stack(7).items[0].stack_height
+        assert lower[2] == pytest.approx(-bravo._teachpoints.get_teachpoint(7, Axis.Z) + support)
+        assert not {"pose", "bodies", "penetration_mm", "sample_index"} & error.keys()
+        assert bravo.controller._motion_guard is None
+    finally:
+        bravo.disconnect()
+
+
+@pytest.mark.parametrize("operation", ["plate/Delid", "plate/Relid"])
+def test_unsupported_lid_operation_has_setup_identity_without_collision_evidence(operation):
+    bravo = Bravo(profile=BravoProfile.load(PROFILE_PATH), mode="simulation")
+    plate = _pp_plate("lid operation target")
+    bravo._deck.add(3, plate)
+    scene = BravoCollisionScene(bravo)
+    try:
+        with pytest.raises(PhysicalSimulationError, match="Lid collision geometry") as caught:
+            scene.set_context("lid-node", operation, {"location": 3})
+        error = caught.value.details
+        assert error["kind"] == "unsupported_lid_operation"
+        assert error["operation"] == operation
+        assert error["node_id"] == "lid-node"
+        assert error["location"] == 3
+        assert error["labware_id"] == plate.id
+        assert error["labware_name"] == plate.name
+        assert not {"pose", "bodies", "penetration_mm", "lower_mm", "upper_mm"} & error.keys()
+        assert scene.moves_checked == scene.samples_checked == 0
+    finally:
+        scene.close()
 
 
 @pytest.mark.asyncio

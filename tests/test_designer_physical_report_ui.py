@@ -31,6 +31,8 @@ const document={getElementById(id){
     return elements.get(id);
 }};
 const designerState={graph:{getNodeById(id){return id===7?{title:'Move across stack'}:null;}}};
+function updatePhysicalObstructionPreview(){}
+function resetPhysicalObstructionPreview(){}
 """ + "\n".join(functions) + body)
     subprocess.run([NODE, str(script)], check=True, capture_output=True, text=True)
 

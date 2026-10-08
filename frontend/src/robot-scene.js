@@ -127,6 +127,24 @@ function fitLinear(samples) {
     return { scale, offset };
 }
 
+// A scene owns its loaded assets. Dispose late arrivals as well as visible
+// meshes so opening and closing a diagnostic during loading does not leak GPU
+// resources. Cloned labware shares geometry/materials with its cached template.
+function disposeObjectResources(root) {
+    const resources = new Set();
+    root?.traverse(obj => {
+        if (obj.geometry) resources.add(obj.geometry);
+        for (const material of Array.isArray(obj.material) ? obj.material : [obj.material]) {
+            if (!material) continue;
+            resources.add(material);
+            for (const value of Object.values(material)) {
+                if (value?.isTexture) resources.add(value);
+            }
+        }
+    });
+    resources.forEach(resource => resource.dispose());
+}
+
 // ── URDF Model ────────────────────────────────────────────────────────
 
 class URDFModel {
@@ -151,6 +169,7 @@ export class RobotScene {
      * @param {string} [options.wsUrl] - WebSocket URL for state streaming
      * @param {boolean} [options.autoConnect=true] - auto-connect WebSocket
      * @param {boolean} [options.showGizmo=true] - show coordinate gizmo
+     * @param {boolean} [options.deckOnly=false] - load deck assets without robot tooling
      * @param {Function} [options.onStateUpdate] - callback with raw state data
      */
     constructor(container, options = {}) {
@@ -159,6 +178,7 @@ export class RobotScene {
             wsUrl: `ws://${location.hostname}:8000/ws/state`,
             autoConnect: true,
             showGizmo: true,
+            deckOnly: false,
             onStateUpdate: null,
             ...options,
         };
@@ -246,22 +266,34 @@ export class RobotScene {
     // ── Lifecycle ─────────────────────────────────────────────────────
 
     async init() {
+        if (this._disposed) return this;
         this._setupRenderer();
         this._setupLighting();
         if (this.options.showGizmo) this._setupGizmo();
         await this._loadURDF();
+        if (this._disposed) return this;
         this._startAnimation();
         if (this.options.autoConnect) this.connectWebSocket();
         return this;
     }
 
     dispose() {
+        if (this._disposed) return;
         this._disposed = true;
+        ++this.labwareRefreshToken;
         if (this._animationId) cancelAnimationFrame(this._animationId);
         if (this._wsReconnectTimer) clearTimeout(this._wsReconnectTimer);
         if (this.ws) { this.ws.onclose = null; this.ws.close(); }
         if (this._resizeObserver) this._resizeObserver.disconnect();
         this.controls?.dispose();
+        disposeObjectResources(this.scene);
+        disposeObjectResources(this.gizmoScene);
+        for (const cache of [this.labwareTemplateCache, this.tipTemplateCache]) {
+            for (const template of cache.values()) {
+                Promise.resolve(template).then(disposeObjectResources).catch(() => {});
+            }
+            cache.clear();
+        }
         this.renderer?.dispose();
         if (this.gizmoRenderer) this.gizmoRenderer.dispose();
         while (this.container.firstChild) {
@@ -274,7 +306,7 @@ export class RobotScene {
     /** Update deck labware from external source (workflow editor deck config). */
     setDeckDetails(deckDetails) {
         this.deckDetails = deckDetails;
-        void this.refreshDeckLabwareScene();
+        return this.refreshDeckLabwareScene();
     }
 
     /** Set axis positions (the "truth" each axis is driving toward).
@@ -472,6 +504,7 @@ export class RobotScene {
 
     /** Resize renderer to fit container. */
     resize() {
+        if (this._disposed || !this.camera || !this.renderer) return;
         const rect = this.container.getBoundingClientRect();
         if (rect.width < 2 || rect.height < 2) return;
         this.camera.aspect = rect.width / rect.height;
@@ -717,6 +750,7 @@ export class RobotScene {
             console.error(`Failed to fetch URDF: ${e.message}`);
             return;
         }
+        if (this._disposed) return;
 
         const xml = new DOMParser().parseFromString(xmlText, 'text/xml');
         const model = new URDFModel();
@@ -758,9 +792,15 @@ export class RobotScene {
                     /^(384_head_384_head|gripperzaxis_gripperzaxis)$/i.test(lname) ||
                     /(384_head|gripperzaxis)\.stl$/i.test(filename);
                 const isDeckVisual = isDeckPositionVisual(lname);
+                if (this.options.deckOnly && !isDeckVisual) continue;
 
                 const promise = new Promise((resolve) => {
                     this.stlLoader.load(filename, (geometry) => {
+                        if (this._disposed) {
+                            geometry.dispose();
+                            resolve();
+                            return;
+                        }
                         geometry.computeVertexNormals();
                         const mat = createRobotMaterial(visual);
                         const mesh = new THREE.Mesh(geometry, mat);
@@ -783,6 +823,10 @@ export class RobotScene {
             }
         }
         await Promise.all(meshPromises);
+        if (this._disposed) {
+            Object.values(linkGroups).forEach(disposeObjectResources);
+            return;
+        }
         this._registerDeckVisuals(deckVisuals);
 
         const childLinks = new Set();
@@ -920,7 +964,7 @@ export class RobotScene {
 
     async refreshDeckLabwareScene() {
         const token = ++this.labwareRefreshToken;
-        if (!this.urdfRobot || this.deckSlotAnchors.size === 0) return;
+        if (this._disposed || !this.urdfRobot || this.deckSlotAnchors.size === 0) return;
 
         const nextEntries = [];
         for (let loc = 1; loc <= 9; loc++) {
@@ -933,12 +977,19 @@ export class RobotScene {
             for (let index = 0; index < details.length; index++) {
                 const detail = details[index];
                 const mesh = await this._buildLabwareMesh(detail);
+                if (this._disposed) {
+                    disposeObjectResources(mesh);
+                    nextEntries.forEach(([, entry]) => disposeObjectResources(entry.group));
+                    return;
+                }
                 if (!mesh) continue;
                 const entryAnchor = anchor.clone();
                 entryAnchor.z += supportHeightM;
                 mesh.position.copy(entryAnchor);
+                mesh.userData.deckLocation = loc;
+                mesh.userData.stackIndex = index;
                 const entry = { group: mesh, anchor: entryAnchor.clone(), detail, location: loc };
-                await this._attachTipboxTips(entry, detail);
+                if (!this.options.deckOnly) await this._attachTipboxTips(entry, detail);
                 nextEntries.push([loc, entry, index === details.length - 1]);
                 supportHeightM += Math.max(
                     0.001,
@@ -947,7 +998,7 @@ export class RobotScene {
             }
         }
 
-        if (token !== this.labwareRefreshToken) return;
+        if (this._disposed || token !== this.labwareRefreshToken) return;
         this._resetCarryAnimation();
         this.deckLabwareMeshes.clear();
         this.labwareRoot.clear();
@@ -975,6 +1026,11 @@ export class RobotScene {
                 this.gltfLoader.load(url, (gltf) => {
                     const wrapper = new THREE.Group();
                     const source = gltf.scene || gltf.scenes?.[0];
+                    if (this._disposed) {
+                        disposeObjectResources(source);
+                        resolve(null);
+                        return;
+                    }
                     if (!source) {
                         resolve(this._buildFallbackLabwareMesh(baseDetail));
                         return;
@@ -987,6 +1043,7 @@ export class RobotScene {
             }));
         }
         const template = await this.labwareTemplateCache.get(cacheKey);
+        if (this._disposed) return null;
         return template ? this._attachGeneratedLidMesh(template.clone(true), detail) : null;
     }
 
@@ -1061,6 +1118,7 @@ export class RobotScene {
         const topThicknessM = Math.max(0.0005, heightM - skirtHeightM);
         const skirtThicknessM = Math.max(0.0009, Math.min(lengthM, widthM) * 0.035);
         const group = new THREE.Group();
+        group.userData.labwarePart = 'lid';
         const material = new THREE.MeshStandardMaterial({
             color: options.attached ? 0xdde4ee : 0xe8edf4,
             transparent: true,
@@ -1611,7 +1669,7 @@ export class RobotScene {
     }
 
     _updateURDFJoints(positions) {
-        if (!this.urdfRobot) return;
+        if (!this.urdfRobot || this.options.deckOnly) return;
         this._ensureTeachTipLength();
         for (const [jointName, info] of Object.entries(JOINT_AXIS_MAP)) {
             const pos = positions[info.bravoAxis];

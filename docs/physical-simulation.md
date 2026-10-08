@@ -112,6 +112,19 @@ unchanged. Errors stop the rehearsal and highlight the task in Designer.
 
 ## Limits of a clear result
 
+When setup stops because a plate is marked lidded or sealed, Designer opens a
+rotatable setup preview. It highlights the cover on the reported deck position
+and stack item, with nearby labware for context. **View obstruction** reopens
+the picture; **Edit deck position** opens the affected setup. Closing the view
+disposes its renderer, including assets that finish loading later.
+
+This picture is an illustration of the recorded setup, not a sampled collision
+or a movie of motion. The diagnostic contains the plate identity, cover flags,
+and configured exterior bounds. It does not invent a rejected robot pose or a
+contact pair when setup checked zero moves. Lid collision support remains
+required for rehearsing Delid/Relid; opening the picture does not bypass that
+restriction or change the workflow.
+
 The default spacing is 0.5 mm with a 0.05 mm penetration reporting threshold.
 These are sampled geometric checks, not certified continuous collision
 detection. They interpolate each commanded move in axis space; firmware timing

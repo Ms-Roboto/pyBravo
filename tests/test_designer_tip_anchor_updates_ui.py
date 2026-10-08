@@ -63,6 +63,9 @@ function isProtocolDraftTab(){return false;}
 function isGeneratedProtocolDraftTab(){return false;}
 function clearActiveNodeHighlight(){}
 function timelineReset(){}
+let physicalObstructionRun=null;
+function resetPhysicalObstructionPreview(){physicalObstructionRun=null;}
+function physicalObstructionDeckDetails(){return {};}
 function recordDrafterPatch(){}
 function syncActiveTabMeta(){}
 const validationErrors=[];

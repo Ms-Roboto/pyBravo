@@ -130,6 +130,18 @@ class _Obstacle:
     top_item: bool
 
 
+def _labware_setup_details(item, location):
+    """Identify unsupported setup without manufacturing a sampled contact."""
+    return {
+        "location": location,
+        "labware_id": item.id,
+        "labware_definition_id": item.definition_id,
+        "labware_name": item.name,
+        "is_lidded": bool(item.is_lidded),
+        "is_sealed": bool(item.is_sealed),
+    }
+
+
 class BravoCollisionScene:
     """Fail before accepting a sampled command that intersects modeled solids."""
 
@@ -211,7 +223,20 @@ class BravoCollisionScene:
         if json.dumps(self.bravo.profile._to_dict(), sort_keys=True) != self._profile_snapshot:
             self._fail("Profile calibration changed during physical rehearsal; rebuild the scene")
         if node_type in {"plate/Delid", "plate/Relid"}:
-            self._fail("Lid collision geometry is not configured; no physical clearance result can be granted.")
+            details = {"kind": "unsupported_lid_operation", "operation": node_type}
+            try:
+                location = int(properties.get("location", 1))
+            except (TypeError, ValueError):
+                location = 0
+            if 1 <= location <= 9:
+                details["location"] = location
+                item = self.bravo._deck.get_stack(location).top
+                if item is not None:
+                    details.update(_labware_setup_details(item, location))
+            self._fail(
+                "Lid collision geometry is not configured; no physical clearance result can be granted.",
+                **details,
+            )
         self._refresh_deck()
         if node_type in {"liquid/Aspirate", "liquid/Dispense", "liquid/Mix"}:
             location = int(properties.get("location", -1))
@@ -265,8 +290,24 @@ class BravoCollisionScene:
                 self._known_labware[id(item)] = self.obstacles[-1]
                 self._metadata_digests[id(item)] = json.dumps(item.metadata, sort_keys=True)
                 if item.is_lidded or item.is_sealed:
+                    details = {
+                        "kind": "covered_labware",
+                        **_labware_setup_details(item, loc),
+                        "stack_index": idx,
+                        "body": self.obstacles[-1].name,
+                    }
+                    # These are the configured exterior bounds, not a lid
+                    # collision mesh or a robot pose. Setup checked no motion.
+                    if np.isfinite(lower).all() and np.isfinite(upper).all() and (upper > lower).all():
+                        details.update(
+                            lower_mm=lower.tolist(),
+                            upper_mm=upper.tolist(),
+                            geometry="catalog_envelope",
+                            coordinate_frame="machine_xyz_z_up_mm",
+                        )
                     raise PhysicalSimulationError(
-                        f"{item.name} is lidded/sealed; accessible well and lid collision geometry is required"
+                        f"{item.name} is lidded/sealed; accessible well and lid collision geometry is required",
+                        details=details,
                     )
                 support += float(item.stack_height or item.height)
 
