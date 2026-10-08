@@ -65,19 +65,19 @@ labware_types:
 - labware_type_id: lw-34358f93e2a0
   name: 384 CellVis 1.5H
   kind: sbs_plate
-  vendor: ''
-  catalog_number: ''
+  vendor: Cellvis
+  catalog_number: P384-1.5H-N
   description: ''
   base_class: microplate
   wells: 384
   plate_dimensions_mm:
-    length_mm: 127.76
-    width_mm: 85.48
-    height_mm: 14.3
+    length_mm: 127.6
+    width_mm: 85.6
+    height_mm: 14.33
   plate_properties:
     robot_gripper_offset_mm: 8
     empty_check_offset_mm: null
-    thickness_mm: 14.3
+    thickness_mm: 14.33
     stacking_thickness_mm: null
     shim_thickness_mm: null
     can_be_sealed: false
@@ -99,13 +99,22 @@ labware_types:
   well_dimensions_mm:
     dead_volume_ul: 5.0
     dead_volume_status: placeholder
+    rows: 16
+    cols: 24
+    depth_mm: 11.38
+    diameter_mm: 3.3
+    offset_x_mm: 2.25
+    offset_y_mm: 2.25
+    spacing_x_mm: 4.5
+    spacing_y_mm: 4.5
+    well_geometry: 2
   pf400: {}
   planar_motor: {}
   labware_class_ids:
   - 01KD4PKQ8DFP12QWDM29CQWZ8A
   tip_definition_id: ''
   supported_tip_ids: []
-  model_3d: null
+  model_3d: /labware-assets/lw-34358f93e2a0/Cellvis_P384_1.5H_N.glb
 - kind: sbs_plate
   name: 384 Labcyte PP0200 PP sq flt
   vendor: Beckman

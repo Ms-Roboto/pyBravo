@@ -15,7 +15,8 @@ from pybravo.workflow.storage import WorkflowStorage
 
 CATALOG = {"labware": [
     {"id": "st10-rack", "name": "384 ST10 rack", "kind": "sbs_plate", "base_class": "tip_box", "well_diameter_mm": 0},
-    {"id": "plate", "name": "CellVis plate", "kind": "sbs_plate", "base_class": "microplate", "well_diameter_mm": 3},
+    {"id": "plate", "name": "CellVis plate", "kind": "sbs_plate", "base_class": "microplate", "well_diameter_mm": 3,
+     "well_depth_mm": 11, "rows": 16, "cols": 24, "spacing_x_mm": 4.5, "spacing_y_mm": 4.5},
 ]}
 
 
@@ -60,6 +61,29 @@ def test_valid_plate_target_and_measured_tip_return_geometry_pass():
     catalog = copy.deepcopy(CATALOG)
     catalog["labware"][0]["well_diameter_mm"] = 3.5
     assert static_labware_issues(workflow(2), catalog_context=catalog) == []
+
+
+@pytest.mark.parametrize("node_type", ["liquid/Aspirate", "liquid/Dispense", "liquid/Mix"])
+def test_missing_well_depth_is_reported_even_for_an_above_rim_target(node_type):
+    catalog = copy.deepcopy(CATALOG)
+    catalog["labware"][0]["well_diameter_mm"] = 3.5
+    catalog["labware"][1]["well_depth_mm"] = 0
+    data = workflow(2)
+    data["graph"]["nodes"][2]["type"] = node_type
+    data["graph"]["nodes"][2]["properties"]["distance_from_bottom"] = 1
+    issues = static_labware_issues(data, catalog_context=catalog)
+    assert len(issues) == 1
+    assert issues[0]["node_id"] == 3
+    assert issues[0]["value"] == ["well_depth_mm"]
+    assert "unknown well depth cannot be treated as the plate rim" in issues[0]["reason"]
+
+
+def test_known_geometry_allows_deliberate_above_rim_dispense():
+    catalog = copy.deepcopy(CATALOG)
+    catalog["labware"][0]["well_diameter_mm"] = 3.5
+    data = workflow(2)
+    data["graph"]["nodes"][2]["properties"]["distance_from_bottom"] = 15
+    assert static_labware_issues(data, catalog_context=catalog) == []
 
 
 @pytest.mark.parametrize("node_type", ["plate/PickPlace", "plate/Stack", "plate/Destack", "system/Manual", "logic/Script"])
@@ -120,3 +144,29 @@ async def test_saved_handmade_workflow_is_rejected_before_initialization_or_exec
         assert storage.get_workflow(saved["id"]) == saved
     finally:
         live.disconnect()
+
+
+async def test_missing_depth_stops_saved_simulation_before_initialization(tmp_path, monkeypatch):
+    storage = WorkflowStorage(tmp_path)
+    saved = storage.create_workflow(workflow(2))
+    catalog = copy.deepcopy(CATALOG)
+    catalog["labware"][0]["well_diameter_mm"] = 3.5
+    catalog["labware"][1]["well_depth_mm"] = 0
+    live = Bravo(mode="simulation")
+    live._labware_catalog = InMemoryLabwareCatalog([LabwareDefinition(**row) for row in catalog["labware"]])
+    initialize = AsyncMock()
+    monkeypatch.setattr(live, "initialize", initialize)
+    monkeypatch.setattr(server, "_bravo", live)
+    monkeypatch.setattr(server, "_active_workflow_executor", None)
+    monkeypatch.setattr(server, "_workflow_start_lock", asyncio.Lock())
+    monkeypatch.setattr(server, "_get_workflow_storage", lambda: storage)
+    monkeypatch.setattr(server, "_validate_workflow_liquid_classes", lambda *args: [])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+        response = await client.post(f"/api/workflows/{saved['id']}/simulate")
+    assert response.status_code == 400, response.text
+    issues = response.json()["detail"]["invalid_nodes"]
+    assert any(issue["node_id"] == 3 and "well_depth_mm" in issue["value"] for issue in issues)
+    initialize.assert_not_awaited()
+    assert server._active_workflow_executor is None
+    assert not live.is_connected
+    assert storage.get_workflow(saved["id"]) == saved

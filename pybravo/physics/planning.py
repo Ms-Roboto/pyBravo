@@ -9,6 +9,8 @@ from pydantic import ValidationError
 from pybravo.workflow.drafter.schema import DraftedWorkflow
 from pybravo.workflow.drafter.validator import validate_drafted_workflow
 
+from .well_geometry import missing_liquid_well_geometry
+
 
 def static_labware_issues(workflow, *, catalog_context, physical_geometry=True):
     """Reject definite labware mistakes on an unchanged initial deck.
@@ -56,6 +58,14 @@ def static_labware_issues(workflow, *, catalog_context, physical_geometry=True):
                 "reason": f"{title} (task {node.get('id')}) targets deck position {location}, "
                 f"'{name}', which is a {'tip rack' if tip_box else 'tip waste receptacle'}. "
                 "Choose the intended plate or reservoir for this liquid task."})
+        elif liquid and physical_geometry:
+            missing = missing_liquid_well_geometry(definition)
+            if missing:
+                result.append({**issue, "field": "well_geometry", "value": missing,
+                    "reason": f"{title} (task {node.get('id')}) targets deck position {location}, "
+                    f"'{name}', whose catalog lacks recorded {', '.join(missing)}. "
+                    "Complete its well geometry in Labware Editor before physical simulation; "
+                    "an unknown well depth cannot be treated as the plate rim."})
         if physical_geometry and node_type == "tips/TipsOff" and tip_box:
             diameter = definition.get("well_diameter_mm")
             try:

@@ -50,14 +50,14 @@ labware:
 - id: lw-34358f93e2a0
   name: 384 CellVis 1.5H
   kind: sbs_plate
-  vendor: ''
-  catalog_number: ''
+  vendor: Cellvis
+  catalog_number: P384-1.5H-N
   description: ''
   base_class: microplate
   wells: 384
-  length_mm: 127.76
-  width_mm: 85.48
-  height_mm: 14.3
+  length_mm: 127.6
+  width_mm: 85.6
+  height_mm: 14.33
   stack_height_mm: 14.3
   gripper_offset_mm: 8.0
   lid_gripper_offset_mm: 0.5
@@ -72,21 +72,22 @@ labware:
   lid_resting_height_mm: 9.7
   lid_departure_height_mm: 11.0
   max_robot_handling_speed: fast
-  rows: 0
-  cols: 0
-  well_depth_mm: 0.0
-  offset_x_mm: 0.0
-  offset_y_mm: 0.0
-  spacing_x_mm: 0.0
-  spacing_y_mm: 0.0
+  rows: 16
+  cols: 24
+  well_depth_mm: 11.38
+  offset_x_mm: 2.25
+  offset_y_mm: 2.25
+  spacing_x_mm: 4.5
+  spacing_y_mm: 4.5
   well_volume_ul: 0.0
   dead_volume_ul: 5.0
   dead_volume_status: placeholder
-  well_diameter_mm: 0.0
+  well_diameter_mm: 3.3
+  well_geometry: square
   disposable_tip_capacity_ul: 0.0
   tip_definition_id: ''
   supported_tip_ids: []
-  model_3d: null
+  model_3d: /labware-assets/lw-34358f93e2a0/Cellvis_P384_1.5H_N.glb
   can_mount: false
   can_be_mounted: false
 - id: 01KD4PYY7N4EG0E22P3QP1RHB9

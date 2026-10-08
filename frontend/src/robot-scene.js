@@ -78,7 +78,7 @@ const JOINT_AXIS_MAP = {
     'ygripper-right': { bravoAxis: 'G',  homeOffset: 0,      scale:  0.5 },
 };
 
-const URDF_URL  = '/model/pybravo_urdf/robot.urdf?v=bravo-skin4';
+const URDF_URL  = '/model/pybravo_urdf/robot.urdf?v=bravo-gripper-pads1';
 const ASSET_BASE = '/model/pybravo_urdf/assets';
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -1323,12 +1323,13 @@ export class RobotScene {
         const tipGeo = new THREE.ConeGeometry(shaftR, tipH, 6);
         const mat = new THREE.MeshStandardMaterial({ color: 0xd9d9de, roughness: 0.85, metalness: 0.05 });
         const shaft = new THREE.Mesh(shaftGeo, mat);
-        shaft.position.z = -shaftH / 2;
+        // Match the glTF template: tip point at z=0, seating plane at z=height.
+        shaft.position.z = tipH + shaftH / 2;
         shaft.rotation.x = Math.PI / 2;
         group.add(shaft);
         const tip = new THREE.Mesh(tipGeo, mat.clone());
-        tip.position.z = -(shaftH + tipH / 2);
-        tip.rotation.x = Math.PI / 2;
+        tip.position.z = tipH / 2;
+        tip.rotation.x = -Math.PI / 2;
         group.add(tip);
         return group;
     }
@@ -1379,7 +1380,9 @@ export class RobotScene {
                 tip.position.set(
                     mountFrame.centerX + ((xOrigin + col * pitchX) / 1000),
                     mountFrame.centerY + ((yOrigin + row * pitchY) / 1000),
-                    mountFrame.minZ - tipHeightM + 0.002,
+                    // Attached length is the native motion model's protrusion
+                    // below the barrel datum. Do not shorten it for overlap.
+                    mountFrame.minZ - tipHeightM,
                 );
                 tip.traverse(obj => {
                     if (obj.isMesh && obj.material?.color) {

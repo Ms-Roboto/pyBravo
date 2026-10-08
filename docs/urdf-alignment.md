@@ -1,5 +1,10 @@
 # URDF head alignment (3D view only)
 
+The original renderer-only calibration below is historical context. The later
+[gripper assembly correction](#gripper-assembly-datum-october-2026) updates the
+shared URDF used by both the viewers and SuperDex; it does not change commanded
+positions or hardware teachpoints.
+
 > **Status: all three axes are fixed.**
 >
 > - **Z — done.** The head was drawn one teach-tip too low. Corrected via the
@@ -61,7 +66,7 @@ Why this works where the two reverted attempts could not: `homeOffset` moves
 the **whole gantry chain** — head mesh, attached tips, and gripper together, as
 on the real machine (they share one carriage; confirmed against the URDF joint
 tree, where both hang under `ygantry` ← `xgantry`). The tips↔mesh relationship
-is preserved by construction (barrel-to-tip gap 17.9 mm before and after), and
+is preserved by construction (the tips move with their barrel mounts), and
 deck pads and labware are static children of the base and do not move. The
 earlier attempts moved only the drawn tips, which can satisfy tips↔labware or
 tips↔mesh but never both.
@@ -189,10 +194,10 @@ common 26.1 seeded as a fallback.
 
 Two things were checked because they could have been broken silently:
 
-- **Tips still sit on the head.** The gap between the barrels and the tips'
-  bottoms is 17.9 mm before and after. The whole head link moves, so this
-  relationship is preserved by construction — unlike the X/Y attempts, which
-  moved only the drawn tips.
+- **Tips still sit on the head.** The whole head link moves, so the
+  barrel-to-tip relationship is preserved by construction — unlike the X/Y
+  attempts, which moved only the drawn tips. The old 17.9 mm rendered ST10
+  extension was later found to be 2 mm short; see the correction below.
 - **The gripper did not move.** `zaxis-gripper` is coupled to Z, so it could
   have been dragged along; measured at 87.8 mm before and after, unchanged.
 
@@ -252,3 +257,76 @@ review those boundaries before regenerating the visual assets.
 With the web server running, `/static/bravo-preview.html` opens an orbitable
 preview with perspective, front, and isolated-deck views. This page does not
 connect to the robot's state socket or send motion commands.
+
+## Gripper assembly datum (October 2026)
+
+The exported gripper assembly floated to the right of the head. Its carriage
+had a **12.40 mm air gap** from the housing and its outer edge extended
+**29.40 mm** past the housing. This placement preceded the realistic materials
+update: that update split the original surfaces without changing their bounds.
+
+The user's real Bravo photograph and Agilent's
+[gripper assembly illustration](https://automation.help.agilent.com/AutomationSolutionsKB14/Bravo%20User%20Guide/images/00263d_bravo_with_gripper.png)
+show the carriage immediately alongside the head. The photo establishes the
+arrangement, not a millimeter calibration. The correction comes from the
+existing CAD contact pads and the native pickup position:
+
+- Each finger has two inward-facing pads, at local X −108…−100 mm and
+  −74…−66 mm. Their combined center is −87 mm in the finger mesh.
+- After the existing joint transforms, both pad pairs were centered at
+  **X +71.746546 mm** relative to the commanded native pickup X.
+- Native PickPlace uses the recorded deck X teachpoint. The center of a
+  standard 96-well plate is **X +49.5 mm** from this datum. The 384- and
+  1536-well grids have the same center after their A1 offsets are included.
+- Moving the whole gripper assembly **22.25 mm toward −X** places both pad
+  pairs at **X +49.496546 mm**, a 0.004 mm residual from exported-mesh rounding.
+
+Only the `zaxis-gripper` origin X in the shared URDF changes, from 0.100478 m
+to 0.078228 m. The carriage and both fingers move together. The commanded
+axes, head/barrel position, finger spacing and travel, Zg dock datum, and native
+PickPlace calculations remain unchanged. Both web viewers and SuperDex consume
+the same corrected joint, and the collision asset digest changes with it.
+
+The corrected carriage has no lateral air gap and extends **7.15 mm** past
+the head's bounding edge. This is the existing CAD assembly aligned to its
+grasp datum, not a dimensional certification inferred from a photograph.
+`tests/test_physics_asset_scene.py` checks the actual transformed contact flats
+against the native plate centers in all three grid formats.
+
+## Mounted tip length and Cellvis well geometry (October 2026)
+
+The mounted-tip renderer previously subtracted 2 mm from the recorded tip
+length as an artificial mounting overlap. That drew the ST10 outlet 17.9 mm
+below the barrel even though its recorded length is 19.9 mm. The rendered
+barrel-to-outlet distance now uses the complete recorded attached-tip length,
+matching the native Z calculation and the collision scene. A visual overlap
+must not shorten that distance or introduce another motion offset.
+
+The Cellvis P384-1.5H-N plate also needs a well model rather than a solid box.
+The shared asset at
+`labware/editor_assets/lw-34358f93e2a0/Cellvis_P384_1.5H_N.glb` is generated by
+`scripts/build_cellvis_plate.py` from the manufacturer's
+[dimension drawing](https://www.cellvis.com/images/glass_bottom_plate_384_well_size.png)
+for the [P384-1.5H-N plate](https://www.cellvis.com/product_detail.php?product_id=53).
+It is a dimensional reconstruction, not a vendor CAD export.
+
+The drawing establishes a 127.6 × 85.6 × **14.33 mm** plate with **11.38 mm**
+inside well depth. The inside glass surface is therefore **2.95 mm above the
+deck datum**; the 0.17 mm cover glass extends below that surface. The 16 × 24
+grid has 4.5 mm pitch and tapered square openings, **3.7 mm across at the rim**
+and **3.3 mm across at the glass**. All 384 wells are open in the asset, with
+the glass at the inside-bottom plane rather than a solid surface at the rim.
+
+Both the editable catalog and its runtime snapshot use those outer dimensions
+and depth. The catalog's 3.3 mm aperture is a conservative inscribed circle
+within the square opening for the current radial clearance checks; it is not
+the visible rim width. Physical A1 is **12.05 mm / 9.05 mm from the outside
+plate edges**. The catalog's **2.25 mm / 2.25 mm offsets** instead reference
+the machine's taught 96-well A1 datum. These are different coordinate origins
+and must not be substituted for each other.
+
+`tests/test_cellvis_visual_geometry.py` intersects vertical rays with the
+shipped asset: every well center and an interior square corner must reach the
+glass, a ray through the taper must intersect the wall at the expected height,
+and a ray outside the opening must hit the rim. It also checks the glass
+thickness and the asset dimensions against both catalogs.

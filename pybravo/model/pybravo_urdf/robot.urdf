@@ -310,7 +310,10 @@
   </joint>
   <!-- Joint from ygantry to gripperzaxis -->
   <joint name="zaxis-gripper" type="prismatic">
-    <origin xyz="0.100478 -0.224926 -0.0530846" rpy="1.5708 8.63559e-42 -5.71589e-35"/>
+    <!-- Center the two CAD grasp pads on the plate at the native pickup X.
+         The exported assembly placed their center 22.25 mm to the right.
+         Shared by the viewers and collision scene; no command datum changes. -->
+    <origin xyz="0.078228 -0.224926 -0.0530846" rpy="1.5708 8.63559e-42 -5.71589e-35"/>
     <parent link="ygantry"/>
     <child link="gripperzaxis"/>
     <axis xyz="0 0 1"/>

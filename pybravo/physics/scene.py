@@ -29,6 +29,7 @@ from .assets import ROBOT_URDF_PATH, robot_assets_sha256
 from .carrying import active_grasp_location, carried_plate_poses
 from .errors import PhysicalSimulationError
 from .superdex_backend import SuperDexCollisionBackend
+from .well_geometry import missing_liquid_well_geometry
 
 _URDF = ROBOT_URDF_PATH
 _TOOL_LINKS = {"384_head_384_head", "fingerleft_fingerleft", "fingerright_fingerright", "gripperzaxis_gripperzaxis"}
@@ -212,6 +213,18 @@ class BravoCollisionScene:
         if node_type in {"plate/Delid", "plate/Relid"}:
             self._fail("Lid collision geometry is not configured; no physical clearance result can be granted.")
         self._refresh_deck()
+        if node_type in {"liquid/Aspirate", "liquid/Dispense", "liquid/Mix"}:
+            location = int(properties.get("location", -1))
+            item = self.bravo._deck.get_stack(location).top if 1 <= location <= 9 else None
+            if item is not None:
+                missing = missing_liquid_well_geometry(item.metadata)
+                if missing:
+                    self._fail(
+                        f"{item.name} at position {location} lacks recorded {', '.join(missing)} "
+                        "for physical liquid simulation. Complete its well geometry in Labware Editor.",
+                        missing_geometry=missing,
+                        labware_id=item.id,
+                    )
 
     def _add_deck(self):
         for loc in range(1, 10):
@@ -507,9 +520,12 @@ class BravoCollisionScene:
                     "spacing_x_mm": pitch_x,
                     "spacing_y_mm": pitch_y,
                 }
-                missing = [key for key, value in dimensions.items() if not math.isfinite(value) or value <= 0]
-                if wg.rows <= 0 or wg.cols <= 0:
-                    missing.append("well_grid_rows_columns")
+                if returning:
+                    missing = [key for key, value in dimensions.items() if not math.isfinite(value) or value <= 0]
+                    if wg.rows <= 0 or wg.cols <= 0:
+                        missing.append("well_grid_rows_columns")
+                else:
+                    missing = missing_liquid_well_geometry(md)
                 if missing:
                     self._fail(
                         f"{obstacle.labware.name} lacks recorded {', '.join(missing)} for physical tip entry",

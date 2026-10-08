@@ -2279,7 +2279,7 @@ function updateLabwareAnimation() {
 }
 
 async function loadURDF() {
-    const URDF_URL  = '/model/pybravo_urdf/robot.urdf?v=bravo-skin4';
+    const URDF_URL  = '/model/pybravo_urdf/robot.urdf?v=bravo-gripper-pads1';
     const ASSET_BASE = '/model/pybravo_urdf/assets';
 
     log('Loading URDF model…', 'info');
